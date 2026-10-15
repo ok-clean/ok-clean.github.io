@@ -1,3 +1,3 @@
 User-agent: *
 Allow: /
-Sitemap: https://example.github.io/sitemap.xml
+Sitemap: https://ok-clean.github.io/sitemap.xml
