@@ -40,6 +40,11 @@ def price_from(s):
     return f"{s['unit']}당 {won(lo)}원~", ""
 
 
+def blog_list(c):
+    v = c.get("blog") or []
+    return [x for x in ([v] if isinstance(v, str) else v) if str(x).strip()]
+
+
 def area_file(r):
     return "area/" + urllib.parse.quote(r) + ".html"
 
@@ -87,7 +92,7 @@ def foot(c, depth=0):
     return f"""<footer><div class="wrap">
 <nav aria-label="지역">{areas}</nav>
 <div class="biz"><b>{e(c['name'])}</b>{(' · ' + e(c['hours'])) if c.get('hours') else ''}<br>{biz}</div>
-<nav><a href="{up}privacy.html">개인정보처리방침</a>{f'<a href="https://blog.naver.com/{e(c["blog"])}" target="_blank" rel="noopener">블로그</a>' if c.get("blog") else ''}</nav>
+<nav><a href="{up}privacy.html">개인정보처리방침</a>{''.join(f'<a href="https://blog.naver.com/{e(x)}" target="_blank" rel="noopener">블로그{i + 1 if len(blog_list(c)) > 1 else ""}</a>' for i, x in enumerate(blog_list(c)))}</nav>
 <div>© {datetime.now(KST).year} {e(c['name'])}</div>
 </div></footer>
 <div class="dock"><div class="in">

@@ -22,6 +22,7 @@ async function copy(text){
   }
 }
 const won = x => { x = Math.round(x / 1000) * 1000; return x >= 10000 ? (+(x / 10000).toFixed(1)) + "만" : x.toLocaleString("ko-KR"); };
+const BLOGS = [].concat(C.blog || []).filter(Boolean);
 const phoneDigits = (C.phone || "").replace(/[^0-9+]/g, "");
 
 // ── 견적 계산기 ──
@@ -119,22 +120,23 @@ document.querySelectorAll("#services .cats .chip").forEach(b => b.addEventListen
 }));
 
 // ── 시공 사례 (블로그 후기 자동 연동: update.py 가 cases.json 으로 정리) ──
-let CASES = [], caseF = "";
+let CASES = [], caseF = "", caseN = 8;
 function drawCases(){
   const list = CASES.filter(x => !caseF || x.svc === caseF);
   const used = [...new Set(CASES.map(x => x.svc).filter(Boolean))];
   $("caseChips").innerHTML = used.length > 1 ? `<button class="chip" data-f="" aria-pressed="${!caseF}">전체</button>` + used.map(id => { const s = SV.find(x => x.id === id); return s ? `<button class="chip" data-f="${esc(id)}" aria-pressed="${caseF === id}">${esc(s.name)}</button>` : ""; }).join("") : "";
-  $("caseList").innerHTML = list.slice(0, 12).map(x => {
+  $("caseList").innerHTML = list.slice(0, caseN).map(x => {
     const s = SV.find(v => v.id === x.svc);
     return `<a class="case" href="${esc(x.link)}" target="_blank" rel="noopener">${x.img ? `<img class="ph" src="${esc(x.img)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : `<div class="ph"></div>`}
       <div class="tx"><div class="tg">${esc([x.region, s && s.name].filter(Boolean).join(" "))}</div><div class="tt">${esc(x.title)}</div></div></a>`;
-  }).join("");
+  }).join("") + (list.length > caseN ? `<button class="btn line small" id="caseMore" type="button" style="grid-column:1/-1">시공 사례 더 보기 (${list.length - caseN}건)</button>` : "");
 }
-$("caseChips").addEventListener("click", e => { const b = e.target.closest("[data-f]"); if(!b) return; caseF = b.dataset.f; drawCases(); });
+$("caseList").addEventListener("click", e => { if(e.target.id === "caseMore"){ caseN += 8; drawCases(); } });
+$("caseChips").addEventListener("click", e => { const b = e.target.closest("[data-f]"); if(!b) return; caseF = b.dataset.f; caseN = 8; drawCases(); });
 fetch("cases.json?t=" + Date.now(), {cache: "no-store"}).then(r => r.ok ? r.json() : {cases: []}).catch(() => ({cases: []})).then(d => {
-  CASES = (d.cases || []).filter(x => x.link && x.title);
+  CASES = (d.cases || []).filter(x => x.link && x.title).sort((p, q) => (q.date || "").localeCompare(p.date || ""));
   if(CASES.length) drawCases();
-  else if(C.sample || !C.blog) $("caseList").outerHTML = `<div class="hint">${C.blog ? "블로그 후기를 불러오는 중이에요. 1시간 안에 자동으로 채워져요." : "config.json 의 blog 에 네이버 블로그 아이디를 넣으면, 블로그에 올린 시공 후기가 여기에 자동으로 모여요."}</div>`;
+  else if(C.sample || !BLOGS.length) $("caseList").outerHTML = `<div class="hint">${BLOGS.length ? "블로그 후기를 불러오는 중이에요. 1시간 안에 자동으로 채워져요." : "config.json 의 blog 에 네이버 블로그 아이디를 넣으면, 블로그에 올린 시공 후기가 여기에 자동으로 모여요."}</div>`;
   else $("cases").hidden = true;
 });
 
