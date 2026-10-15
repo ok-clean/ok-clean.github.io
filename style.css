@@ -1,12 +1,12 @@
 /* 청소업체 허브 사이트 공통 스타일 */
 :root{
-  --tile:#F5F8F7; --paper:#FFFFFF; --ink:#13302D; --muted:#5A6F6B; --line:#D6E1DE; --mist:#E6F0ED;
-  --water:#0B7F73; --water-soft:#DDF1EE; --glove:#FFC933; --glove-ink:#3A2C00; --warn:#B4462E;
+  --tile:#F4F7FC; --paper:#FFFFFF; --ink:#0E2350; --muted:#55627D; --line:#D5DEEE; --mist:#E5ECF8;
+  --water:#0B3FA6; --water-soft:#E3ECFB; --glove:#FFC933; --glove-ink:#3A2C00; --warn:#B4462E;
   --r:14px;
 }
 @media (prefers-color-scheme: dark){
-  :root{ --tile:#0E1C1A; --paper:#142725; --ink:#E7F1EE; --muted:#9DB3AE; --line:#24403C; --mist:#183330;
-         --water:#4FD1BF; --water-soft:#123B36; --glove:#FFC933; --glove-ink:#2A2000; --warn:#FF8A6E; }
+  :root{ --tile:#0C1426; --paper:#131E36; --ink:#E8EEFA; --muted:#9FAECB; --line:#25345A; --mist:#17233F;
+         --water:#86A8FF; --water-soft:#18295A; --glove:#FFC933; --glove-ink:#2A2000; --warn:#FF8A6E; }
 }
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
@@ -165,3 +165,7 @@ footer a{color:var(--muted)}
 @media (prefers-reduced-motion: reduce){ *{transition:none!important} }
 .cats .chip{flex:none;white-space:nowrap}
 .ck-bar .btn{flex:none}
+
+.brand .logo{border-radius:50%;flex:none}
+.hero-logo{display:none}
+@media (min-width:900px){ .hero-logo{display:block;width:240px;height:240px;margin-top:36px;border-radius:50%;box-shadow:0 0 0 8px var(--tile)} }

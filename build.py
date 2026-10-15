@@ -58,14 +58,16 @@ def head(c, title, desc, path, depth=0):
 <meta name="description" content="{e(desc)}">
 <link rel="canonical" href="{e(url)}">
 <meta property="og:type" content="website"><meta property="og:title" content="{e(title)}"><meta property="og:description" content="{e(desc)}"><meta property="og:url" content="{e(url)}">
-<meta name="theme-color" content="#0B7F73">
-<link rel="icon" href="{up}favicon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#0B3FA6">
+<link rel="icon" href="{up}icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="{up}apple-touch-icon.png">
+<meta property="og:image" content="{e(c.get("siteUrl","").rstrip("/") + "/og.jpg")}"><meta property="og:site_name" content="{e(c["name"])}">
 {FONT}
 <link rel="stylesheet" href="{up}style.css">
 </head><body>
 {'<div class="sample">샘플 화면이에요 · config.json 에 업체 정보를 넣고 sample 을 false 로 바꾸면 이 줄이 사라져요</div>' if c.get("sample") else ''}
 <div class="wrap"><header class="top">
-<a class="brand" href="{up}index.html">{LOGO}<b>{e(c["name"])}</b></a>
+<a class="brand" href="{up}index.html"><img src="{up}icon-192.png" alt="" width="38" height="38" class="logo"><b>{e(c["name"])}</b></a>
 <nav aria-label="주요 메뉴"><a href="{up}index.html#quote">견적 계산</a><a href="{up}index.html#services">서비스</a><a href="{up}index.html#cases">시공 사례</a><a href="{up}index.html#check">셀프 검수표</a></nav>
 {f'<a class="call" href="{tel(c)}">{e(c["phone"])}</a>' if c.get("phone") else ''}
 </header></div>"""
@@ -124,6 +126,7 @@ def index_page(c):
     <h1>{e(rg + ' 청소, ' if rg else '')}평수만 넣으면 바로 견적이 나와요</h1>
     <p class="lead">{e(c.get('tagline', ''))}. 계산한 견적 그대로 카톡이나 문자로 문의하면 돼요.</p>
     <div class="areas">{''.join(f'<span>{e(r)}</span>' for r in regions)}</div>
+    <img class="hero-logo" src="logo.png" alt="{e(c['name'])} 로고" width="240" height="240">
   </div>
   <div class="calc" id="quote">
     <h2>예상 견적 계산</h2>
@@ -297,7 +300,6 @@ def run():
     files["sitemap.xml"] = ('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
                             + "".join(f"<url><loc>{e(base + u)}</loc><lastmod>{today}</lastmod></url>\n" for u in urls) + "</urlset>\n")
     files["robots.txt"] = f"User-agent: *\nAllow: /\nSitemap: {base}sitemap.xml\n"
-    files["favicon.svg"] = LOGO.replace('aria-hidden="true"', 'xmlns="http://www.w3.org/2000/svg"').replace("var(--water)", "#0B7F73").replace("var(--glove)", "#FFC933")
     for path, text in files.items():
         if write(path, text):
             changed.append(path)
@@ -307,6 +309,13 @@ def run():
         if f.name not in keep:
             f.unlink()
             changed.append(f"area/{f.name} (삭제)")
+    keep_s = {f"{s['id']}.html" for s in c["services"]}
+    for f in (ROOT / "services").glob("*.html"):
+        if f.name not in keep_s:
+            f.unlink()
+            changed.append(f"services/{f.name} (삭제)")
+    if (ROOT / "favicon.svg").exists():
+        (ROOT / "favicon.svg").unlink()
     print("페이지 생성:", ", ".join(changed) if changed else "변경 없음")
 
 
