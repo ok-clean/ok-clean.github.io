@@ -1,4 +1,4 @@
-// 메인 화면 동작: 견적 계산기, 시공 사례, 셀프 검수표, 계절 달력
+// 메인 화면 동작: 견적 계산기, 시공 사례, 계절 달력
 const C = JSON.parse(document.getElementById("cfg").textContent);
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
@@ -137,27 +137,6 @@ fetch("cases.json?t=" + Date.now(), {cache: "no-store"}).then(r => r.ok ? r.json
   else if(C.sample || !C.blog) $("caseList").outerHTML = `<div class="hint">${C.blog ? "블로그 후기를 불러오는 중이에요. 1시간 안에 자동으로 채워져요." : "config.json 의 blog 에 네이버 블로그 아이디를 넣으면, 블로그에 올린 시공 후기가 여기에 자동으로 모여요."}</div>`;
   else $("cases").hidden = true;
 });
-
-// ── 셀프 검수표 ──
-const CK = store.get("check", {}) || {};
-const allItems = C.checklist.flatMap(a => a.items.map(it => a.area + "|" + it));
-$("ckList").innerHTML = C.checklist.map(a => `<div class="ck-area"><h3>${esc(a.area)}</h3>${a.items.map(it => { const k = a.area + "|" + it; return `<label><input type="checkbox" data-k="${esc(k)}"${CK[k] ? " checked" : ""}><span>${esc(it)}</span></label>`; }).join("")}</div>`).join("");
-function ckDraw(){
-  const n = allItems.filter(k => CK[k]).length;
-  $("ckCount").textContent = `${n}/${allItems.length}`;
-  $("ckMeter").style.width = (n * 100 / allItems.length) + "%";
-}
-$("ckList").addEventListener("change", e => { const k = e.target.dataset.k; if(!k) return; if(e.target.checked) CK[k] = 1; else delete CK[k]; store.set("check", CK); ckDraw(); });
-$("ckReset").onclick = () => { if(!confirm("체크한 내용을 모두 지울까요?")) return; Object.keys(CK).forEach(k => delete CK[k]); store.set("check", CK); document.querySelectorAll("#ckList input").forEach(i => i.checked = false); ckDraw(); };
-$("ckSend").onclick = async () => {
-  const left = allItems.filter(k => !CK[k]).map(k => "- " + k.replace("|", ": "));
-  if(!left.length){ toast("모든 항목을 확인했어요."); return; }
-  const text = `[${C.name} 검수 요청]\n확인이 더 필요한 곳 ${left.length}곳:\n${left.join("\n")}\n사진도 함께 보내드릴게요.`;
-  await copy(text);
-  if(C.kakao){ toast("확인할 곳 목록을 복사했어요. 카톡에 붙여넣어 주세요."); setTimeout(() => window.open(C.kakao, "_blank", "noopener"), 600); }
-  else location.href = `sms:${phoneDigits}${/iPhone|iPad|iPod/.test(navigator.userAgent) ? "&" : "?"}body=${encodeURIComponent(text)}`;
-};
-ckDraw();
 
 // ── 계절 달력 ──
 const nowM = new Date(Date.now() + 9*3600e3).getUTCMonth() + 1;

@@ -68,7 +68,7 @@ def head(c, title, desc, path, depth=0):
 {'<div class="sample">샘플 화면이에요 · config.json 에 업체 정보를 넣고 sample 을 false 로 바꾸면 이 줄이 사라져요</div>' if c.get("sample") else ''}
 <div class="wrap"><header class="top">
 <a class="brand" href="{up}index.html"><img src="{up}icon-192.png" alt="" width="38" height="38" class="logo"><b>{e(c["name"])}</b></a>
-<nav aria-label="주요 메뉴"><a href="{up}index.html#quote">견적 계산</a><a href="{up}index.html#services">서비스</a><a href="{up}index.html#cases">시공 사례</a><a href="{up}index.html#check">셀프 검수표</a></nav>
+<nav aria-label="주요 메뉴"><a href="{up}index.html#quote">견적 계산</a><a href="{up}index.html#services">서비스</a><a href="{up}index.html#cases">시공 사례</a><a href="{up}index.html#faq">자주 묻는 질문</a></nav>
 {f'<a class="call" href="{tel(c)}">{e(c["phone"])}</a>' if c.get("phone") else ''}
 </header></div>"""
 
@@ -160,13 +160,6 @@ def index_page(c):
   <div id="caseList" class="cases"></div>
 </div></section>
 
-<section class="s" id="check"><div class="wrap">
-  <h2>입주청소 셀프 검수표</h2>
-  <p class="d">청소가 끝나면 이 표로 직접 확인해 보세요. 체크한 내용은 이 기기에만 저장되고, 아쉬운 곳은 바로 보내실 수 있어요.</p>
-  <div class="ck-bar"><div class="meter"><i id="ckMeter"></i></div><b id="ckCount">0/0</b><button class="btn line small" id="ckSend" type="button">아쉬운 곳 보내기</button><button class="btn line small" id="ckReset" type="button">초기화</button></div>
-  <div class="ck-wrap" id="ckList"></div>
-</div></section>
-
 <section class="s" id="season"><div class="wrap">
   <h2>달마다 많이 찾는 청소</h2>
   <p class="d">에어컨은 여름 전, 입주청소는 이사철에 예약이 몰려요. 원하는 날짜가 있다면 미리 잡아두세요.</p>
@@ -175,12 +168,12 @@ def index_page(c):
 
 <section class="s"><div class="wrap">
   <h2>진행 순서</h2>
-  <p class="d">문의부터 확인까지 네 단계예요.</p>
+  <p class="d">문의부터 마무리까지 네 단계예요.</p>
   <ol class="steps">
     <li><b>견적 계산·문의</b><span>위 계산기로 예상 금액을 보고 카톡이나 문자로 보내주세요.</span></li>
     <li><b>사진 확인·일정 확정</b><span>현장 사진을 보고 최종 금액과 날짜를 정해요.</span></li>
     <li><b>방문 작업</b><span>약속한 날 방문해 작업 범위대로 진행해요.</span></li>
-    <li><b>셀프 검수</b><span>검수표로 확인하고 아쉬운 곳은 바로 알려주세요.</span></li>
+    <li><b>함께 확인</b><span>작업이 끝나면 함께 둘러보고, 아쉬운 곳은 바로 말씀해 주세요.</span></li>
   </ol>
 </div></section>
 
@@ -261,7 +254,7 @@ def privacy_page(c):
 <h1>개인정보처리방침</h1>
 <div class="box">
 <p>{e(who)}(이하 '업체')는 이 사이트에서 회원가입이나 입력 양식을 통해 개인정보를 수집하지 않아요.</p>
-<p>견적 계산기와 셀프 검수표에 입력한 내용은 이용자의 기기(브라우저)에만 저장되고 업체 서버로 전송되지 않아요. 이용자가 직접 카카오톡·문자·전화로 보낸 문의 내용은 상담과 작업 진행에만 쓰고, 상담이 끝나면 지체 없이 파기해요.</p>
+<p>견적 계산기에 입력한 내용은 이용자의 기기(브라우저)에만 저장되고 업체 서버로 전송되지 않아요. 이용자가 직접 카카오톡·문자·전화로 보낸 문의 내용은 상담과 작업 진행에만 쓰고, 상담이 끝나면 지체 없이 파기해요.</p>
 <p>사이트 이용 통계를 위해 방문 기록(접속 기기, 방문 페이지 등)이 익명으로 수집될 수 있어요.</p>
 <p>문의: {e(c.get('phone', ''))} {e(b.get('email', ''))}</p>
 </div>
