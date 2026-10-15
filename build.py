@@ -223,8 +223,22 @@ def service_page(c, s):
 """
 
 
+def naver_imgs(src):
+    """네이버 블로그 사진 주소 → (큰 사진 주소, 실패 시 쓸 주소)"""
+    import re as _re
+    if "pstatic.net" not in src:
+        return src, src
+    base = _re.sub(r"\?.*$", "", src)
+    big = base.replace("://blogthumb.pstatic.net", "://mblogthumb-phinf.pstatic.net").replace("://postfiles.pstatic.net", "://mblogthumb-phinf.pstatic.net") + "?type=w800"
+    return big, base + "?type=s3"
+
+
+IMG_ERR = "if(!this.dataset.f){this.dataset.f=1;this.src=this.dataset.alt}else{this.replaceWith(Object.assign(document.createElement('div'),{className:'ph'}))}"
+
+
 def case_card(x):
-    img = (f'<img class="ph" src="{e(x["img"])}" alt="" loading="lazy" referrerpolicy="no-referrer">' if x.get("img")
+    big, alt = naver_imgs(x.get("img") or "")
+    img = (f'<img class="ph" src="{e(big)}" data-alt="{e(alt)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="{IMG_ERR}">' if x.get("img")
            else '<div class="ph"></div>')
     return (f'<a class="case" href="{e(x["link"])}" target="_blank" rel="noopener">{img}'
             f'<div class="tx"><div class="tt">{e(x["title"])}</div></div></a>')

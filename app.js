@@ -121,13 +121,25 @@ document.querySelectorAll("#services .cats .chip").forEach(b => b.addEventListen
 
 // ── 시공 사례 (블로그 후기 자동 연동: update.py 가 cases.json 으로 정리) ──
 let CASES = [], caseF = "", caseN = 8;
+// 네이버 블로그 사진: 외부 사이트에서도 잘 열리는 서버(mblogthumb-phinf)의 큰 사진을 먼저 쓰고, 안 되면 원래 썸네일로
+function naverImgs(src){
+  if(!/pstatic\.net/.test(src)) return [src, src];
+  const base = src.replace(/\?.*$/, "");
+  return [base.replace("://blogthumb.pstatic.net", "://mblogthumb-phinf.pstatic.net").replace("://postfiles.pstatic.net", "://mblogthumb-phinf.pstatic.net") + "?type=w800", base + "?type=s3"];
+}
+document.addEventListener("error", e => {
+  const im = e.target;
+  if(!(im instanceof HTMLImageElement) || !im.classList.contains("ph")) return;
+  if(!im.dataset.f && im.dataset.alt){ im.dataset.f = "1"; im.src = im.dataset.alt; }
+  else { const d = document.createElement("div"); d.className = "ph"; im.replaceWith(d); }
+}, true);
 function drawCases(){
   const list = CASES.filter(x => !caseF || x.svc === caseF);
   const used = [...new Set(CASES.map(x => x.svc).filter(Boolean))];
   $("caseChips").innerHTML = used.length > 1 ? `<button class="chip" data-f="" aria-pressed="${!caseF}">전체</button>` + used.map(id => { const s = SV.find(x => x.id === id); return s ? `<button class="chip" data-f="${esc(id)}" aria-pressed="${caseF === id}">${esc(s.name)}</button>` : ""; }).join("") : "";
   $("caseList").innerHTML = list.slice(0, caseN).map(x => {
     const s = SV.find(v => v.id === x.svc);
-    return `<a class="case" href="${esc(x.link)}" target="_blank" rel="noopener">${x.img ? `<img class="ph" src="${esc(x.img)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : `<div class="ph"></div>`}
+    return `<a class="case" href="${esc(x.link)}" target="_blank" rel="noopener">${x.img ? (() => { const [big, alt] = naverImgs(x.img); return `<img class="ph" src="${esc(big)}" data-alt="${esc(alt)}" alt="" loading="lazy" referrerpolicy="no-referrer">`; })() : `<div class="ph"></div>`}
       <div class="tx"><div class="tg">${esc([x.region, s && s.name].filter(Boolean).join(" "))}</div><div class="tt">${esc(x.title)}</div></div></a>`;
   }).join("") + (list.length > caseN ? `<button class="btn line small" id="caseMore" type="button" style="grid-column:1/-1">시공 사례 더 보기 (${list.length - caseN}건)</button>` : "");
 }

@@ -31,9 +31,7 @@ def first_img(desc):
     m = re.search(r'<img[^>]+src="([^"]+)"', desc or "")
     if not m:
         return ""
-    src = html.unescape(m.group(1))
-    # 네이버 썸네일은 type 파라미터로 크기 조절
-    return re.sub(r"\?type=\w+", "", src) + "?type=w580" if "pstatic.net" in src else src
+    return html.unescape(m.group(1))   # 원래 주소 그대로 저장 (화면에서 크기·서버를 골라 씀)
 
 
 def norm(s):
