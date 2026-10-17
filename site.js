@@ -35,7 +35,8 @@
   document.addEventListener("keydown", e => { if(e.key === "Escape") document.querySelectorAll(".modal:not([hidden])").forEach(window.closeModal); });
 
   // ── 공유하기 ──
-  const shareUrl = (S.url || location.origin).replace(/\/$/, "") + "/?src=share";
+  let myCode = ""; try { myCode = (JSON.parse(localStorage.getItem("member") || "null") || {}).code || ""; } catch(e){}
+  const shareUrl = (S.url || location.origin).replace(/\/$/, "") + (myCode ? "/?ref=" + myCode : "/?src=share");   // 회원이면 내 초대 링크로 공유
   const shareText = `${S.name} · ${S.tagline}\n평수만 넣으면 청소 견적이 바로 나와요.`;
   async function share(){
     if(navigator.share && !IN_APP){

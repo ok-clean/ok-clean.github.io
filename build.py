@@ -53,7 +53,7 @@ def tel(c):
     return "tel:" + "".join(ch for ch in c.get("phone", "") if ch.isdigit() or ch == "+")
 
 
-def head(c, title, desc, path, depth=0):
+def head(c, title, desc, path, depth=0, ld=None):
     up = "../" * depth
     url = c.get("siteUrl", "").rstrip("/") + "/" + path
     return f"""<!doctype html>
@@ -71,17 +71,53 @@ def head(c, title, desc, path, depth=0):
 <meta property="og:image" content="{e(c.get("siteUrl","").rstrip("/") + "/og.jpg")}"><meta property="og:site_name" content="{e(c["name"])}">
 {FONT}
 <link rel="stylesheet" href="{up}style.css">
+{ld_tags(ld)}{analytics(c)}
 </head><body>
 {'<div class="sample">샘플 화면이에요 · config.json 에 업체 정보를 넣고 sample 을 false 로 바꾸면 이 줄이 사라져요</div>' if c.get("sample") else ''}
 <div class="wrap"><header class="top">
 <a class="brand" href="{up}index.html"><img src="{up}icon-192.png" alt="" width="38" height="38" class="logo"><b>{e(c["name"])}</b></a>
-<nav aria-label="주요 메뉴"><a href="{up}index.html#quote">견적 계산</a><a href="{up}index.html#services">서비스</a><a href="{up}index.html#cases">시공 사례</a><a href="{up}index.html#faq">자주 묻는 질문</a></nav>
+<nav aria-label="주요 메뉴"><a href="{up}index.html#quote">견적 계산</a><a href="{up}index.html#services">서비스</a><a href="{up}index.html#cases">시공 사례</a><a href="{up}index.html#member">회원 혜택</a><a href="{up}index.html#faq">자주 묻는 질문</a></nav>
 <div class="tools">
 <button class="tool" type="button" data-share aria-label="공유하기"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>공유</span></button>
 <button class="tool app" type="button" data-install hidden><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7v7M9 11l3 3 3-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>앱 설치</span></button>
 {f'<a class="call" href="{tel(c)}">{e(c["phone"])}</a>' if c.get("phone") else ''}
 </div>
 </header></div>"""
+
+
+def ld_tags(ld):
+    """검색엔진용 구조화 데이터(JSON-LD): 구글·네이버가 업체 정보·FAQ를 이해하게 도움"""
+    if not ld:
+        return ""
+    return "".join('<script type="application/ld+json">' + json.dumps(x, ensure_ascii=False).replace("</", "<\\/") + "</script>" for x in ld)
+
+
+def analytics(c):
+    a = c.get("analytics") or {}
+    out = ""
+    if a.get("ga"):
+        g = e(a["ga"])
+        out += (f'<script async src="https://www.googletagmanager.com/gtag/js?id={g}"></script>'
+                f"<script>window.dataLayer=window.dataLayer||[];function gtag(){{dataLayer.push(arguments)}}gtag('js',new Date());gtag('config','{g}');</script>")
+    if a.get("naver"):
+        out += (f'<script src="https://wcs.pstatic.net/wcslog.js"></script>'
+                f'<script>if(!wcs_add)var wcs_add={{}};wcs_add["wa"]="{e(a["naver"])}";if(window.wcs)wcs_do();</script>')
+    return out
+
+
+def biz_ld(c):
+    b = c.get("business") or {}
+    base = c.get("siteUrl", "").rstrip("/")
+    d = {"@context": "https://schema.org", "@type": "HomeAndConstructionBusiness", "name": c["name"], "url": base + "/",
+         "image": base + "/logo.png", "logo": base + "/logo.png", "telephone": c.get("phone", ""),
+         "description": f"{', '.join(c.get('regions', []))} 입주청소·거주청소·사무실·준공 청소, 에어컨·세탁기 분해세척",
+         "areaServed": c.get("regions", []), "priceRange": "₩₩"}
+    if b.get("address"):
+        d["address"] = {"@type": "PostalAddress", "streetAddress": b["address"], "addressLocality": "춘천시", "addressRegion": "강원특별자치도", "addressCountry": "KR"}
+    same = [f"https://blog.naver.com/{x}" for x in blog_list(c)] + ([c["naverPlace"]] if c.get("naverPlace") else [])
+    if same:
+        d["sameAs"] = same
+    return d
 
 
 def foot(c, depth=0):
@@ -102,7 +138,7 @@ def foot(c, depth=0):
 <div class="foot-tools"><button class="btn line small" type="button" data-share>🔗 이 사이트 공유하기</button><button class="btn line small" type="button" data-install hidden>📲 휴대폰에 앱으로 설치</button></div>
 <nav aria-label="지역">{areas}</nav>
 <div class="biz"><b>{e(c['name'])}</b>{(' · ' + e(c['hours'])) if c.get('hours') else ''}<br>{biz}</div>
-<nav><a href="{up}privacy.html">개인정보처리방침</a>{''.join(f'<a href="https://blog.naver.com/{e(x)}" target="_blank" rel="noopener">블로그{i + 1 if len(blog_list(c)) > 1 else ""}</a>' for i, x in enumerate(blog_list(c)))}</nav>
+<nav><a href="{up}privacy.html">개인정보처리방침</a>{f'<a href="{e(c["naverPlace"])}" target="_blank" rel="noopener">네이버 플레이스</a>' if c.get("naverPlace") else ''}{''.join(f'<a href="https://blog.naver.com/{e(x)}" target="_blank" rel="noopener">블로그{i + 1 if len(blog_list(c)) > 1 else ""}</a>' for i, x in enumerate(blog_list(c)))}</nav>
 <div>© {datetime.now(KST).year} {e(c['name'])}</div>
 </div></footer>
 <div class="dock"><div class="in">
@@ -148,6 +184,7 @@ def member_section(c):
     if not m:
         return ""
     frees = "".join(f"<li>{e(x)}</li>" for x in m.get("freeServices", []))
+    ref = m.get("referral")
     grades = "".join(f'<tr><td><b>{e(g["name"])}</b></td><td>{e(g["rule"])}</td><td>{e(g["perk"])}</td></tr>' for g in m.get("grades", []))
     return f"""<section class="s" id="member"><div class="wrap">
   <h2>회원 혜택</h2>
@@ -155,7 +192,8 @@ def member_section(c):
   <div class="perks">
     <div class="perk"><span class="pk">가입 즉시</span><b>{won_text(m["coupon"])} 할인 쿠폰</b><p>{e(m.get("couponTerms", ""))}</p></div>
     <div class="perk"><span class="pk">가입 즉시</span><b>무료 서비스 1가지</b><ul>{frees}</ul></div>
-    <div class="perk"><span class="pk">후기 선물</span><b>{e(m.get("reviewGift", ""))}</b><p>{e(m.get("reviewTerms", ""))}</p></div>
+    <div class="perk"><span class="pk">후기 선물</span><b>{e(m.get("reviewGift", ""))}</b><p>{e(m.get("reviewTerms", ""))}</p>{f'<a class="btn line small" href="{e(c["naverPlace"])}" target="_blank" rel="noopener">네이버 플레이스에 리뷰 남기기</a>' if c.get("naverPlace") else ''}</div>
+    {f'<div class="perk"><span class="pk">친구 초대</span><b>{won(ref["point"]).replace("만", "만")}P 적립</b><p>{e(ref.get("text", ""))}</p><button class="btn line small" type="button" data-invite>내 초대 링크 보내기</button></div>' if ref else ''}
   </div>
   <h3 class="sub">등급과 포인트</h3>
   <div class="tbl-wrap"><table class="grade"><thead><tr><th>등급</th><th>조건</th><th>혜택</th></tr></thead><tbody>{grades}</tbody></table></div>
@@ -176,11 +214,12 @@ def join_modal(c):
 <div id="joinForm">
   <p class="eyebrow-less">{e(c["name"])} 회원가입</p>
   <h2 id="joinT">지금 가입하면 <em>{won_text(m["coupon"])} 할인</em> + 무료 서비스</h2>
+  <p class="ref-b" id="jRef" hidden></p>
   <div class="field"><label for="jName">이름</label><input id="jName" type="text" autocomplete="name" maxlength="20" placeholder="홍길동"></div>
   <div class="field"><label for="jPhone">연락처</label><input id="jPhone" type="tel" inputmode="tel" autocomplete="tel" maxlength="13" placeholder="010-0000-0000"></div>
   <div class="field"><label for="jArea">지역</label><select id="jArea"><option value="">선택</option>{regions}<option>그 외 지역</option></select></div>
   <div class="field"><span class="lab">무료로 받을 서비스 1가지</span>{frees}</div>
-  <label class="agree"><input type="checkbox" id="jAgree"><span><b>(필수)</b> 개인정보 수집·이용 동의 · 이름·연락처·지역을 회원 관리, 쿠폰 지급, 예약 상담에만 쓰고 탈퇴 요청 시 지체 없이 파기해요. <a href="privacy.html" target="_blank">자세히</a></span></label>
+  <label class="agree"><input type="checkbox" id="jAgree"><span><b>(필수)</b> 개인정보 수집·이용 동의 · 이름·연락처·지역(추천인 코드)을 회원 관리, 쿠폰·포인트 지급, 예약 상담에만 쓰고 탈퇴 요청 시 지체 없이 파기해요. <a href="privacy.html" target="_blank">자세히</a></span></label>
   <label class="agree"><input type="checkbox" id="jAd"><span>(선택) 할인·이벤트 소식 받기</span></label>
   <p class="err" id="jErr" role="alert"></p>
   <button class="btn glove" type="button" id="jSubmit">가입하고 쿠폰 받기</button>
@@ -190,13 +229,29 @@ def join_modal(c):
 </div></div>"""
 
 
-def index_page(c):
+def promises_section(c, cases):
+    ps = c.get("promises") or []
+    if not ps:
+        return ""
+    n = sum(1 for x in cases if x.get("kind", "case") == "case")
+    stat = f'<div class="stat"><b>{n}건</b><span>블로그에 공개한 시공 기록</span></div>' if n else ""
+    items = "".join(f'<li><b>{e(x["t"])}</b><span>{e(x["d"])}</span></li>' for x in ps)
+    return f"""<section class="s trust" id="promise"><div class="wrap">
+  <h2>{e(c['name'])}의 약속</h2>
+  <p class="d">처음 맡기는 업체라 걱정되시죠. 이렇게 일해요.</p>
+  <div class="trust-in">{stat}<ul class="promise">{items}</ul></div>
+</div></section>"""
+
+
+def index_page(c, cases=()):
     regions = c.get("regions", [])
     rg = "·".join(regions[:2]) if regions else ""
     title = f"{c['name']} | {rg} 입주청소·에어컨 청소 견적" if rg else f"{c['name']} | 청소 견적"
     desc = f"{', '.join(regions)} 입주청소, 거주청소, 사무실·준공 청소, 에어컨·세탁기 분해세척. 평수만 넣으면 예상 견적을 바로 볼 수 있어요."
     cfg = json.dumps(c, ensure_ascii=False).replace("</", "<\\/")
-    return head(c, title, desc, "") + f"""
+    faq_ld = {"@context": "https://schema.org", "@type": "FAQPage",
+              "mainEntity": [{"@type": "Question", "name": f["q"], "acceptedAnswer": {"@type": "Answer", "text": f["a"]}} for f in c.get("faq", [])]}
+    return head(c, title, desc, "", 0, [biz_ld(c), faq_ld]) + f"""
 <main>
 <section class="hero"><div class="wrap hero-in">
   <div>
@@ -225,6 +280,8 @@ def index_page(c):
   </div>
 </div></section>
 
+{promises_section(c, cases)}
+
 <section class="s" id="services"><div class="wrap">
   <h2>하는 일</h2>
   <p class="d">주거부터 상가, 준공 현장, 가전 분해세척까지 맡아요. 항목을 누르면 작업 범위와 가격 기준을 볼 수 있어요.</p>
@@ -232,14 +289,20 @@ def index_page(c):
   {services_html(c)}
 </div></section>
 
-{member_section(c)}
-
 <section class="s" id="cases"><div class="wrap">
   <h2>시공 사례</h2>
-  <p class="d">실제 작업한 현장의 전후 사진이에요. 블로그에 올라온 후기가 자동으로 모여요.</p>
+  <p class="d">실제 작업한 현장 기록이에요. 블로그에 올린 후기가 자동으로 모여요.</p>
   <div id="caseChips" class="cats"></div>
   <div id="caseList" class="cases"></div>
 </div></section>
+
+<section class="s" id="tips" hidden><div class="wrap">
+  <h2>청소 꿀팁</h2>
+  <p class="d">집에서 바로 써먹을 수 있는 청소 정보를 블로그에 정리해 두었어요.</p>
+  <ul class="tips" id="tipList"></ul>
+</div></section>
+
+{member_section(c)}
 
 <section class="s" id="season"><div class="wrap">
   <h2>달마다 많이 찾는 청소</h2>
@@ -271,7 +334,7 @@ def index_page(c):
 """
 
 
-def service_page(c, s):
+def service_page(c, s, cases=()):
     a, b = price_from(s)
     regions = c.get("regions", [])
     rg = "·".join(regions[:3])
@@ -284,14 +347,26 @@ def service_page(c, s):
         if s.get("min"):
             rows += f"<tr><td>최소 금액</td><td>{won(s['min'])}원</td></tr>"
     same = [x for x in c["services"] if x["cat"] == s["cat"] and x["id"] != s["id"]]
-    return head(c, title, desc, f"services/{s['id']}.html", 1) + f"""
+    rooms = "".join(f'<div class="room"><b>{e(r["name"])}</b><ul>{"".join(f"<li>{e(i)}</li>" for i in r["items"])}</ul></div>' for r in s.get("rooms", []))
+    excl = "".join(f"<li>{e(x)}</li>" for x in s.get("excludes", []))
+    mine = [x for x in cases if x.get("svc") == s["id"] and x.get("kind", "case") == "case"][:4]
+    kakao = c.get("kakao", "")
+    base = c.get("siteUrl", "").rstrip("/")
+    ld = {"@context": "https://schema.org", "@type": "Service", "name": s["name"], "description": s["summary"], "serviceType": s["name"],
+          "areaServed": regions, "url": f"{base}/services/{s['id']}.html",
+          "provider": {"@type": "HomeAndConstructionBusiness", "name": c["name"], "telephone": c.get("phone", ""), "url": base + "/"}}
+    if not s.get("quote") and s.get("variants"):
+        ld["offers"] = {"@type": "AggregateOffer", "priceCurrency": "KRW", "lowPrice": min(v["lo"] for v in s["variants"]), "highPrice": max(v["hi"] for v in s["variants"])}
+    return head(c, title, desc, f"services/{s['id']}.html", 1, [ld]) + f"""
 <main class="wrap page">
 <div class="crumb"><a href="../index.html">홈</a> › <a href="../index.html#services">서비스</a></div>
 <h1>{e(s['name'])}</h1>
 <p class="lead" style="color:var(--muted);font-size:17px;margin:0">{e(s['summary'])}</p>
-<div class="box"><h2>작업 범위</h2><ul>{''.join(f'<li>{e(i)}</li>' for i in s['includes'])}</ul></div>
+<div class="box"><h2>작업 범위</h2><ul>{''.join(f'<li>{e(i)}</li>' for i in s['includes'])}</ul>{f'<div class="rooms">{rooms}</div>' if rooms else ''}</div>
+{f'<div class="box"><h2>기본 범위에 없는 것</h2><p class="d-s">아래는 기본 금액에 들어가지 않아요. 필요하시면 상담 때 말씀해 주세요. 추가 비용은 작업 전에 먼저 안내해 드려요.</p><ul class="excl">{excl}</ul></div>' if excl else ''}
 <div class="box"><h2>가격 기준</h2>{f'<table class="ptable">{rows}</table><p style="font-size:13.5px;color:var(--muted);margin:10px 0 0">오염 정도와 구조에 따라 현장에서 달라질 수 있어요.</p>' if rows else '<p style="margin:0">현장 상태에 따라 작업량 차이가 커서, 사진을 보고 견적을 안내해 드려요.</p>'}</div>
-<a class="btn glove" href="../index.html?svc={e(s['id'])}#quote">{'내 견적 계산하기' if not s.get('quote') else '사진 보내고 견적 받기'}</a>
+<div class="cta2"><a class="btn glove" href="../index.html?svc={e(s['id'])}#quote">{'내 견적 계산하기' if not s.get('quote') else '사진 보내고 견적 받기'}</a>{f'<a class="btn line" href="{e(kakao)}" target="_blank" rel="noopener">카톡으로 바로 문의</a>' if kakao else ''}</div>
+{f'<div class="box"><h2>최근 {e(s["name"])} 사례</h2><div class="cases">{"".join(case_card(x) for x in mine)}</div></div>' if mine else ''}
 {f'<div class="box"><h2>서비스 지역</h2><div class="links">' + ''.join(f'<a href="../{area_file(r)}">{e(r)} {e(s["name"])}</a>' for r in regions) + '</div></div>' if regions else ''}
 {f'<div class="box"><h2>같이 많이 찾는 청소</h2><div class="links">' + ''.join(f'<a href="{e(x["id"])}.html">{e(x["name"])}</a>' for x in same) + '</div></div>' if same else ''}
 </main>
@@ -324,7 +399,7 @@ def case_card(x):
 def area_page(c, r, cases):
     title = f"{r} 입주청소·에어컨 청소 | {c['name']}"
     desc = f"{r} 지역 입주청소, 거주청소, 사무실·준공 청소, 에어컨·세탁기 분해세척을 {c['name']}에서 맡아요. 평수만 넣으면 예상 견적을 볼 수 있어요."
-    mine = [x for x in cases if x.get("region") == r][:8]
+    mine = [x for x in cases if x.get("region") == r and x.get("kind", "case") == "case"][:8]
     case_html = "".join(case_card(x) for x in mine)
     return head(c, title, desc, area_file(r), 1) + f"""
 <main class="wrap page">
@@ -350,7 +425,7 @@ def privacy_page(c):
 <h1>개인정보처리방침</h1>
 <div class="box">
 <h2>1. 수집하는 항목과 목적</h2>
-<p>{e(who)}(이하 '업체')는 회원가입 시 <b>이름, 연락처, 지역, 선택한 무료 서비스, 이벤트 수신 동의 여부</b>를 받아요. 회원 관리, 쿠폰·포인트 지급, 예약 상담과 작업 진행에만 써요.</p>
+<p>{e(who)}(이하 '업체')는 회원가입 시 <b>이름, 연락처, 지역, 선택한 무료 서비스, 추천인 코드(초대 링크로 가입한 경우), 이벤트 수신 동의 여부</b>를 받아요. 회원 관리, 쿠폰·포인트 지급, 예약 상담과 작업 진행에만 써요.</p>
 <h2>2. 수집 방법</h2>
 <p>사이트에 입력한 가입 정보는 이용자의 기기(브라우저)에만 저장되고, 이용자가 카카오톡으로 직접 보낸 경우에만 업체가 받아요. 견적 계산기에 입력한 내용도 기기에만 저장돼요.</p>
 <h2>3. 보관 기간과 파기</h2>
@@ -387,9 +462,9 @@ def run():
         except ValueError:
             cases = []
     changed = []
-    files = {"index.html": index_page(c), "privacy.html": privacy_page(c)}
+    files = {"index.html": index_page(c, cases), "privacy.html": privacy_page(c)}
     for s in c["services"]:
-        files[f"services/{s['id']}.html"] = service_page(c, s)
+        files[f"services/{s['id']}.html"] = service_page(c, s, cases)
     for r in c.get("regions", []):
         files[f"area/{r}.html"] = area_page(c, r, cases)
     files["manifest.webmanifest"] = json.dumps({

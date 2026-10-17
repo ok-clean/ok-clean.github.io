@@ -2,8 +2,10 @@
 
 - config.json 의 blog 에 적은 네이버 블로그(여러 개 가능)를 모두 읽어 최근 글부터 정렬
 - 블로그 RSS 는 최근 글만 주므로, 한 번 모은 사례는 계속 쌓아 둠
-- 제목·카테고리에 서비스 키워드(입주청소, 에어컨청소 등)가 있는 글만 시공 사례로 모음
-- 교육·창업 홍보 글(excludeWords)은 시공 사례에서 뺌
+- 제목·카테고리에 서비스 키워드(입주청소, 에어컨청소 등)나 '청소'가 있는 글만 시공 사례로 모음
+- '방법·차이·vs·가격' 같은 정보 글(tipWords)은 '청소 꿀팁'(kind=tip)으로 따로 모음
+- 교육·창업 홍보 글(excludeWords)과 청소와 관계없는 일상 글은 뺌
+- 제목 끝의 다른 상호(titleStrip)는 지워서 보여줌
 - 실패해도 기존 cases.json 을 그대로 둠
 """
 import html
@@ -39,16 +41,46 @@ def norm(s):
     return re.sub(r"\s+", "", s or "")
 
 
-def classify(c, title, cat, desc):
+def svc_by_title(c, title, cat):
     text = norm(title + " " + cat)
     for s in c["services"]:
         if any(norm(k) in text for k in s.get("keywords", []) + [s["name"]]):
             return s["id"]
+    return ""
+
+
+def svc_by_body(c, desc):
     body = norm(re.sub(r"<[^>]+>", " ", desc or ""))[:400]
     for s in c["services"]:
         if any(norm(k) in body for k in s.get("keywords", [])):
             return s["id"]
     return ""
+
+
+def judge(c, title, cat, desc="", old_svc=""):
+    """글 하나를 (종류, 서비스)로 판정. 종류: 'case'(시공 사례) / 'tip'(청소 꿀팁) / None(안 보여줌)"""
+    if is_edu(c, title, cat):
+        return None, ""
+    t = norm(title)
+    svc = svc_by_title(c, title, cat)
+    topic = svc or "청소" in t or any(norm(w) in t for w in c.get("tipTopics", []))
+    if not topic:
+        return None, ""                       # 영화·여행·일상 글
+    if any(norm(w).lower() in t.lower() for w in c.get("tipWords", [])):
+        return "tip", svc
+    if not (svc or "청소" in t):
+        return None, ""
+    return "case", svc or svc_by_body(c, desc)
+
+
+def clean_title(c, title):
+    """제목 끝에 붙은 다른 상호만 지움 (문장 중간은 그대로)"""
+    title = re.sub(r"\s+", " ", title).strip()
+    for w in c.get("titleStrip", []):
+        t = title.rstrip(" -~·|,")
+        if t.endswith(w):
+            title = t[: -len(w)]
+    return title.strip(" -~·|,")
 
 
 def region_of(c, title, cat, desc):
@@ -83,15 +115,15 @@ def read_blog(c, blog_id):
         link = (it.findtext("link") or "").strip().split("?")[0]
         cat = html.unescape(it.findtext("category") or "")
         desc = it.findtext("description") or ""
-        svc = classify(c, title, cat, desc)
-        if not (title and link and svc) or is_edu(c, title, cat):
+        kind, svc = judge(c, title, cat, desc)
+        if not (title and link and kind):
             continue
         try:
             date = parsedate_to_datetime(it.findtext("pubDate")).astimezone(KST).strftime("%Y-%m-%d %H:%M")
         except Exception:
             date = ""
-        out.append({"title": title, "link": link, "date": date, "img": first_img(desc), "svc": svc,
-                    "region": region_of(c, title, cat, desc), "blog": blog_id})
+        out.append({"title": clean_title(c, title), "link": link, "date": date, "img": first_img(desc), "svc": svc,
+                    "kind": kind, "region": region_of(c, title, cat, desc), "blog": blog_id})
     return out
 
 
@@ -101,7 +133,13 @@ def main():
     if blogs:
         old = json.loads(OUT.read_text("utf-8")).get("cases", []) if OUT.exists() else []
         # 블로그 RSS 는 최근 글만 주므로, 예전에 모은 사례는 지우지 않고 계속 쌓아 둠
-        box = {x["link"]: x for x in old if x.get("link") and not is_edu(c, x.get("title", ""), "")}
+        box = {}
+        for x in old:                          # 예전에 모은 글도 지금 규칙으로 다시 판정
+            if not x.get("link"):
+                continue
+            kind, svc = judge(c, x.get("title", ""), "", "", x.get("svc", ""))
+            if kind:
+                box[x["link"]] = {**x, "title": clean_title(c, x["title"]), "kind": kind, "svc": svc}
         ok = 0
         for b in blogs:
             try:

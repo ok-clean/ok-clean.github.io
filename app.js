@@ -26,6 +26,10 @@ const BLOGS = [].concat(C.blog || []).filter(Boolean);
 const phoneDigits = (C.phone || "").replace(/[^0-9+]/g, "");
 const M = C.member || null;
 let MEMBER = store.get("member", null);
+// 친구 초대 링크(?ref=OK-XXXXXX)로 들어온 경우 추천인 코드를 기억
+const refQ = (new URLSearchParams(location.search).get("ref") || "").toUpperCase();
+if(/^OK-[A-Z0-9]{6}$/.test(refQ) && (!MEMBER || MEMBER.code !== refQ)) store.set("ref", refQ);
+const REF = store.get("ref", "");
 
 // ── 견적 계산기 ──
 const SV = C.services;
@@ -79,15 +83,22 @@ function summary(){
   if($("qArea").value) lines.push(`지역: ${$("qArea").value}`);
   if($("qDate").value) lines.push(`희망 날짜: ${$("qDate").value}`);
   if(MEMBER && M) lines.push(`회원 쿠폰: ${MEMBER.code} (${won(M.coupon)}원 할인 + 무료 서비스: ${MEMBER.free})`);
+  else if(REF) lines.push(`추천인 코드: ${REF}`);
   lines.push("상세 주소·현장 사진은 대화로 보내드릴게요.");
   return lines.join("\n");
+}
+// 고른 날짜가 주말이면 할증 가능성 안내 (평일이 더 저렴하고 일정 잡기도 쉬움)
+function weekendNote(){
+  const v = $("qDate").value; if(!v) return "";
+  const d = new Date(v + "T00:00:00").getDay();
+  return (d === 0 || d === 6) ? " 주말은 할증이 붙을 수 있어요. 평일이면 더 저렴해요." : "";
 }
 function calc(){
   const s = svc(), r = estimate();
   if(r){
     $("qK").textContent = "예상 금액";
     $("qV").innerHTML = `${won(r.lo)}~${won(r.hi)}<small>원</small>`;
-    $("qN").textContent = "오염 정도와 구조에 따라 현장에서 달라질 수 있어요." + (s.min && r.lo === s.min ? ` 최소 금액 ${won(s.min)}원이 적용됐어요.` : "");
+    $("qN").textContent = "오염 정도와 구조에 따라 현장에서 달라질 수 있어요." + (s.min && r.lo === s.min ? ` 최소 금액 ${won(s.min)}원이 적용됐어요.` : "") + weekendNote();
   } else {
     $("qK").textContent = "현장 견적";
     $("qV").innerHTML = `사진 보고<small> 안내</small>`;
@@ -153,7 +164,13 @@ $("caseList").addEventListener("click", e => { if(e.target.id === "caseMore"){ c
 $("caseChips").addEventListener("click", e => { const b = e.target.closest("[data-f]"); if(!b) return; caseF = b.dataset.f; caseN = 8; drawCases(); });
 fetch("cases.json?t=" + Date.now(), {cache: "no-store"}).then(r => r.ok ? r.json() : {cases: []}).catch(() => ({cases: []})).then(d => {
   const ex = (C.excludeWords || []).map(w => w.replace(/\s/g, ""));
-  CASES = (d.cases || []).filter(x => x.link && x.title && !ex.some(w => x.title.replace(/\s/g, "").includes(w))).sort((p, q) => (q.date || "").localeCompare(p.date || ""));
+  const all = (d.cases || []).filter(x => x.link && x.title && !ex.some(w => x.title.replace(/\s/g, "").includes(w))).sort((p, q) => (q.date || "").localeCompare(p.date || ""));
+  CASES = all.filter(x => (x.kind || "case") === "case");
+  const tips = all.filter(x => x.kind === "tip").slice(0, 6);
+  if(tips.length){
+    $("tipList").innerHTML = tips.map(x => `<li><a href="${esc(x.link)}" target="_blank" rel="noopener"><span>${esc(x.title)}</span><small>${esc((x.date || "").slice(0, 10).replace(/-/g, "."))}</small></a></li>`).join("");
+    $("tips").hidden = false;
+  }
   if(CASES.length) drawCases();
   else if(C.sample || !BLOGS.length) $("caseList").outerHTML = `<div class="hint">${BLOGS.length ? "블로그 후기를 불러오는 중이에요. 1시간 안에 자동으로 채워져요." : "config.json 의 blog 에 네이버 블로그 아이디를 넣으면, 블로그에 올린 시공 후기가 여기에 자동으로 모여요."}</div>`;
   else $("cases").hidden = true;
@@ -176,24 +193,36 @@ function joinDone(){
     <p class="note">${esc(M.couponTerms)}</p>
     <p class="step-k"><b>마지막 단계</b> · 아래 버튼으로 가입 내용을 카톡에 보내 주시면 쿠폰이 등록돼요.</p>
     <button class="btn glove" type="button" id="jKakao">카톡으로 가입 완료하기</button>
+    ${M.referral ? `<button class="btn line small" type="button" data-invite>친구 초대하고 ${won(M.referral.point)}P 받기</button>` : ""}
     <button class="link" type="button" data-close>나중에 보낼게요</button>`;
   $("jKakao").onclick = async () => {
-    const text = `[${C.name} 회원가입]\n이름: ${m.name}\n연락처: ${m.phone}\n지역: ${m.area || "-"}\n무료 서비스: ${m.free}\n쿠폰번호: ${m.code}\n이벤트 소식: ${m.ad ? "받음" : "안 받음"}`;
+    const text = `[${C.name} 회원가입]\n이름: ${m.name}\n연락처: ${m.phone}\n지역: ${m.area || "-"}\n무료 서비스: ${m.free}\n쿠폰번호: ${m.code}${m.ref ? `\n추천인 코드: ${m.ref}` : ""}\n이벤트 소식: ${m.ad ? "받음" : "안 받음"}`;
     await copy(text);
     toast("가입 내용을 복사했어요. 카톡 대화창에 붙여넣기만 하면 돼요.");
     MEMBER.sent = true; store.set("member", MEMBER);
     setTimeout(() => window.open(C.kakao, "_blank", "noopener"), 600);
   };
 }
+// 친구 초대: 내 쿠폰번호가 들어간 링크를 공유 (친구가 가입하면 카톡 가입 메시지에 추천인 코드가 함께 와요)
+async function invite(){
+  if(!MEMBER){ openJoin(); return; }
+  const url = (C.siteUrl || location.origin).replace(/\/$/, "") + "/?ref=" + MEMBER.code;
+  const text = `${C.name} 회원가입하면 ${won(M.coupon)}원 할인 쿠폰 + 무료 서비스 1가지를 바로 줘요. 내 초대 링크로 가입해 봐요!`;
+  if(navigator.share && !/KAKAOTALK|NAVER|Instagram|FBAN|FBAV|Line\//i.test(navigator.userAgent)){
+    try { await navigator.share({title: C.name, text, url}); return; } catch(e){ if(e && e.name === "AbortError") return; }
+  }
+  if(await copy(text + "\n" + url)) toast("초대 링크를 복사했어요. 친구에게 카톡으로 붙여넣어 보내세요.");
+}
 function openJoin(){
   if(!M) return;
-  if(MEMBER) joinDone(); else { $("joinForm").hidden = false; $("joinDone").hidden = true; }
+  if(MEMBER) joinDone(); else { $("joinForm").hidden = false; $("joinDone").hidden = true; const rb = $("jRef"); if(rb && REF){ rb.hidden = false; rb.textContent = `친구 초대로 오셨네요! 추천인 코드 ${REF}가 함께 등록돼요.`; } }
   openModal("join");
 }
 if(M){
   document.addEventListener("click", e => {
     if(e.target.closest("[data-join]")){ e.preventDefault(); openJoin(); }
     if(e.target.closest("[data-later]")){ store.set("joinLater", Date.now()); closeModal($("join")); }
+    if(e.target.closest("[data-invite]")){ e.preventDefault(); invite(); }
   });
   $("jPhone").addEventListener("input", e => {
     const d = e.target.value.replace(/\D/g, "").slice(0, 11);
@@ -208,7 +237,7 @@ if(M){
     const abc = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     const code = "OK-" + Array.from({length: 6}, () => abc[Math.floor(Math.random() * abc.length)]).join("");
     MEMBER = {name, phone, area: $("jArea").value, free: (document.querySelector('input[name="jFree"]:checked') || {}).value || M.freeServices[0],
-              ad: $("jAgree").checked && $("jAd").checked, code, joined: new Date().toISOString().slice(0, 10)};
+              ad: $("jAgree").checked && $("jAd").checked, code, ref: REF && REF !== code ? REF : "", joined: new Date().toISOString().slice(0, 10)};
     store.set("member", MEMBER);
     joinDone(); calc();
   };
@@ -217,8 +246,12 @@ if(M){
   if(!MEMBER && Date.now() - later > 7 * 864e5 && !/src=app/.test(location.search)){
     let shown = false;
     const pop = () => { if(shown || document.querySelector(".modal:not([hidden])")) return; shown = true; store.set("joinLater", Date.now()); openJoin(); };
-    setTimeout(pop, 12000);
-    window.addEventListener("scroll", function onS(){ if(window.scrollY > document.body.scrollHeight * 0.35){ pop(); window.removeEventListener("scroll", onS); } }, {passive: true});
+    // 견적 계산기를 만지는 중에는 방해하지 않음
+    let busy = 0;
+    ["input", "change", "click", "focusin"].forEach(t => $("quote").addEventListener(t, () => busy = Date.now()));
+    const tryPop = () => { if(Date.now() - busy < 15000) return setTimeout(tryPop, 5000); pop(); };
+    setTimeout(tryPop, REF ? 4000 : 25000);   // 초대 링크로 온 사람에게는 빨리 보여줌
+    window.addEventListener("scroll", function onS(){ if(window.scrollY > document.body.scrollHeight * 0.45){ tryPop(); window.removeEventListener("scroll", onS); } }, {passive: true});
   }
   calc();
 }
