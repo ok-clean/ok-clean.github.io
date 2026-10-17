@@ -35,8 +35,8 @@ const REF = store.get("ref", "");
 const SV = C.services;
 const Q = store.get("quote", {}) || {};
 const urlSvc = new URLSearchParams(location.search).get("svc");
-let cur = { svc: urlSvc && SV.some(s => s.id === urlSvc) ? urlSvc : (Q.svc && SV.some(s => s.id === Q.svc) ? Q.svc : SV[0].id), v: 0, qty: null, opts: [] };
-if(cur.svc === Q.svc){ cur.v = Q.v || 0; cur.qty = Q.qty || null; cur.opts = Q.opts || []; }
+let cur = { svc: urlSvc && SV.some(s => s.id === urlSvc) ? urlSvc : (Q.svc && SV.some(s => s.id === Q.svc) ? Q.svc : SV[0].id), v: 0, t: null, qty: null, opts: [] };
+if(cur.svc === Q.svc){ cur.v = Q.v || 0; cur.t = Q.t ?? null; cur.qty = Q.qty || null; cur.opts = Q.opts || []; }
 const svc = () => SV.find(s => s.id === cur.svc);
 
 $("qSvc").innerHTML = C.categories.map(cat => `<optgroup label="${esc(cat.name)}">${SV.filter(s => s.cat === cat.id).map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("")}</optgroup>`).join("");
@@ -44,42 +44,71 @@ if(Q.area) $("qArea").value = Q.area;
 if(Q.date) $("qDate").value = Q.date;
 const today = new Date(); $("qDate").min = new Date(today.getTime() + 9*3600e3).toISOString().slice(0, 10);
 
+// 가격 방식: tiers(집 크기별 정액, 입주청소) / variants(종류 × 수량) / quote(현장 견적)
+// 금액에 hi 가 없으면 '~부터' 금액, quote:true 는 현장 견적 항목
+const priceText = (lo, hi) => hi == null ? `${won(lo)}원~` : lo === hi ? `${won(lo)}원` : `${won(lo)}~${won(hi)}원`;
+const optText = (o, s) => o.quote ? "현장 견적" : "+" + (o.hi == null ? won(o.lo) + "~" : `${won(o.lo)}~${won(o.hi)}`) + (o.perUnit ? "/" + s.unit : "");
+const isQuote = s => s.quote || (!(s.tiers || []).length && !(s.variants || []).length);
 function drawForm(){
   const s = svc();
   $("qSvc").value = s.id;
-  const quote = s.quote || !s.variants || !s.variants.length;
-  $("qVarF").hidden = quote || s.variants.length < 2;
-  $("qQtyF").hidden = quote;
+  const quote = isQuote(s), tiered = !!(s.tiers || []).length;
+  const vars = tiered ? s.kinds || [] : s.variants || [];
+  if(cur.v >= vars.length) cur.v = 0;
+  if(tiered && (cur.t == null || cur.t >= s.tiers.length)) cur.t = s.tierDefault ?? 0;
+  $("qVarF").hidden = quote || vars.length < 2;
+  $("qVar").innerHTML = vars.map((v, i) => `<button type="button" data-v="${i}" aria-pressed="${i === cur.v}">${esc(v.name)}</button>`).join("");
+  $("qTierF").hidden = !tiered;
+  if(tiered) $("qTier").innerHTML = s.tiers.map((t, i) => `<button type="button" data-t="${i}" aria-pressed="${i === cur.t}"><b>${esc(t.name)}</b><span>${esc(t.size || "")}${t.crew ? ` · ${t.crew}명` : ""}</span><em>${t.quote ? "현장 견적" : won(t.price) + "원" + (vars[cur.v] && vars[cur.v].open ? "~" : "")}</em></button>`).join("");
+  const v = vars[cur.v];
+  $("qQtyF").hidden = quote || tiered || !!(v && v.quote);
   $("qOptF").hidden = quote || !(s.options || []).length;
-  if(!quote){
-    if(cur.v >= s.variants.length) cur.v = 0;
-    $("qVar").innerHTML = s.variants.map((v, i) => `<button type="button" data-v="${i}" aria-pressed="${i === cur.v}">${esc(v.name)}</button>`).join("");
+  if(!quote && !tiered){
     if(!cur.qty) cur.qty = s.qtyDefault || 1;
     $("qQty").value = cur.qty;
     $("qQtyL").textContent = s.qtyLabel || "수량";
     $("qUnit").textContent = s.unit;
-    $("qOpt").innerHTML = (s.options || []).map((o, i) => `<label><input type="checkbox" data-o="${i}"${cur.opts.includes(i) ? " checked" : ""}><span>${esc(o.name)}</span><small>+${won(o.lo)}~${won(o.hi)}${o.perUnit ? "/" + esc(s.unit) : ""}</small></label>`).join("");
   }
+  if(!quote) $("qOpt").innerHTML = (s.options || []).map((o, i) => `<label><input type="checkbox" data-o="${i}"${cur.opts.includes(i) ? " checked" : ""}><span>${esc(o.name)}</span><small>${optText(o, s)}</small></label>`).join("");
   calc();
 }
 function estimate(){
   const s = svc();
-  if(s.quote || !s.variants || !s.variants.length) return null;
-  const v = s.variants[cur.v] || s.variants[0], q = Math.max(1, +cur.qty || 1);
-  let lo = v.lo * q, hi = v.hi * q;
-  cur.opts.forEach(i => { const o = (s.options || [])[i]; if(o){ lo += o.perUnit ? o.lo * q : o.lo; hi += o.perUnit ? o.hi * q : o.hi; } });
-  if(s.min){ lo = Math.max(lo, s.min); hi = Math.max(hi, s.min); }
-  return {lo, hi, v, q};
+  if(isQuote(s)) return null;
+  const tiered = !!(s.tiers || []).length;
+  const opts = cur.opts.map(i => (s.options || [])[i]).filter(Boolean);
+  let lo, hi, v, q = 1, t = null;
+  if(tiered){
+    v = (s.kinds || [])[cur.v] || {}; t = s.tiers[cur.t] || s.tiers[0];
+    if(t.quote) return null;
+    lo = t.price; hi = v.open ? null : t.price;
+  } else {
+    v = s.variants[cur.v] || s.variants[0];
+    if(v.quote) return null;
+    q = Math.max(1, +cur.qty || 1);
+    lo = v.lo * q; hi = v.hi == null ? null : v.hi * q;
+  }
+  opts.filter(o => !o.quote).forEach(o => {
+    const m = o.perUnit ? q : 1;
+    lo += o.lo * m; hi = (hi == null || o.hi == null) ? null : hi + o.hi * m;
+  });
+  if(s.min){ lo = Math.max(lo, s.min); if(hi != null) hi = Math.max(hi, s.min); }
+  return {lo, hi, v, q, t, onSite: opts.filter(o => o.quote).map(o => o.name)};
 }
 function summary(){
   const s = svc(), r = estimate();
   const lines = [`[${C.name} 견적 문의]`, `서비스: ${s.name}`];
+  const os = cur.opts.map(i => (s.options || [])[i]).filter(Boolean).map(o => o.name);
   if(r){
-    lines.push(`내용: ${s.variants.length > 1 ? r.v.name + " / " : ""}${r.q}${s.unit}`);
-    const os = cur.opts.map(i => (s.options || [])[i]).filter(Boolean).map(o => o.name);
+    lines.push(r.t ? `내용: ${r.v.name || ""} / ${r.t.name} (${r.t.size}, ${r.t.crew}명)` : `내용: ${s.variants.length > 1 ? r.v.name + " / " : ""}${r.q}${s.unit}`);
     if(os.length) lines.push(`추가: ${os.join(", ")}`);
-    lines.push(`예상 금액: ${won(r.lo)}~${won(r.hi)}원 (사이트 계산)`);
-  } else lines.push("현장 사진을 보내드릴게요.");
+    lines.push(`예상 금액: ${priceText(r.lo, r.hi)} (사이트 계산${r.onSite.length ? ", " + r.onSite.join("·") + " 별도" : ""})`);
+  } else {
+    const t = (s.tiers || [])[cur.t], v = ((s.tiers || []).length ? s.kinds : s.variants || [])[cur.v];
+    if(!isQuote(s)) lines.push(`내용: ${[v && v.name, t && t.name].filter(Boolean).join(" / ")}`);
+    if(os.length) lines.push(`추가: ${os.join(", ")}`);
+    lines.push("현장 사진을 보내드릴게요. 견적 부탁드려요.");
+  }
   if($("qArea").value) lines.push(`지역: ${$("qArea").value}`);
   if($("qDate").value) lines.push(`희망 날짜: ${$("qDate").value}`);
   if(MEMBER && M) lines.push(`회원 쿠폰: ${MEMBER.code} (${won(M.coupon)}원 할인 + 무료 서비스: ${MEMBER.free})`);
@@ -96,23 +125,26 @@ function weekendNote(){
 function calc(){
   const s = svc(), r = estimate();
   if(r){
-    $("qK").textContent = "예상 금액";
-    $("qV").innerHTML = `${won(r.lo)}~${won(r.hi)}<small>원</small>`;
-    $("qN").textContent = "오염 정도와 구조에 따라 현장에서 달라질 수 있어요." + (s.min && r.lo === s.min ? ` 최소 금액 ${won(s.min)}원이 적용됐어요.` : "") + weekendNote();
+    const p = priceText(r.lo, r.hi);
+    $("qK").textContent = r.t ? `예상 금액 · 작업 인원 ${r.t.crew}명` : "예상 금액";
+    $("qV").innerHTML = `${esc(p.replace(/원(~?)$/, ""))}<small>원${r.hi == null ? "~" : ""}</small>`;
+    const base = r.v && r.v.note ? r.v.note : s.priceNote || "오염 정도와 구조에 따라 현장에서 달라질 수 있어요.";
+    $("qN").textContent = base + (r.onSite.length ? ` ${r.onSite.join("·")}은 별도 현장 견적이에요.` : "") + (s.min && r.lo === s.min ? ` 최소 금액 ${won(s.min)}원${s.minNote ? "(" + s.minNote + ")" : ""}이 적용됐어요.` : "") + weekendNote();
   } else {
     $("qK").textContent = "현장 견적";
     $("qV").innerHTML = `사진 보고<small> 안내</small>`;
-    $("qN").textContent = "작업량 차이가 커서 현장 사진을 보고 금액을 알려드려요.";
+    $("qN").textContent = "작업량 차이가 커서 현장 사진을 보고 금액을 알려드려요." + weekendNote();
   }
   $("qKakao").textContent = r ? "이 견적으로 카톡 문의" : "카톡으로 사진 보내고 견적 받기";
   if(M){
     const box = $("qMem"); box.hidden = false;
-    if(MEMBER) box.innerHTML = r ? `🎟 회원 쿠폰 적용 시 <b>${won(Math.max(0, r.lo - M.coupon))}~${won(Math.max(0, r.hi - M.coupon))}원</b> + ${esc(MEMBER.free)} 무료` : `🎟 회원 쿠폰 ${won(M.coupon)}원 할인 + ${esc(MEMBER.free)} 무료가 적용돼요`;
+    if(MEMBER) box.innerHTML = r ? `🎟 회원 쿠폰 적용 시 <b>${priceText(Math.max(0, r.lo - M.coupon), r.hi == null ? null : Math.max(0, r.hi - M.coupon))}</b> + ${esc(MEMBER.free)} 무료` : `🎟 회원 쿠폰 ${won(M.coupon)}원 할인 + ${esc(MEMBER.free)} 무료가 적용돼요`;
     else box.innerHTML = `<button type="button" class="mem-join" data-join>🎟 회원가입하면 여기서 <b>${won(M.coupon)}원 더 할인</b> + 무료 서비스 →</button>`;
   }
-  store.set("quote", {svc: cur.svc, v: cur.v, qty: cur.qty, opts: cur.opts, area: $("qArea").value, date: $("qDate").value});
+  store.set("quote", {svc: cur.svc, v: cur.v, t: cur.t, qty: cur.qty, opts: cur.opts, area: $("qArea").value, date: $("qDate").value});
 }
-$("qSvc").addEventListener("change", e => { cur = {svc: e.target.value, v: 0, qty: null, opts: []}; drawForm(); });
+$("qSvc").addEventListener("change", e => { cur = {svc: e.target.value, v: 0, t: null, qty: null, opts: []}; drawForm(); });
+$("qTier").addEventListener("click", e => { const b = e.target.closest("[data-t]"); if(!b) return; cur.t = +b.dataset.t; drawForm(); });
 $("qVar").addEventListener("click", e => { const b = e.target.closest("[data-v]"); if(!b) return; cur.v = +b.dataset.v; drawForm(); });
 $("qQty").addEventListener("input", e => { cur.qty = Math.min(999, Math.max(1, parseInt(e.target.value, 10) || 1)); calc(); });
 $("qMinus").onclick = () => { cur.qty = Math.max(1, (+cur.qty || 1) - 1); $("qQty").value = cur.qty; calc(); };

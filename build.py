@@ -30,14 +30,46 @@ def won(x):
     return f"{x:,}"
 
 
+def amount(lo, hi=None, per=""):
+    """금액 문구: hi 가 없으면 '~부터' 금액"""
+    if hi is None:
+        return f"{per}{won(lo)}원~"
+    return f"{per}{won(lo)}원" if lo == hi else f"{per}{won(lo)}~{won(hi)}원"
+
+
 def price_from(s):
     """서비스 목록에 보여줄 '최저 기준 금액' 문구"""
-    if s.get("quote") or not s.get("variants"):
+    tiers = [t for t in s.get("tiers", []) if not t.get("quote")]
+    if tiers:
+        t = min(tiers, key=lambda x: x["price"])
+        return f"{t['name']} {won(t['price'])}원~", "집 크기별 정액"
+    vs = [v for v in s.get("variants", []) if not v.get("quote")]
+    if s.get("quote") or not vs:
         return "현장 견적", "사진 확인 후 안내"
-    lo = min(v["lo"] for v in s["variants"])
+    lo = min(v["lo"] for v in vs)
     if s["unit"] == "평":
         return f"평당 {won(lo)}원~", (f"최소 {won(s['min'])}원" if s.get("min") else "")
     return f"{s['unit']}당 {won(lo)}원~", ""
+
+
+def price_rows(s):
+    """서비스 상세 페이지의 가격표"""
+    rows = ""
+    if s.get("tiers"):
+        kinds = s.get("kinds", [])
+        rows += "".join(f"<tr><td>{e(t['name'])}<small>{e(t.get('size', ''))}{' · 작업 인원 ' + str(t['crew']) + '명' if t.get('crew') else ''}</small></td>"
+                        f"<td>{'현장 견적' if t.get('quote') else won(t['price']) + '원'}</td></tr>" for t in s["tiers"])
+        rows += "".join(f"<tr><td colspan=\"2\" class=\"kn\"><b>{e(k['name'])}</b> · {e(k.get('note', ''))}</td></tr>" for k in kinds if k.get("note"))
+    else:
+        for v in s.get("variants", []):
+            val = "현장 견적" if v.get("quote") else amount(v["lo"], v.get("hi"), f"{s['unit']}당 ")
+            rows += f"<tr><td>{e(v['name'])}</td><td>{val}</td></tr>"
+    for o in s.get("options", []):
+        val = "현장 견적" if o.get("quote") else amount(o["lo"], o.get("hi")) + (f" ({s['unit']}당)" if o.get("perUnit") else "")
+        rows += f"<tr><td>+ {e(o['name'])}</td><td>{val}</td></tr>"
+    if s.get("min"):
+        rows += f"<tr><td>최소 금액{('<small>' + e(s['minNote']) + '</small>') if s.get('minNote') else ''}</td><td>{won(s['min'])}원</td></tr>"
+    return rows
 
 
 def blog_list(c):
@@ -265,6 +297,7 @@ def index_page(c, cases=()):
     <h2>예상 견적 계산</h2>
     <div class="field"><label for="qSvc">어떤 청소가 필요하세요?</label><select id="qSvc"></select></div>
     <div class="field" id="qVarF"><span class="lab">종류</span><div class="seg" id="qVar" role="group" aria-label="종류"></div></div>
+    <div class="field" id="qTierF" hidden><span class="lab">집 크기</span><div class="tiers-pick" id="qTier" role="group" aria-label="집 크기"></div></div>
     <div class="field" id="qQtyF"><label for="qQty" id="qQtyL">평수</label>
       <div class="qty"><button type="button" id="qMinus" aria-label="줄이기">−</button><input id="qQty" type="number" inputmode="numeric" min="1" max="999"><span class="u" id="qUnit">평</span><button type="button" id="qPlus" aria-label="늘리기">+</button></div></div>
     <div class="price" id="qPrice" aria-live="polite"><div class="k" id="qK">예상 금액</div><div class="v" id="qV">-</div><div class="n" id="qN"></div><div class="mem" id="qMem" hidden></div></div>
@@ -340,12 +373,7 @@ def service_page(c, s, cases=()):
     rg = "·".join(regions[:3])
     title = f"{rg} {s['name']} | {c['name']}" if rg else f"{s['name']} | {c['name']}"
     desc = f"{s['summary']}. 작업 범위: {', '.join(s['includes'])}. {a}"
-    rows = ""
-    if not s.get("quote"):
-        rows = "".join(f"<tr><td>{e(v['name'])}</td><td>{s['unit']}당 {won(v['lo'])}~{won(v['hi'])}원</td></tr>" for v in s["variants"])
-        rows += "".join(f"<tr><td>+ {e(o['name'])}</td><td>{won(o['lo'])}~{won(o['hi'])}원{' (' + s['unit'] + '당)' if o.get('perUnit') else ''}</td></tr>" for o in s.get("options", []))
-        if s.get("min"):
-            rows += f"<tr><td>최소 금액</td><td>{won(s['min'])}원</td></tr>"
+    rows = "" if s.get("quote") else price_rows(s)
     same = [x for x in c["services"] if x["cat"] == s["cat"] and x["id"] != s["id"]]
     rooms = "".join(f'<div class="room"><b>{e(r["name"])}</b><ul>{"".join(f"<li>{e(i)}</li>" for i in r["items"])}</ul></div>' for r in s.get("rooms", []))
     excl = "".join(f"<li>{e(x)}</li>" for x in s.get("excludes", []))
@@ -355,8 +383,9 @@ def service_page(c, s, cases=()):
     ld = {"@context": "https://schema.org", "@type": "Service", "name": s["name"], "description": s["summary"], "serviceType": s["name"],
           "areaServed": regions, "url": f"{base}/services/{s['id']}.html",
           "provider": {"@type": "HomeAndConstructionBusiness", "name": c["name"], "telephone": c.get("phone", ""), "url": base + "/"}}
-    if not s.get("quote") and s.get("variants"):
-        ld["offers"] = {"@type": "AggregateOffer", "priceCurrency": "KRW", "lowPrice": min(v["lo"] for v in s["variants"]), "highPrice": max(v["hi"] for v in s["variants"])}
+    prices = [t["price"] for t in s.get("tiers", []) if not t.get("quote")] or [v["lo"] for v in s.get("variants", []) if not v.get("quote")]
+    if not s.get("quote") and prices:
+        ld["offers"] = {"@type": "AggregateOffer", "priceCurrency": "KRW", "lowPrice": min(prices)}
     return head(c, title, desc, f"services/{s['id']}.html", 1, [ld]) + f"""
 <main class="wrap page">
 <div class="crumb"><a href="../index.html">홈</a> › <a href="../index.html#services">서비스</a></div>
@@ -364,7 +393,7 @@ def service_page(c, s, cases=()):
 <p class="lead" style="color:var(--muted);font-size:17px;margin:0">{e(s['summary'])}</p>
 <div class="box"><h2>작업 범위</h2><ul>{''.join(f'<li>{e(i)}</li>' for i in s['includes'])}</ul>{f'<div class="rooms">{rooms}</div>' if rooms else ''}</div>
 {f'<div class="box"><h2>기본 범위에 없는 것</h2><p class="d-s">아래는 기본 금액에 들어가지 않아요. 필요하시면 상담 때 말씀해 주세요. 추가 비용은 작업 전에 먼저 안내해 드려요.</p><ul class="excl">{excl}</ul></div>' if excl else ''}
-<div class="box"><h2>가격 기준</h2>{f'<table class="ptable">{rows}</table><p style="font-size:13.5px;color:var(--muted);margin:10px 0 0">오염 정도와 구조에 따라 현장에서 달라질 수 있어요.</p>' if rows else '<p style="margin:0">현장 상태에 따라 작업량 차이가 커서, 사진을 보고 견적을 안내해 드려요.</p>'}</div>
+<div class="box"><h2>가격 기준</h2>{f'<table class="ptable">{rows}</table><p style="font-size:13.5px;color:var(--muted);margin:10px 0 0">{e(s.get("priceNote") or "오염 정도와 구조에 따라 현장에서 달라질 수 있어요.")} 최종 금액은 사진을 보고 확정해요.</p>' if rows else '<p style="margin:0">현장 상태에 따라 작업량 차이가 커서, 사진을 보고 견적을 안내해 드려요.</p>'}</div>
 <div class="cta2"><a class="btn glove" href="../index.html?svc={e(s['id'])}#quote">{'내 견적 계산하기' if not s.get('quote') else '사진 보내고 견적 받기'}</a>{f'<a class="btn line" href="{e(kakao)}" target="_blank" rel="noopener">카톡으로 바로 문의</a>' if kakao else ''}</div>
 {f'<div class="box"><h2>최근 {e(s["name"])} 사례</h2><div class="cases">{"".join(case_card(x) for x in mine)}</div></div>' if mine else ''}
 {f'<div class="box"><h2>서비스 지역</h2><div class="links">' + ''.join(f'<a href="../{area_file(r)}">{e(r)} {e(s["name"])}</a>' for r in regions) + '</div></div>' if regions else ''}
