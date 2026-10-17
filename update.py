@@ -3,6 +3,7 @@
 - config.json 의 blog 에 적은 네이버 블로그(여러 개 가능)를 모두 읽어 최근 글부터 정렬
 - 블로그 RSS 는 최근 글만 주므로, 한 번 모은 사례는 계속 쌓아 둠
 - 제목·카테고리에 서비스 키워드(입주청소, 에어컨청소 등)가 있는 글만 시공 사례로 모음
+- 교육·창업 홍보 글(excludeWords)은 시공 사례에서 뺌
 - 실패해도 기존 cases.json 을 그대로 둠
 """
 import html
@@ -61,6 +62,12 @@ def region_of(c, title, cat, desc):
     return ""
 
 
+def is_edu(c, title, cat):
+    """교육·창업 홍보 글은 시공 사례에서 뺌 (config.json 의 excludeWords)"""
+    text = norm(title + " " + cat)
+    return any(norm(w) in text for w in c.get("excludeWords", []))
+
+
 def blogs_of(c):
     b = c.get("blog") or []
     if isinstance(b, str):
@@ -77,7 +84,7 @@ def read_blog(c, blog_id):
         cat = html.unescape(it.findtext("category") or "")
         desc = it.findtext("description") or ""
         svc = classify(c, title, cat, desc)
-        if not (title and link and svc):
+        if not (title and link and svc) or is_edu(c, title, cat):
             continue
         try:
             date = parsedate_to_datetime(it.findtext("pubDate")).astimezone(KST).strftime("%Y-%m-%d %H:%M")
@@ -94,7 +101,7 @@ def main():
     if blogs:
         old = json.loads(OUT.read_text("utf-8")).get("cases", []) if OUT.exists() else []
         # 블로그 RSS 는 최근 글만 주므로, 예전에 모은 사례는 지우지 않고 계속 쌓아 둠
-        box = {x["link"]: x for x in old if x.get("link")}
+        box = {x["link"]: x for x in old if x.get("link") and not is_edu(c, x.get("title", ""), "")}
         ok = 0
         for b in blogs:
             try:

@@ -66,6 +66,8 @@ def head(c, title, desc, path, depth=0):
 <meta name="theme-color" content="#0B3FA6">
 <link rel="icon" href="{up}icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="{up}apple-touch-icon.png">
+<link rel="manifest" href="{up}manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="{e(c["name"])}">
 <meta property="og:image" content="{e(c.get("siteUrl","").rstrip("/") + "/og.jpg")}"><meta property="og:site_name" content="{e(c["name"])}">
 {FONT}
 <link rel="stylesheet" href="{up}style.css">
@@ -74,7 +76,11 @@ def head(c, title, desc, path, depth=0):
 <div class="wrap"><header class="top">
 <a class="brand" href="{up}index.html"><img src="{up}icon-192.png" alt="" width="38" height="38" class="logo"><b>{e(c["name"])}</b></a>
 <nav aria-label="주요 메뉴"><a href="{up}index.html#quote">견적 계산</a><a href="{up}index.html#services">서비스</a><a href="{up}index.html#cases">시공 사례</a><a href="{up}index.html#faq">자주 묻는 질문</a></nav>
+<div class="tools">
+<button class="tool" type="button" data-share aria-label="공유하기"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>공유</span></button>
+<button class="tool app" type="button" data-install hidden><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7v7M9 11l3 3 3-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>앱 설치</span></button>
 {f'<a class="call" href="{tel(c)}">{e(c["phone"])}</a>' if c.get("phone") else ''}
+</div>
 </header></div>"""
 
 
@@ -89,7 +95,11 @@ def foot(c, depth=0):
     kakao = c.get("kakao", "")
     dock_main = (f'<a class="btn glove" href="{e(kakao)}" target="_blank" rel="noopener">카톡으로 상담하기</a>' if kakao
                  else f'<a class="btn glove" href="{up}index.html#quote">견적 계산하기</a>')
-    return f"""<footer><div class="wrap">
+    rc = c.get("recruit") or {}
+    recruit = (f'<section class="recruit"><div class="wrap"><div><b>{e(rc.get("title", ""))}</b><p>{e(rc.get("text", ""))}</p></div>'
+               f'<a class="btn line" href="{e(kakao)}" target="_blank" rel="noopener">{e(rc.get("button", "카톡으로 문의"))}</a></div></section>') if rc and kakao else ""
+    return recruit + f"""<footer><div class="wrap">
+<div class="foot-tools"><button class="btn line small" type="button" data-share>🔗 이 사이트 공유하기</button><button class="btn line small" type="button" data-install hidden>📲 휴대폰에 앱으로 설치</button></div>
 <nav aria-label="지역">{areas}</nav>
 <div class="biz"><b>{e(c['name'])}</b>{(' · ' + e(c['hours'])) if c.get('hours') else ''}<br>{biz}</div>
 <nav><a href="{up}privacy.html">개인정보처리방침</a>{''.join(f'<a href="https://blog.naver.com/{e(x)}" target="_blank" rel="noopener">블로그{i + 1 if len(blog_list(c)) > 1 else ""}</a>' for i, x in enumerate(blog_list(c)))}</nav>
@@ -97,7 +107,10 @@ def foot(c, depth=0):
 </div></footer>
 <div class="dock"><div class="in">
 <a class="btn line" href="{tel(c)}">전화하기</a>{dock_main}
-</div></div>"""
+</div></div>
+<div class="modal" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetT" hidden><div class="modal-box"><button class="x" type="button" data-close aria-label="닫기">×</button><h2 id="sheetT"></h2><div id="sheetB"></div></div></div>
+<script>window.SITE={{name:{json.dumps(c["name"], ensure_ascii=False)},url:{json.dumps(c.get("siteUrl", ""))},tagline:{json.dumps(c.get("tagline", ""), ensure_ascii=False)},root:{json.dumps(up)}}};</script>
+<script src="{up}site.js"></script>"""
 
 
 def services_html(c, depth=0):
@@ -118,6 +131,65 @@ def faq_html(c):
     return "".join(f'<details><summary>{e(f["q"])}</summary><p>{e(f["a"])}</p></details>' for f in c.get("faq", []))
 
 
+def won_text(x):
+    return f"{won(x)}원"
+
+
+def member_badge(c):
+    m = c.get("member")
+    if not m:
+        return ""
+    return (f'<button class="member-badge" type="button" data-join><b>회원가입하면 {won_text(m["coupon"])} 할인</b>'
+            f'<span>+ 무료 서비스 1가지 · 30초 가입</span></button>')
+
+
+def member_section(c):
+    m = c.get("member")
+    if not m:
+        return ""
+    frees = "".join(f"<li>{e(x)}</li>" for x in m.get("freeServices", []))
+    grades = "".join(f'<tr><td><b>{e(g["name"])}</b></td><td>{e(g["rule"])}</td><td>{e(g["perk"])}</td></tr>' for g in m.get("grades", []))
+    return f"""<section class="s" id="member"><div class="wrap">
+  <h2>회원 혜택</h2>
+  <p class="d">가입하는 순간 쓸 수 있는 쿠폰부터, 이용할수록 쌓이는 포인트까지 준비했어요.</p>
+  <div class="perks">
+    <div class="perk"><span class="pk">가입 즉시</span><b>{won_text(m["coupon"])} 할인 쿠폰</b><p>{e(m.get("couponTerms", ""))}</p></div>
+    <div class="perk"><span class="pk">가입 즉시</span><b>무료 서비스 1가지</b><ul>{frees}</ul></div>
+    <div class="perk"><span class="pk">후기 선물</span><b>{e(m.get("reviewGift", ""))}</b><p>{e(m.get("reviewTerms", ""))}</p></div>
+  </div>
+  <h3 class="sub">등급과 포인트</h3>
+  <div class="tbl-wrap"><table class="grade"><thead><tr><th>등급</th><th>조건</th><th>혜택</th></tr></thead><tbody>{grades}</tbody></table></div>
+  <p class="note">{e(m.get("pointTerms", ""))}</p>
+  <button class="btn glove" type="button" data-join>회원가입하고 쿠폰 받기</button>
+</div></section>"""
+
+
+def join_modal(c):
+    m = c.get("member")
+    if not m:
+        return ""
+    frees = "".join(f'<label class="radio"><input type="radio" name="jFree" value="{e(x)}"{" checked" if i == 0 else ""}><span>{e(x)}</span></label>'
+                    for i, x in enumerate(m.get("freeServices", [])))
+    regions = "".join(f"<option>{e(r)}</option>" for r in c.get("regions", []))
+    return f"""<div class="modal" id="join" role="dialog" aria-modal="true" aria-labelledby="joinT" hidden><div class="modal-box">
+<button class="x" type="button" data-close aria-label="닫기">×</button>
+<div id="joinForm">
+  <p class="eyebrow-less">{e(c["name"])} 회원가입</p>
+  <h2 id="joinT">지금 가입하면 <em>{won_text(m["coupon"])} 할인</em> + 무료 서비스</h2>
+  <div class="field"><label for="jName">이름</label><input id="jName" type="text" autocomplete="name" maxlength="20" placeholder="홍길동"></div>
+  <div class="field"><label for="jPhone">연락처</label><input id="jPhone" type="tel" inputmode="tel" autocomplete="tel" maxlength="13" placeholder="010-0000-0000"></div>
+  <div class="field"><label for="jArea">지역</label><select id="jArea"><option value="">선택</option>{regions}<option>그 외 지역</option></select></div>
+  <div class="field"><span class="lab">무료로 받을 서비스 1가지</span>{frees}</div>
+  <label class="agree"><input type="checkbox" id="jAgree"><span><b>(필수)</b> 개인정보 수집·이용 동의 · 이름·연락처·지역을 회원 관리, 쿠폰 지급, 예약 상담에만 쓰고 탈퇴 요청 시 지체 없이 파기해요. <a href="privacy.html" target="_blank">자세히</a></span></label>
+  <label class="agree"><input type="checkbox" id="jAd"><span>(선택) 할인·이벤트 소식 받기</span></label>
+  <p class="err" id="jErr" role="alert"></p>
+  <button class="btn glove" type="button" id="jSubmit">가입하고 쿠폰 받기</button>
+  <button class="link" type="button" data-later>다음에 할게요</button>
+</div>
+<div id="joinDone" hidden></div>
+</div></div>"""
+
+
 def index_page(c):
     regions = c.get("regions", [])
     rg = "·".join(regions[:2]) if regions else ""
@@ -129,8 +201,9 @@ def index_page(c):
 <section class="hero"><div class="wrap hero-in">
   <div>
     <h1>{e(rg + ' 청소, ' if rg else '')}평수만 넣으면 바로 견적이 나와요</h1>
-    <p class="lead">{e(c.get('tagline', ''))}. 계산한 견적 그대로 카톡이나 문자로 문의하면 돼요.</p>
+    <p class="lead">{e(c.get('tagline', ''))}. 계산한 견적 그대로 카톡으로 문의하면 돼요.</p>
     <div class="areas">{''.join(f'<span>{e(r)}</span>' for r in regions)}</div>
+    {member_badge(c)}
     <img class="hero-logo" src="logo.png" alt="{e(c['name'])} 로고" width="240" height="240">
   </div>
   <div class="calc" id="quote">
@@ -139,7 +212,7 @@ def index_page(c):
     <div class="field" id="qVarF"><span class="lab">종류</span><div class="seg" id="qVar" role="group" aria-label="종류"></div></div>
     <div class="field" id="qQtyF"><label for="qQty" id="qQtyL">평수</label>
       <div class="qty"><button type="button" id="qMinus" aria-label="줄이기">−</button><input id="qQty" type="number" inputmode="numeric" min="1" max="999"><span class="u" id="qUnit">평</span><button type="button" id="qPlus" aria-label="늘리기">+</button></div></div>
-    <div class="price" id="qPrice" aria-live="polite"><div class="k" id="qK">예상 금액</div><div class="v" id="qV">-</div><div class="n" id="qN"></div></div>
+    <div class="price" id="qPrice" aria-live="polite"><div class="k" id="qK">예상 금액</div><div class="v" id="qV">-</div><div class="n" id="qN"></div><div class="mem" id="qMem" hidden></div></div>
     <div class="field" id="qOptF"><span class="lab">추가 옵션</span><div class="opts" id="qOpt"></div></div>
     <div class="two">
       <div class="field"><label for="qArea">지역</label><select id="qArea"><option value="">선택</option>{''.join(f'<option>{e(r)}</option>' for r in regions)}<option>그 외 지역</option></select></div>
@@ -147,7 +220,7 @@ def index_page(c):
     </div>
     <div class="ask">
       <button class="btn glove" id="qKakao" type="button">이 견적으로 카톡 문의</button>
-      <div class="row2"><a class="btn line small" id="qSms" href="#">문자로 보내기</a><button class="btn line small" id="qCopy" type="button">내용 복사</button></div>
+      <button class="btn line small" id="qCopy" type="button">문의 내용 복사</button>
     </div>
   </div>
 </div></section>
@@ -155,8 +228,11 @@ def index_page(c):
 <section class="s" id="services"><div class="wrap">
   <h2>하는 일</h2>
   <p class="d">주거부터 상가, 준공 현장, 가전 분해세척까지 맡아요. 항목을 누르면 작업 범위와 가격 기준을 볼 수 있어요.</p>
+  {f'<p class="note">{e(c["priceNote"])}</p>' if c.get("priceNote") else ''}
   {services_html(c)}
 </div></section>
+
+{member_section(c)}
 
 <section class="s" id="cases"><div class="wrap">
   <h2>시공 사례</h2>
@@ -175,7 +251,7 @@ def index_page(c):
   <h2>진행 순서</h2>
   <p class="d">문의부터 마무리까지 네 단계예요.</p>
   <ol class="steps">
-    <li><b>견적 계산·문의</b><span>위 계산기로 예상 금액을 보고 카톡이나 문자로 보내주세요.</span></li>
+    <li><b>견적 계산·문의</b><span>위 계산기로 예상 금액을 보고 카톡으로 보내주세요.</span></li>
     <li><b>사진 확인·일정 확정</b><span>현장 사진을 보고 최종 금액과 날짜를 정해요.</span></li>
     <li><b>방문 작업</b><span>약속한 날 방문해 작업 범위대로 진행해요.</span></li>
     <li><b>함께 확인</b><span>작업이 끝나면 함께 둘러보고, 아쉬운 곳은 바로 말씀해 주세요.</span></li>
@@ -189,6 +265,7 @@ def index_page(c):
 </main>
 {foot(c)}
 <script id="cfg" type="application/json">{cfg}</script>
+{join_modal(c)}
 <script src="app.js"></script>
 </body></html>
 """
@@ -272,10 +349,19 @@ def privacy_page(c):
 <main class="wrap page">
 <h1>개인정보처리방침</h1>
 <div class="box">
-<p>{e(who)}(이하 '업체')는 이 사이트에서 회원가입이나 입력 양식을 통해 개인정보를 수집하지 않아요.</p>
-<p>견적 계산기에 입력한 내용은 이용자의 기기(브라우저)에만 저장되고 업체 서버로 전송되지 않아요. 이용자가 직접 카카오톡·문자·전화로 보낸 문의 내용은 상담과 작업 진행에만 쓰고, 상담이 끝나면 지체 없이 파기해요.</p>
-<p>사이트 이용 통계를 위해 방문 기록(접속 기기, 방문 페이지 등)이 익명으로 수집될 수 있어요.</p>
-<p>문의: {e(c.get('phone', ''))} {e(b.get('email', ''))}</p>
+<h2>1. 수집하는 항목과 목적</h2>
+<p>{e(who)}(이하 '업체')는 회원가입 시 <b>이름, 연락처, 지역, 선택한 무료 서비스, 이벤트 수신 동의 여부</b>를 받아요. 회원 관리, 쿠폰·포인트 지급, 예약 상담과 작업 진행에만 써요.</p>
+<h2>2. 수집 방법</h2>
+<p>사이트에 입력한 가입 정보는 이용자의 기기(브라우저)에만 저장되고, 이용자가 카카오톡으로 직접 보낸 경우에만 업체가 받아요. 견적 계산기에 입력한 내용도 기기에만 저장돼요.</p>
+<h2>3. 보관 기간과 파기</h2>
+<p>회원 정보는 탈퇴 요청 시 또는 마지막 이용 후 2년이 지나면 지체 없이 파기해요. 법령에 따라 보관해야 하는 거래 기록은 정해진 기간 동안 보관해요.</p>
+<h2>4. 제3자 제공</h2>
+<p>이용자의 동의 없이 개인정보를 외부에 제공하지 않아요.</p>
+<h2>5. 이용자의 권리</h2>
+<p>언제든지 개인정보 열람·수정·삭제와 이벤트 수신 거부를 요청할 수 있어요. 아래 연락처로 말씀해 주세요.</p>
+<h2>6. 문의</h2>
+<p>{e(who)} · 대표 {e(b.get('owner', ''))} · {e(c.get('phone', ''))} {e(b.get('email', ''))}</p>
+<p style="color:var(--muted);font-size:14px">사이트 이용 통계를 위해 방문 기록(접속 기기, 방문 페이지 등)이 익명으로 수집될 수 있어요.</p>
 </div>
 </main>
 {foot(c)}
@@ -306,6 +392,11 @@ def run():
         files[f"services/{s['id']}.html"] = service_page(c, s)
     for r in c.get("regions", []):
         files[f"area/{r}.html"] = area_page(c, r, cases)
+    files["manifest.webmanifest"] = json.dumps({
+        "name": c["name"], "short_name": c["name"], "description": c.get("tagline", ""), "lang": "ko",
+        "start_url": "./?src=app", "scope": "./", "display": "standalone", "background_color": "#F4F7FC", "theme_color": "#0B3FA6",
+        "icons": [{"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
+                  {"src": "logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}]}, ensure_ascii=False, indent=1)
     base = c.get("siteUrl", "").rstrip("/") + "/"
     today = datetime.now(KST).strftime("%Y-%m-%d")
     urls = [""] + [f"services/{s['id']}.html" for s in c["services"]] + [area_file(r) for r in c.get("regions", [])]
