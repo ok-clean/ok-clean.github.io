@@ -511,7 +511,7 @@ def run():
         files[f"area/{r}.html"] = area_page(c, r, cases)
     files["manifest.webmanifest"] = json.dumps({
         "name": c["name"], "short_name": c["name"], "description": c.get("tagline", ""), "lang": "ko",
-        "start_url": "./?src=app", "scope": "./", "display": "standalone", "background_color": "#F4F7FC", "theme_color": "#0B3FA6",
+        "id": "./", "start_url": "./?src=app", "scope": "./", "display": "standalone", "background_color": "#F4F7FC", "theme_color": "#0B3FA6",
         "icons": [{"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
                   {"src": "logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}]}, ensure_ascii=False, indent=1)
     base = c.get("siteUrl", "").rstrip("/") + "/"

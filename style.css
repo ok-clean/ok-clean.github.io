@@ -9,6 +9,7 @@
          --water:#86A8FF; --water-soft:#18295A; --glove:#FFC933; --glove-ink:#2A2000; --warn:#FF8A6E; }
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--tile);color:var(--ink);font-family:"Pretendard Variable",Pretendard,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
   font-size:16px;line-height:1.6;word-break:keep-all;padding-bottom:76px}
