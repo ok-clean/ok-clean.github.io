@@ -3,6 +3,7 @@
  "short_name": "오케이청소",
  "description": "깨끗한 공간, 더 좋은 일상",
  "lang": "ko",
+ "id": "./",
  "start_url": "./?src=app",
  "scope": "./",
  "display": "standalone",
