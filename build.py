@@ -308,7 +308,8 @@ def index_page(c, cases=()):
     </div>
     <div class="ask">
       <button class="btn glove" id="qKakao" type="button">이 견적으로 카톡 문의</button>
-      <button class="btn line small" id="qCopy" type="button">문의 내용 복사</button>
+      {'<button class="btn line" id="qSms" type="button">문자로 견적 보내기</button>' if c.get("sms") else ''}
+      <button class="link" id="qCopy" type="button">문의 내용만 복사하기</button>
     </div>
   </div>
 </div></section>

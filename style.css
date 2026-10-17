@@ -65,6 +65,7 @@ select,input[type=number],input[type=date],input[type=text],input[type=tel]{widt
 .price .v small{font-size:.5em;font-weight:700}
 .price .n{font-size:13px;color:var(--muted);margin-top:4px}
 .ask{display:grid;grid-template-columns:1fr;gap:8px;margin-top:14px}
+.ask .link{justify-self:center;margin-top:2px}
 .btn{appearance:none;display:flex;align-items:center;justify-content:center;gap:8px;font:inherit;font-weight:800;font-size:16px;border-radius:14px;padding:14px 16px;border:0;cursor:pointer;text-decoration:none}
 .btn.glove{background:var(--glove);color:var(--glove-ink)}
 .btn.line{background:var(--paper);color:var(--ink);border:1px solid var(--line)}

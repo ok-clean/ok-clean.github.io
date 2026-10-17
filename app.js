@@ -152,6 +152,19 @@ $("qPlus").onclick = () => { cur.qty = Math.min(999, (+cur.qty || 0) + 1); $("qQ
 $("qOpt").addEventListener("change", e => { const i = +e.target.dataset.o; cur.opts = e.target.checked ? [...new Set([...cur.opts, i])] : cur.opts.filter(x => x !== i); calc(); });
 $("qArea").addEventListener("change", calc);
 $("qDate").addEventListener("change", calc);
+window.goSms = u => { location.href = u; };
+// 문자로 견적 보내기: 견적 내용이 미리 적힌 문자 창을 엶 (아이폰은 &body=, 안드로이드는 ?body=)
+if($("qSms")) $("qSms").onclick = async () => {
+  const num = (C.sms || "").replace(/[^0-9]/g, ""), body = encodeURIComponent(summary());
+  const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const MOBILE = IOS || /Android/i.test(navigator.userAgent);
+  if(!MOBILE){   // PC에서는 문자 앱이 없어서 번호와 내용을 안내
+    await copy(summary());
+    toast(`문의 내용을 복사했어요. 휴대폰에서 ${C.sms} 로 문자 보내주세요.`);
+    return;
+  }
+  window.goSms(`sms:${num}${IOS ? "&" : "?"}body=${body}`);
+};
 $("qCopy").onclick = async () => { if(await copy(summary())) toast("문의 내용을 복사했어요. 원하는 곳에 붙여넣어 주세요."); };
 $("qKakao").onclick = async () => {
   if(C.kakao) return kakaoSend("카톡으로 견적 문의", summary());
