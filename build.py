@@ -177,7 +177,7 @@ def foot(c, depth=0):
 <a class="btn line" href="{tel(c)}">전화하기</a>{dock_main}
 </div></div>
 <div class="modal" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetT" hidden><div class="modal-box"><button class="x" type="button" data-close aria-label="닫기">×</button><h2 id="sheetT"></h2><div id="sheetB"></div></div></div>
-<script>window.SITE={{name:{json.dumps(c["name"], ensure_ascii=False)},url:{json.dumps(c.get("siteUrl", ""))},tagline:{json.dumps(c.get("tagline", ""), ensure_ascii=False)},root:{json.dumps(up)}}};</script>
+<script>window.SITE={{name:{json.dumps(c["name"], ensure_ascii=False)},url:{json.dumps(c.get("siteUrl", ""))},kakao:{json.dumps(c.get("kakao", ""))},tagline:{json.dumps(c.get("tagline", ""), ensure_ascii=False)},root:{json.dumps(up)}}};</script>
 <script src="{up}site.js"></script>"""
 
 

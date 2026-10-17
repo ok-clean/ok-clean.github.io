@@ -174,7 +174,8 @@ footer a{color:var(--muted)}
 .top .tools{display:flex;align-items:center;gap:8px}
 .tool{appearance:none;display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);background:var(--paper);color:var(--ink);border-radius:999px;padding:7px 11px;font:inherit;font-size:13.5px;font-weight:700;cursor:pointer}
 .tool.app{color:var(--water);border-color:var(--water)}
-@media (max-width:520px){ .tool span{display:none} .tool{padding:8px} .top .call{display:none} }
+@media (max-width:520px){ .tool{padding:7px 10px;font-size:13px;gap:4px} .tool svg{width:15px;height:15px} .top .tools{gap:6px} .top .call{display:none} }
+@media (max-width:350px){ .tool svg{display:none} .brand b{font-size:17px} }
 
 /* ── 회원 혜택 ── */
 .member-badge{appearance:none;display:block;text-align:left;margin-top:16px;border:0;border-radius:16px;padding:12px 16px;background:var(--glove);color:var(--glove-ink);cursor:pointer;font:inherit;box-shadow:0 2px 0 rgba(0,0,0,.08)}
@@ -274,6 +275,11 @@ body.modal-open{overflow:hidden}
 .cta2 .btn{flex:1 1 180px}
 .ref-b{background:var(--water-soft);color:var(--water);font-weight:700;font-size:14px;border-radius:10px;padding:8px 12px;margin:0 0 10px}
 .perk .btn{margin-top:12px}
+/* 카톡 보내기 안내 */
+.send-pre{white-space:pre-wrap;background:var(--tile);border:1px dashed var(--line);border-radius:12px;padding:12px 14px;font:inherit;font-size:13.5px;line-height:1.55;max-height:30vh;overflow:auto;margin:0 0 12px;color:var(--ink)}
+.send-ok{display:flex;align-items:center;gap:6px;font-size:14px;font-weight:700;color:var(--water);margin:0 0 8px}
+.send-steps{margin:0 0 14px;padding-left:20px;font-size:14.5px;line-height:1.8}
+.send-steps b{color:var(--ink)}
 
 /* 입주청소 집 크기 선택 */
 .tiers-pick{display:grid;grid-template-columns:1fr 1fr;gap:6px}

@@ -154,11 +154,9 @@ $("qArea").addEventListener("change", calc);
 $("qDate").addEventListener("change", calc);
 $("qCopy").onclick = async () => { if(await copy(summary())) toast("문의 내용을 복사했어요. 원하는 곳에 붙여넣어 주세요."); };
 $("qKakao").onclick = async () => {
+  if(C.kakao) return kakaoSend("카톡으로 견적 문의", summary());
   await copy(summary());
-  if(C.kakao){
-    toast("문의 내용을 복사했어요. 카톡 대화창에 붙여넣기만 하면 돼요.");
-    setTimeout(() => window.open(C.kakao, "_blank", "noopener"), 600);
-  } else { toast("문의 내용을 복사했어요. 전화로 연결할게요."); setTimeout(() => location.href = "tel:" + phoneDigits, 600); }
+  toast("문의 내용을 복사했어요. 전화로 연결할게요."); setTimeout(() => location.href = "tel:" + phoneDigits, 600);
 };
 drawForm();
 
@@ -229,10 +227,8 @@ function joinDone(){
     <button class="link" type="button" data-close>나중에 보낼게요</button>`;
   $("jKakao").onclick = async () => {
     const text = `[${C.name} 회원가입]\n이름: ${m.name}\n연락처: ${m.phone}\n지역: ${m.area || "-"}\n무료 서비스: ${m.free}\n쿠폰번호: ${m.code}${m.ref ? `\n추천인 코드: ${m.ref}` : ""}\n이벤트 소식: ${m.ad ? "받음" : "안 받음"}`;
-    await copy(text);
-    toast("가입 내용을 복사했어요. 카톡 대화창에 붙여넣기만 하면 돼요.");
     MEMBER.sent = true; store.set("member", MEMBER);
-    setTimeout(() => window.open(C.kakao, "_blank", "noopener"), 600);
+    kakaoSend("카톡으로 가입 완료하기", text);
   };
 }
 // 친구 초대: 내 쿠폰번호가 들어간 링크를 공유 (친구가 가입하면 카톡 가입 메시지에 추천인 코드가 함께 와요)
