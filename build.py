@@ -261,6 +261,16 @@ def join_modal(c):
 </div></div>"""
 
 
+def diff_html(c):
+    """시공 사례 위 '이렇게 달라요' 비교표"""
+    d = c.get("diff")
+    if not d:
+        return ""
+    rows = "".join(f'<tr><th scope="row">{e(r["k"])}</th><td>{e(r["a"])}</td><td><b>{e(r["b"])}</b></td></tr>' for r in d["rows"])
+    return (f'<div class="diff"><h3>{e(d["title"])}</h3><div class="tbl-wrap"><table>'
+            f'<thead><tr><th></th><th>보통 청소</th><th>{e(c["name"])}</th></tr></thead><tbody>{rows}</tbody></table></div></div>')
+
+
 def promises_section(c, cases):
     ps = c.get("promises") or []
     if not ps:
@@ -289,6 +299,7 @@ def index_page(c, cases=()):
   <div>
     <h1>{e(rg + ' 청소, ' if rg else '')}평수만 넣으면 바로 견적이 나와요</h1>
     <p class="lead">{e(c.get('tagline', ''))}. 계산한 견적 그대로 카톡으로 문의하면 돼요.</p>
+    {f'<p class="sani-badge">🛡 {e(c["sanitize"]["badge"])}</p>' if c.get("sanitize") else ''}
     <div class="areas">{''.join(f'<span>{e(r)}</span>' for r in regions)}</div>
     {member_badge(c)}
     <img class="hero-logo" src="logo.png" alt="{e(c['name'])} 로고" width="240" height="240">
@@ -326,6 +337,7 @@ def index_page(c, cases=()):
 <section class="s" id="cases"><div class="wrap">
   <h2>시공 사례</h2>
   <p class="d">실제 작업한 현장 기록이에요. 블로그에 올린 후기가 자동으로 모여요.</p>
+  {diff_html(c)}
   <div id="caseChips" class="cats"></div>
   <div id="caseList" class="cases"></div>
 </div></section>
@@ -392,7 +404,7 @@ def service_page(c, s, cases=()):
 <div class="crumb"><a href="../index.html">홈</a> › <a href="../index.html#services">서비스</a></div>
 <h1>{e(s['name'])}</h1>
 <p class="lead" style="color:var(--muted);font-size:17px;margin:0">{e(s['summary'])}</p>
-<div class="box"><h2>작업 범위</h2><ul>{''.join(f'<li>{e(i)}</li>' for i in s['includes'])}</ul>{f'<div class="rooms">{rooms}</div>' if rooms else ''}</div>
+<div class="box"><h2>작업 범위</h2>{f'<p class="sani-line">🛡 <b>{e(c["sanitize"]["badge"])}</b> · {e(c["sanitize"]["text"])}</p>' if c.get("sanitize") else ''}<ul>{''.join(f'<li>{e(i)}</li>' for i in s['includes'])}</ul>{f'<div class="rooms">{rooms}</div>' if rooms else ''}</div>
 {f'<div class="box"><h2>기본 범위에 없는 것</h2><p class="d-s">아래는 기본 금액에 들어가지 않아요. 필요하시면 상담 때 말씀해 주세요. 추가 비용은 작업 전에 먼저 안내해 드려요.</p><ul class="excl">{excl}</ul></div>' if excl else ''}
 <div class="box"><h2>가격 기준</h2>{f'<table class="ptable">{rows}</table><p style="font-size:13.5px;color:var(--muted);margin:10px 0 0">{e(s.get("priceNote") or "오염 정도와 구조에 따라 현장에서 달라질 수 있어요.")} 최종 금액은 사진을 보고 확정해요.</p>' if rows else '<p style="margin:0">현장 상태에 따라 작업량 차이가 커서, 사진을 보고 견적을 안내해 드려요.</p>'}</div>
 <div class="cta2"><a class="btn glove" href="../index.html?svc={e(s['id'])}#quote">{'내 견적 계산하기' if not s.get('quote') else '사진 보내고 견적 받기'}</a>{f'<a class="btn line" href="{e(kakao)}" target="_blank" rel="noopener">카톡으로 바로 문의</a>' if kakao else ''}</div>
