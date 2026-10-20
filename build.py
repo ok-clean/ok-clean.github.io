@@ -285,6 +285,20 @@ def promises_section(c, cases):
 </div></section>"""
 
 
+def premium_html(c):
+    premium = c.get("premiumCare") or {}
+    if not premium:
+        return ""
+    rows = "".join(f'<tr><th scope="row">{e(x["name"])}</th><td>{x["price"]:,}원~</td></tr>' for x in premium.get("tiers", []))
+    return f"""<section class="s" id="premium"><div class="wrap">
+      <h2>{e(premium.get('title', '프리미엄 케어'))}</h2>
+      <p class="d">{e(premium.get('description', ''))}</p>
+      <div class="box"><table class="ptable"><thead><tr><th>공간 기준</th><th>예상 시작 가격</th></tr></thead><tbody>{rows}</tbody></table>
+      <p class="d-s">별도 서비스 안내 가격이며, 예약 전 사진 상담으로 확정합니다.</p>
+      <a class="btn glove" href="#quote">상담용 견적 문의하기</a></div>
+    </div></section>"""
+
+
 def index_page(c, cases=()):
     regions = c.get("regions", [])
     rg = "·".join(regions[:2]) if regions else ""
@@ -332,6 +346,7 @@ def index_page(c, cases=()):
   <p class="d">주거부터 상가, 준공 현장, 가전 분해세척까지 맡아요. 항목을 누르면 작업 범위와 가격 기준을 볼 수 있어요.</p>
   {f'<p class="note">{e(c["priceNote"])}</p>' if c.get("priceNote") else ''}
   {services_html(c)}
+  {premium_html(c)}
 </div></section>
 
 <section class="s" id="cases"><div class="wrap">
@@ -406,7 +421,7 @@ def service_page(c, s, cases=()):
 <p class="lead" style="color:var(--muted);font-size:17px;margin:0">{e(s['summary'])}</p>
 <div class="box"><h2>작업 범위</h2>{f'<p class="sani-line">🛡 <b>{e(c["sanitize"]["badge"])}</b> · {e(c["sanitize"]["text"])}</p>' if c.get("sanitize") else ''}<ul>{''.join(f'<li>{e(i)}</li>' for i in s['includes'])}</ul>{f'<div class="rooms">{rooms}</div>' if rooms else ''}</div>
 {f'<div class="box"><h2>기본 범위에 없는 것</h2><p class="d-s">아래는 기본 금액에 들어가지 않아요. 필요하시면 상담 때 말씀해 주세요. 추가 비용은 작업 전에 먼저 안내해 드려요.</p><ul class="excl">{excl}</ul></div>' if excl else ''}
-<div class="box"><h2>가격 기준</h2>{f'<table class="ptable">{rows}</table><p style="font-size:13.5px;color:var(--muted);margin:10px 0 0">{e(s.get("priceNote") or "오염 정도와 구조에 따라 현장에서 달라질 수 있어요.")} 최종 금액은 사진을 보고 확정해요.</p>' if rows else '<p style="margin:0">현장 상태에 따라 작업량 차이가 커서, 사진을 보고 견적을 안내해 드려요.</p>'}</div>
+<div class="box"><h2>가격 기준</h2>{f'<table class="ptable">{rows}</table><p style="font-size:13.5px;color:var(--muted);margin:10px 0 0">{e(s.get("priceNote") or "오염 정도와 구조에 따라 현장에서 달라질 수 있어요.")} 최종 금액은 사진을 보고 확정해요.</p>' if rows else f'<p style="margin:0">현장 상태에 따라 작업량 차이가 커서, 사진을 보고 견적을 안내해 드려요. {e(s.get("priceNote", ""))}</p>'}</div>
 <div class="cta2"><a class="btn glove" href="../index.html?svc={e(s['id'])}#quote">{'내 견적 계산하기' if not s.get('quote') else '사진 보내고 견적 받기'}</a>{f'<a class="btn line" href="{e(kakao)}" target="_blank" rel="noopener">카톡으로 바로 문의</a>' if kakao else ''}</div>
 {f'<div class="box"><h2>최근 {e(s["name"])} 사례</h2><div class="cases">{"".join(case_card(x) for x in mine)}</div></div>' if mine else ''}
 {f'<div class="box"><h2>서비스 지역</h2><div class="links">' + ''.join(f'<a href="../{area_file(r)}">{e(r)} {e(s["name"])}</a>' for r in regions) + '</div></div>' if regions else ''}
