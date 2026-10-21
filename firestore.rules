@@ -1,0 +1,33 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAdmin() {
+      // 관리자 Firebase Auth UID를 직접 입력하세요. 이메일 문자열만으로 권한을 부여하지 않습니다.
+      return request.auth != null && request.auth.uid == 'REPLACE_WITH_ADMIN_UID';
+    }
+    match /member_requests/{id} {
+      allow read, update, delete: if isAdmin();
+      // 익명 사용자는 회원가입 요청 생성만 가능. 기존 데이터 읽기/수정은 불가.
+      allow create: if request.auth != null &&
+        request.auth.token.firebase.sign_in_provider == 'anonymous' &&
+        request.resource.data.keys().hasOnly(['name','phone','area','free','ad','code','ref','joined','status','couponStatus','freeStatus','memo','points','grade','ownerUid']) &&
+        request.resource.data.keys().hasAll(['name','phone','area','free','ad','code','ref','joined','status','couponStatus','freeStatus','memo','points','grade','ownerUid']) &&
+        request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 30 &&
+        request.resource.data.phone is string && request.resource.data.phone.matches('^01[016789]-?[0-9]{3,4}-?[0-9]{4}$') &&
+        request.resource.data.area is string && request.resource.data.area.size() <= 40 &&
+        request.resource.data.free is string && request.resource.data.free.size() <= 80 &&
+        request.resource.data.ad is bool &&
+        request.resource.data.code is string && request.resource.data.code.matches('^OK-[A-Z2-9]{6}$') &&
+        request.resource.data.ref is string && request.resource.data.ref.size() <= 20 &&
+        request.resource.data.joined == request.time &&
+        request.resource.data.status == '신규' &&
+        request.resource.data.couponStatus == '미사용' &&
+        request.resource.data.freeStatus == '미제공' &&
+        request.resource.data.memo == '' &&
+        request.resource.data.points == 0 &&
+        request.resource.data.grade == '새싹' &&
+        request.resource.data.ownerUid == request.auth.uid;
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

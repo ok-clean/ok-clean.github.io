@@ -1,0 +1,37 @@
+오케이청소 관리자 웹앱 설치 안내 (2026-10-21)
+
+[기능] Google 관리자 로그인, 회원 목록·검색, 쿠폰/무료서비스 사용 처리, 상담 상태, 등급·포인트·관리메모, 모바일 홈 화면 설치.
+
+[1] Firebase 콘솔 https://console.firebase.google.com 에서 새 프로젝트 생성
+- Authentication > Sign-in method: Google 및 Anonymous(익명) 활성화
+- Authentication > Settings > Authorized domains에 ok-clean.github.io 추가
+- Firestore Database 생성 (프로덕션 모드)
+- 프로젝트 설정 > 내 앱 > 웹 앱 등록 후 Firebase 구성값(apiKey/authDomain/projectId/appId) 확인
+
+[2] config.json의 firebase 네 항목에 해당 값을 넣습니다. 이는 웹 클라이언트용 공개 식별자이며 관리자 비밀번호가 아닙니다.
+
+[3] Firebase Authentication > Users에서 본인 Google 계정으로 관리자 페이지에 한 번 로그인한 뒤 UID 확인.
+- firestore.rules의 REPLACE_WITH_ADMIN_UID를 실제 관리자 UID로 교체
+- Firebase Console > Firestore Database > Rules에 firestore.rules 전체 붙여넣고 Publish
+- 관리자는 반드시 실제 UID로 제한. 공개 GitHub에 비밀번호/서비스 계정 키 금지.
+- 관리자 Google 계정에 2단계 인증을 켜세요.
+
+[4] GitHub 업로드: 기존 파일과 폴더에 더해 admin/, member-sync.js, firestore.rules를 올립니다.
+- admin-setup/ (예전 스프레드시트 설정용)은 올리지 않아도 됩니다.
+- GitHub Pages가 정상 배포된 후 https://ok-clean.github.io/admin/ 접속
+- 관리자 Google 로그인 → 회원 목록 확인
+- Android Chrome: 메뉴 > 홈 화면에 추가 / iPhone Safari: 공유 > 홈 화면에 추가
+
+[5] 회원가입 테스트: 일반 브라우저에서 새 회원 가입, 관리자 화면에서 데이터 확인.
+- 기존 고객 브라우저 localStorage 회원은 자동 이전되지 않습니다.
+- 기존 Google 스프레드시트 접수 방식과 Firebase를 동시에 켜면 중복 접수가 발생할 수 있으므로 memberBackendUrl을 빈 값으로 두세요.
+- 기존 회원 가입 화면은 가입 버튼 직후 고객 브라우저에 쿠폰을 표시하며, 관리자 승인 쿠폰과 별개입니다. 실제 할인 적용은 관리자 확인 후 처리하세요.
+
+[보안·운영 주의]
+- Firestore 규칙은 관리자만 회원 목록을 읽거나 변경하도록 제한합니다. 익명 고객은 신규 요청만 생성 가능합니다.
+- 익명 가입은 자동 스팸/반복 접수를 완전히 막지 못합니다. 실서비스 전 Firebase App Check, 서버측 접수 검증 및 접수량 제한을 추가하는 것이 좋습니다.
+- 회원 가입 시 자동 전송이 실패하면 카카오톡 가입 확인 절차를 유지합니다.
+- 개인정보 처리방침을 업데이트해 Firebase/Google Cloud 처리, 보유기간, 파기 및 접근권한 등을 실제 운영 방식에 맞춰 명시하세요.
+- Firebase 설정과 규칙 배포 전에는 관리자 앱이 작동하지 않습니다. ZIP 업로드만으로 회원 목록이 수집되지는 않습니다.
+- 대시보드는 최근 500건까지 보여줍니다. 더 많은 회원은 페이지네이션이 필요합니다.
+- Firestore 비용/사용량과 백업 정책을 별도로 확인하세요.

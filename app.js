@@ -280,6 +280,13 @@ if(M){
     MEMBER = {name, phone, area: $("jArea").value, free: (document.querySelector('input[name="jFree"]:checked') || {}).value || M.freeServices[0],
               ad: $("jAgree").checked && $("jAd").checked, code, ref: REF && REF !== code ? REF : "", joined: new Date().toISOString().slice(0, 10)};
     store.set("member", MEMBER);
+    // Firebase가 설정되어 있으면 회원 가입 요청을 비공개 Firestore에 전송합니다.
+    // 실패 시 카카오톡 가입 확인 절차를 그대로 안내합니다.
+    if(C.firebase && C.firebase.apiKey && C.firebase.projectId){
+      import('./member-sync.js').then(mod => mod.submitMember(C.firebase, MEMBER))
+        .then(() => toast('회원정보 접수 요청이 완료됐어요. 카톡으로 가입을 확인해 주세요.'))
+        .catch(err => { console.warn('회원 접수 실패', err); toast('자동 접수가 되지 않았어요. 카톡으로 가입을 완료해 주세요.'); });
+    }
     // 관리자 대장 연결이 설정된 경우 가입 정보를 접수합니다.
     // Google Apps Script 웹앱은 교차 출처 응답을 브라우저에서 검증할 수 없으므로
     // 전송 성공을 단정하지 않고 카카오톡 확인 절차를 그대로 유지합니다.
