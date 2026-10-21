@@ -240,7 +240,7 @@ def join_modal(c):
         return ""
     frees = "".join(f'<label class="radio"><input type="radio" name="jFree" value="{e(x)}"{" checked" if i == 0 else ""}><span>{e(x)}</span></label>'
                     for i, x in enumerate(m.get("freeServices", [])))
-    regions = "".join(f"<option>{e(r)}</option>" for r in c.get("regions", []))
+    regions = "".join(f"<option>{e(r)}</option>" for r in c.get("areaChoices", c.get("regions", [])))
     return f"""<div class="modal" id="join" role="dialog" aria-modal="true" aria-labelledby="joinT" hidden><div class="modal-box">
 <button class="x" type="button" data-close aria-label="닫기">×</button>
 <div id="joinForm">
@@ -328,7 +328,7 @@ def index_page(c, cases=()):
     <div class="price" id="qPrice" aria-live="polite"><div class="k" id="qK">예상 금액</div><div class="v" id="qV">-</div><div class="n" id="qN"></div><div class="mem" id="qMem" hidden></div></div>
     <div class="field" id="qOptF"><span class="lab">추가 옵션</span><div class="opts" id="qOpt"></div></div>
     <div class="two">
-      <div class="field"><label for="qArea">지역</label><select id="qArea"><option value="">선택</option>{''.join(f'<option>{e(r)}</option>' for r in regions)}<option>그 외 지역</option></select></div>
+      <div class="field"><label for="qArea">지역</label><select id="qArea"><option value="">선택</option>{''.join(f'<option>{e(r)}</option>' for r in c.get('areaChoices', regions))}<option>그 외 지역</option></select></div>
       <div class="field"><label for="qDate">희망 날짜</label><input id="qDate" type="date"></div>
     </div>
     <div class="ask">
@@ -484,11 +484,11 @@ def privacy_page(c):
 <h2>1. 수집하는 항목과 목적</h2>
 <p>{e(who)}(이하 '업체')는 회원가입 시 <b>이름, 연락처, 지역, 선택한 무료 서비스, 추천인 코드(초대 링크로 가입한 경우), 이벤트 수신 동의 여부</b>를 받아요. 회원 관리, 쿠폰·포인트 지급, 예약 상담과 작업 진행에만 써요.</p>
 <h2>2. 수집 방법</h2>
-<p>사이트에 입력한 가입 정보는 이용자의 기기(브라우저)에만 저장되고, 이용자가 카카오톡으로 직접 보낸 경우에만 업체가 받아요. 견적 계산기에 입력한 내용도 기기에만 저장돼요.</p>
+<p>가입 정보는 이용자 기기에 저장됩니다. 회원 관리 연동을 활성화한 경우 가입 버튼을 누르면 Google 스프레드시트 기반 관리자 대장에도 전송되어 보관되며, 미연동 시 카카오톡으로 직접 전송한 경우에만 업체가 받습니다. 견적 계산기에 입력한 내용은 이용자 기기에 저장되며 상담 전송 시에만 업체가 받습니다.</p>
 <h2>3. 보관 기간과 파기</h2>
-<p>회원 정보는 탈퇴 요청 시 또는 마지막 이용 후 2년이 지나면 지체 없이 파기해요. 법령에 따라 보관해야 하는 거래 기록은 정해진 기간 동안 보관해요.</p>
+<p>회원 정보는 탈퇴 요청 시 또는 마지막 이용 후 2년이 지나면 지체 없이 파기해요. 관리자 대장에 저장된 회원정보도 동일한 기준으로 삭제합니다. 법령에 따라 보관해야 하는 거래 기록은 정해진 기간 동안 보관해요.</p>
 <h2>4. 제3자 제공</h2>
-<p>이용자의 동의 없이 개인정보를 외부에 제공하지 않아요.</p>
+<p>이용자의 동의 없이 개인정보를 외부에 판매하거나 제3자에게 제공하지 않아요. 관리자 대장 연동 시 Google 서비스를 저장·처리 수단으로 이용할 수 있습니다.</p>
 <h2>5. 이용자의 권리</h2>
 <p>언제든지 개인정보 열람·수정·삭제와 이벤트 수신 거부를 요청할 수 있어요. 아래 연락처로 말씀해 주세요.</p>
 <h2>6. 문의</h2>

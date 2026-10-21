@@ -227,7 +227,7 @@ if(nowEl) $("months").scrollLeft = Math.max(0, nowEl.offsetLeft - 20);
 
 
 // ── 회원가입 (팝업) ──
-// 이 사이트에는 서버가 없어서, 가입 정보는 이 기기에 저장하고 고객이 카톡으로 보내면 업체가 회원으로 등록해요.
+// 연동 URL이 설정된 경우 관리자 대장으로도 가입 정보를 전송합니다. 카톡 확인 방식은 유지합니다.
 function joinDone(){
   const d = $("joinDone"), m = MEMBER;
   $("joinForm").hidden = true; d.hidden = false;
@@ -280,6 +280,25 @@ if(M){
     MEMBER = {name, phone, area: $("jArea").value, free: (document.querySelector('input[name="jFree"]:checked') || {}).value || M.freeServices[0],
               ad: $("jAgree").checked && $("jAd").checked, code, ref: REF && REF !== code ? REF : "", joined: new Date().toISOString().slice(0, 10)};
     store.set("member", MEMBER);
+    // 관리자 대장 연결이 설정된 경우 가입 정보를 접수합니다.
+    // Google Apps Script 웹앱은 교차 출처 응답을 브라우저에서 검증할 수 없으므로
+    // 전송 성공을 단정하지 않고 카카오톡 확인 절차를 그대로 유지합니다.
+    if(C.memberBackendUrl && /^https:\/\/script\.google\.com\/macros\/s\//.test(C.memberBackendUrl)){
+      try {
+        const payload = {kind:"join", name:MEMBER.name,phone:MEMBER.phone,area:MEMBER.area,
+          free:MEMBER.free,ad:MEMBER.ad,code:MEMBER.code,ref:MEMBER.ref,joined:MEMBER.joined,
+          couponAmount:M.coupon,source:"ok-clean.github.io"};
+        const form = document.createElement("form");
+        form.method="POST"; form.action=C.memberBackendUrl; form.target="okclean_member_sink";
+        form.style.display="none";
+        const input=document.createElement("input"); input.type="hidden";input.name="payload";
+        input.value=JSON.stringify(payload);form.appendChild(input);
+        let frame=document.getElementById("okclean_member_sink");
+        if(!frame){frame=document.createElement("iframe");frame.name="okclean_member_sink";
+          frame.id="okclean_member_sink";frame.hidden=true;document.body.appendChild(frame);}
+        document.body.appendChild(form);form.submit();setTimeout(()=>form.remove(),1500);
+      }catch(err){console.warn("회원 대장 접수 요청 실패",err);}
+    }
     joinDone(); calc();
   };
   // 처음 방문한 사람에게 한 번 띄우기 (가입했거나 '다음에'를 누른 뒤 7일 동안은 안 띄움)
