@@ -986,10 +986,13 @@
   "memberBackendUrl": "",
   "_memberBackendUrl안내": "Google Apps Script 웹 앱 배포 URL(/exec)을 입력하면 회원가입 시 비공개 관리자 스프레드시트에 접수됩니다. 빈 값이면 기존 카카오톡 수동 등록 방식입니다.",
   "firebase": {
-    "apiKey": "",
-    "authDomain": "",
-    "projectId": "",
-    "appId": ""
+    "apiKey": "AIzaSyA1jn9CDPiEg_Sg_aOlEeZjPy8P7ZoFOZw",
+    "authDomain": "okclean-admin.firebaseapp.com",
+    "projectId": "okclean-admin",
+    "appId": "1:665748095050:web:49d73ca0f28ec5f67ee6b3",
+    "storageBucket": "okclean-admin.firebasestorage.app",
+    "messagingSenderId": "665748095050",
+    "measurementId": "G-RPRHLS0VWZ"
   },
   "_firebase안내": "Firebase 프로젝트의 웹 앱 설정(공개 식별자)을 입력하세요. 관리자 권한은 Firestore 규칙의 관리자 UID로만 제한됩니다. 비밀번호/서비스계정 키는 넣지 마세요."
 }
