@@ -32,6 +32,7 @@ assert.throws(()=>m.assign('r1','p1'));
 assert.throws(()=>m.offer('r1','p1',280000));
 assert.throws(()=>m.setStatus('r1','신규'));
 m.setStatus('r1','작업완료');
+assert.throws(()=>m.setStatus('r1','작업완료'));
 assert.throws(()=>m.setStatus('r1','검토중'));
 assert.throws(()=>m.offer('r1','p1',290000));
 console.log('PASS demo matching assignment and offer isolation');
