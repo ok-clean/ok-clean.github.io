@@ -25,7 +25,7 @@ const assert = require('node:assert/strict');
       await page.locator('#qDate').dispatchEvent('change');
       assert.equal(await page.locator('#qDate').inputValue(), '');
       await page.locator('#qKakao').click();
-      assert.equal(await page.locator('#sheet').isVisible(), true);
+      await page.locator('#sheet').waitFor({state: 'visible'});
       assert.match(await page.locator('#sheetB').innerText(), /에어컨 청소/);
       assert.equal(await page.locator('#sheetB a').getAttribute('href'), 'https://open.kakao.com/o/s3TIhwSi');
       await page.locator('#sheet [data-close]').first().click();
