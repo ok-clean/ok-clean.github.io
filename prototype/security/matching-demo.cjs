@@ -34,6 +34,7 @@ function createDemoMatching() {
  function assign(requestId, partnerId) {
   const request=requests.get(requestId), partner=partners.get(partnerId);
   if (!request || !partner?.approved) throw Error('승인된 업체만 배정 가능합니다.');
+  if (request.assigned.has(partnerId)) throw Error('이미 배정된 업체입니다.');
   if (request.status === '예약확정' || request.status === '작업완료') throw Error('확정된 요청은 배정할 수 없습니다.');
   request.assigned.add(partnerId);request.status='배정';
  }
