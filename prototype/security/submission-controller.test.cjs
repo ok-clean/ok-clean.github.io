@@ -11,5 +11,14 @@ function deferred(){let resolve,reject;let promise=new Promise((a,b)=>{resolve=a
  let err=createSubmissionController(async()=>{throw new Error('network unavailable')},{timeoutMs:20});
  await assert.rejects(err.submit('x',{}));assert.equal(err.getState(),'unknown');assert.throws(()=>err.submit('x',{}));
  let ok=createSubmissionController(async()=>({id:'ok'}),{timeoutMs:100});await ok.submit('ok',{});assert.equal(ok.getState(),'success');
+ const confirmed = createSubmissionController(async()=>{throw Error('network')});
+ await assert.rejects(confirmed.submit('known',{}));
+ assert.equal(await confirmed.reconcile(async id => id === 'known' ? 'confirmed' : 'absent'),'confirmed');
+ assert.equal(confirmed.getState(),'success');
+ const absent = createSubmissionController(async()=>{throw Error('network')});
+ await assert.rejects(absent.submit('missing',{}));
+ assert.equal(await absent.reconcile(async()=> 'absent'),'absent');
+ assert.equal(absent.getState(),'unknown');
+ assert.throws(()=>absent.submit('missing',{}));
  console.log('PASS pending, repeated-click prevention, uncertain timeout, late acknowledgement, and error');
 })().catch(e=>{console.error(e);process.exit(1)});
