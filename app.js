@@ -41,8 +41,8 @@ const svc = () => SV.find(s => s.id === cur.svc);
 
 $("qSvc").innerHTML = C.categories.map(cat => `<optgroup label="${esc(cat.name)}">${SV.filter(s => s.cat === cat.id).map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("")}</optgroup>`).join("");
 if(Q.area) $("qArea").value = Q.area;
-if(Q.date) $("qDate").value = Q.date;
 const today = new Date(); $("qDate").min = new Date(today.getTime() + 9*3600e3).toISOString().slice(0, 10);
+if(Q.date && Q.date >= $("qDate").min) $("qDate").value = Q.date;
 
 // 가격 방식: tiers(집 크기별 정액, 입주청소) / variants(종류 × 수량) / quote(현장 견적)
 // 금액에 hi 가 없으면 '~부터' 금액, quote:true 는 현장 견적 항목
@@ -146,7 +146,8 @@ function calc(){
 $("qSvc").addEventListener("change", e => { cur = {svc: e.target.value, v: 0, t: null, qty: null, opts: []}; drawForm(); });
 $("qTier").addEventListener("click", e => { const b = e.target.closest("[data-t]"); if(!b) return; cur.t = +b.dataset.t; drawForm(); });
 $("qVar").addEventListener("click", e => { const b = e.target.closest("[data-v]"); if(!b) return; cur.v = +b.dataset.v; drawForm(); });
-$("qQty").addEventListener("input", e => { cur.qty = Math.min(999, Math.max(1, parseInt(e.target.value, 10) || 1)); calc(); });
+$("qQty").addEventListener("input", e => { cur.qty = Math.min(999, Math.max(1, parseInt(e.target.value, 10) || 1)); if(e.target.value !== "") e.target.value = cur.qty; calc(); });
+$("qQty").addEventListener("change", e => { e.target.value = cur.qty; });
 $("qMinus").onclick = () => { cur.qty = Math.max(1, (+cur.qty || 1) - 1); $("qQty").value = cur.qty; calc(); };
 $("qPlus").onclick = () => { cur.qty = Math.min(999, (+cur.qty || 0) + 1); $("qQty").value = cur.qty; calc(); };
 $("qOpt").addEventListener("change", e => { const i = +e.target.dataset.o; cur.opts = e.target.checked ? [...new Set([...cur.opts, i])] : cur.opts.filter(x => x !== i); calc(); });
