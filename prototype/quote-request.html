@@ -5,7 +5,7 @@
 <meta name="robots" content="noindex,nofollow">
 <title>청소 견적 요청 연습 화면 | 오케이청소</title>
 <style>
-:root{font-family:system-ui,sans-serif;color:#172b4d;background:#f3f7fc}*{box-sizing:border-box}body{margin:0}main{max-width:620px;margin:0 auto;padding:24px 16px 48px}.brand{font-weight:800;color:#1644a6}.notice{border-radius:12px;background:#eaf1ff;padding:14px;line-height:1.6;color:#153d80}h1{font-size:1.8rem;margin:24px 0 8px}p{line-height:1.6}form,.result{background:white;border:1px solid #dbe4f0;border-radius:16px;padding:20px;margin-top:18px;box-shadow:0 5px 20px #19385a0a}label{display:block;font-weight:700;margin:18px 0 8px}select,input,textarea,button{width:100%;font:inherit;border:1px solid #b6c6dc;border-radius:10px;padding:12px;background:white;color:inherit}textarea{resize:vertical;min-height:88px}button{background:#174cb4;color:white;border:0;font-weight:700;cursor:pointer;margin-top:20px}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #ffba31;outline-offset:2px}.error{color:#b42318}.sub{color:#50627b;font-size:.93rem}.result dl{display:grid;grid-template-columns:96px 1fr;gap:12px;margin:0}.result dt{font-weight:700}.result dd{margin:0;overflow-wrap:anywhere}[hidden]{display:none!important}
+:root{font-family:system-ui,sans-serif;color:#172b4d;background:#f3f7fc}*{box-sizing:border-box}body{margin:0}main{max-width:620px;margin:0 auto;padding:24px 16px 48px}.brand{font-weight:800;color:#1644a6}.notice{border-radius:12px;background:#eaf1ff;padding:14px;line-height:1.6;color:#153d80}h1{font-size:1.8rem;margin:24px 0 8px}p{line-height:1.6}form,.result{background:white;border:1px solid #dbe4f0;border-radius:16px;padding:20px;margin-top:18px;box-shadow:0 5px 20px #19385a0a}label{display:block;font-weight:700;margin:18px 0 8px}select,input,textarea,button{width:100%;font:inherit;border:1px solid #b6c6dc;border-radius:10px;padding:12px;background:white;color:inherit}textarea{resize:vertical;min-height:88px}button{background:#174cb4;color:white;border:0;font-weight:700;cursor:pointer;margin-top:20px}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #ffba31;outline-offset:2px}.photo-preview{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.photo-preview img{width:96px;height:96px;object-fit:cover;border-radius:8px}.error{color:#b42318}.sub{color:#50627b;font-size:.93rem}.result dl{display:grid;grid-template-columns:96px 1fr;gap:12px;margin:0}.result dt{font-weight:700}.result dd{margin:0;overflow-wrap:anywhere}[hidden]{display:none!important}
 </style>
 </head><body><main>
 <a class="brand" href="../index.html">오케이청소</a>
@@ -19,7 +19,12 @@
 <select id="area" required><option value="">선택해 주세요</option><option>춘천</option><option>화천</option><option>양구</option><option>인제</option><option>철원</option><option>홍천</option><option>횡성</option><option>가평</option><option>그 외 지역</option></select>
 <label for="size">청소 면적 (평)</label><input id="size" type="number" min="1" max="999" inputmode="numeric" step="1" required placeholder="예: 25">
 <label for="date">희망 날짜</label><input id="date" type="date" required>
-<p class="sub">사진 첨부와 관리자 접수는 추후 안전한 저장 기능을 마련한 뒤 연결합니다.</p>
+<label for="photos">현장 사진 미리보기 (선택)</label>
+<input id="photos" type="file" accept="image/jpeg,image/png,image/webp" multiple aria-describedby="photo-help photo-error">
+<p class="sub" id="photo-help">최대 3장, 각 5MB 이하의 JPG·PNG·WebP 사진을 선택할 수 있어요. 이 기기에서만 보이며 저장되거나 전송되지 않습니다.</p>
+<p class="error" id="photo-error" role="alert"></p>
+<div class="photo-preview" id="photo-preview"></div>
+<p class="sub">사진 업로드와 관리자 접수는 추후 안전한 저장 기능을 마련한 뒤 연결합니다.</p>
 <p class="error" id="error" role="alert" aria-live="polite"></p>
 <button type="submit">입력 내용 확인</button>
 </form>
@@ -28,6 +33,19 @@
 const $ = id => document.getElementById(id);
 const kstToday = () => new Date(Date.now() + 9 * 3600000).toISOString().slice(0,10);
 $('date').min = kstToday();
+let photoUrls = [];
+$('photos').addEventListener('change', e => {
+ for(const url of photoUrls) URL.revokeObjectURL(url);
+ photoUrls = []; $('photo-preview').replaceChildren(); $('photo-error').textContent = '';
+ const files = [...e.target.files];
+ if(files.length > 3 || files.some(file => !['image/jpeg','image/png','image/webp'].includes(file.type) || file.size > 5*1024*1024)) {
+  e.target.value = ''; $('photo-error').textContent = 'JPG·PNG·WebP 사진을 각 5MB 이하로 최대 3장 선택해 주세요.'; return;
+ }
+ for(const file of files) {
+  const url = URL.createObjectURL(file); photoUrls.push(url);
+  const img = document.createElement('img'); img.alt = '선택한 현장 사진 미리보기'; img.src = url; $('photo-preview').appendChild(img);
+ }
+});
 $('quote').addEventListener('submit', e => {
  e.preventDefault(); const service=$('service'), area=$('area'), size=$('size'), date=$('date');
  const checks=[[service, '청소 종류를 선택해 주세요.'],[area, '지역을 선택해 주세요.'],[size, '면적을 1~999평의 정수로 입력해 주세요.'],[date, '오늘 이후 희망 날짜를 선택해 주세요.']];
