@@ -24,7 +24,7 @@ function deferred(){let resolve,reject;let promise=new Promise((a,b)=>{resolve=a
  const concurrent = createSubmissionController(async()=>{throw Error('offline')});
  await assert.rejects(concurrent.submit('same',{}));
  const verify = async()=>{checks++;return gate.promise};
- const a = concurrent.reconcile(verify), b = concurrent.reconcile(verify);
+ const a = concurrent.reconcile(verify), b = concurrent.reconcile();
  gate.resolve('confirmed');
  assert.equal(await a,'confirmed');assert.equal(await b,'confirmed');
  assert.equal(checks,1);assert.equal(concurrent.getState(),'success');
