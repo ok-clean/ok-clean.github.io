@@ -3,9 +3,11 @@ const assert = require('node:assert/strict');
 const { initializeTestEnvironment, assertFails, assertSucceeds } = require('@firebase/rules-unit-testing');
 const { doc, collection, setDoc, getDoc, getDocs, updateDoc, deleteDoc, serverTimestamp } = require('firebase/firestore');
 const {createQuote,checkQuoteAsAdmin,listQuotes,setStatus} = require('./quote-service.cjs');
+const {reviewPartnerAsAdmin,assignPartnerAsAdmin,readAssignedQuote,submitAssignedOffer} = require('./partner-matching-service.cjs');
 (async () => {
  const env = await initializeTestEnvironment({projectId:'demo-okclean-matching',firestore:{rules:fs.readFileSync('prototype/security/firestore.rules','utf8')}});
  try {
+  await env.clearFirestore();
   const anon=env.authenticatedContext('customer-1',{firebase:{sign_in_provider:'anonymous'}}).firestore();
   const other=env.authenticatedContext('customer-2',{firebase:{sign_in_provider:'anonymous'}}).firestore();
   const admin=env.authenticatedContext('admin-test',{admin:true}).firestore();
@@ -13,7 +15,7 @@ const {createQuote,checkQuoteAsAdmin,listQuotes,setStatus} = require('./quote-se
   const partner=env.authenticatedContext('partner-1',{email_verified:true,firebase:{sign_in_provider:'password'}}).firestore();
   const partner2=env.authenticatedContext('partner-2',{email_verified:true,firebase:{sign_in_provider:'password'}}).firestore();
   const unverified=env.authenticatedContext('unverified',{email_verified:false,firebase:{sign_in_provider:'password'}}).firestore();
-  const profile={company:'가상청소업체',areas:['춘천','가평'],specialties:['입주·이사 청소'],status:'검토중'};
+  const profile={company:'가상청소업체',areas:['춘천','가평'],specialties:['입주·이사 청소'],status:'검토중',approvalVersion:0};
   await assertFails(setDoc(doc(unverified,'partner_profiles','unverified'),profile));
   await assertFails(setDoc(doc(anon,'partner_profiles','customer-1'),profile));
   await assertFails(setDoc(doc(partner,'partner_profiles','partner-1'),{...profile,status:'승인'}));
@@ -27,7 +29,8 @@ const {createQuote,checkQuoteAsAdmin,listQuotes,setStatus} = require('./quote-se
   await assertFails(updateDoc(doc(partner,'partner_profiles','partner-1'),{status:'승인'}));
   await assertFails(updateDoc(doc(partner,'partner_profiles','partner-1'),{specialties:['허위전문분야']}));
   await assertSucceeds(updateDoc(doc(partner,'partner_profiles','partner-1'),{areas:['춘천','홍천']}));
-  await assertSucceeds(updateDoc(doc(admin,'partner_profiles','partner-1'),{status:'승인'}));
+  await assertFails(updateDoc(doc(admin,'partner_profiles','partner-1'),{status:'승인'}));
+  await assertSucceeds(reviewPartnerAsAdmin(admin,'partner-1','승인'));
   await assertFails(updateDoc(doc(admin,'partner_profiles','partner-1'),{company:'임의 변경'}));
   await assertFails(deleteDoc(doc(partner,'partner_profiles','partner-1')));
   await assertFails(getDocs(collection(partner,'quote_requests')));
@@ -69,32 +72,29 @@ const {createQuote,checkQuoteAsAdmin,listQuotes,setStatus} = require('./quote-se
   const receipt=await createQuote(anon,'customer-1','ui-example',form);
   if(receipt.id !== 'ui-example') throw new Error('접수 식별자 불일치');
   await assertFails(createQuote(anon,'customer-1','ui-example',form));
-  const assignment = {service:form.service,area:form.area,size:form.size,date:form.date};
   const assignment1 = doc(admin,'quote_requests','ui-example','assignments','partner-1');
-  const assignment2 = doc(admin,'quote_requests','ui-example','assignments','partner-2');
-  const offer1 = doc(partner,'quote_requests','ui-example','offers','partner-1');
-  const offer = {price:250000,note:'방문 가능',createdAt:serverTimestamp()};
   await assertFails(getDoc(doc(partner,'quote_requests','ui-example')));
-  await assertFails(setDoc(assignment1,{...assignment,phone:'01000000000'}));
-  await assertFails(setDoc(assignment1,{...assignment,area:'홍천'}));
-  await assertFails(setDoc(doc(partner,'quote_requests','ui-example','assignments','partner-1'),assignment));
-  await assertFails(setDoc(offer1,offer));
-  await assertSucceeds(setDoc(assignment1,assignment));
-  await assertSucceeds(getDoc(doc(partner,'quote_requests','ui-example','assignments','partner-1')));
+  await assertFails(setDoc(assignment1,{grantId:'missing',phone:'01000000000'}));
+  await assertFails(setDoc(doc(partner,'quote_requests','ui-example','assignments','partner-1'),{grantId:'missing'}));
+  const {grantId} = await assignPartnerAsAdmin(admin,'ui-example','partner-1');
+  const assigned = await readAssignedQuote(partner,'ui-example','partner-1');
+  assert.equal(assigned.area,'춘천');assert.equal(assigned.grantId,grantId);
+  const offer1 = doc(partner,'quote_requests','ui-example','offers',grantId);
+  const offer = {price:250000,note:'방문 가능',createdAt:serverTimestamp()};
   await assertFails(getDocs(collection(partner,'quote_requests','ui-example','assignments')));
   await assertFails(getDoc(doc(partner2,'quote_requests','ui-example','assignments','partner-1')));
   await assertSucceeds(setDoc(doc(partner2,'partner_profiles','partner-2'),profile));
-  await assertSucceeds(setDoc(assignment2,assignment));
-  await assertFails(getDoc(doc(partner2,'quote_requests','ui-example','assignments','partner-2')));
-  await assertFails(setDoc(doc(partner2,'quote_requests','ui-example','offers','partner-2'),offer));
+  // Changed contract: even administrators cannot assign unapproved partners.
+  await assert.rejects(assignPartnerAsAdmin(admin,'ui-example','partner-2'));
+  await assertFails(setDoc(doc(partner2,'quote_requests','ui-example','offers',grantId),offer));
   await assertFails(setDoc(offer1,{...offer,price:0}));
   await assertFails(setDoc(offer1,{...offer,phone:'01000000000'}));
-  await assertSucceeds(setDoc(offer1,offer));
+  await assertSucceeds(submitAssignedOffer(partner,'ui-example',grantId,{price:250000,note:'방문 가능'}));
   await assertFails(setDoc(offer1,offer));
-  await assertFails(getDoc(doc(anon,'quote_requests','ui-example','offers','partner-1')));
-  await assertFails(getDoc(doc(partner2,'quote_requests','ui-example','offers','partner-1')));
+  await assertFails(getDoc(doc(anon,'quote_requests','ui-example','offers',grantId)));
+  await assertFails(getDoc(doc(partner2,'quote_requests','ui-example','offers',grantId)));
   await assertSucceeds(getDocs(collection(admin,'quote_requests','ui-example','offers')));
-  await assertSucceeds(updateDoc(doc(admin,'partner_profiles','partner-1'),{status:'반려'}));
+  await assertSucceeds(reviewPartnerAsAdmin(admin,'partner-1','반려'));
   await assertFails(getDoc(doc(partner,'quote_requests','ui-example','assignments','partner-1')));
   await assertFails(getDoc(offer1));
   await assertSucceeds(deleteDoc(assignment1));
@@ -104,6 +104,6 @@ const {createQuote,checkQuoteAsAdmin,listQuotes,setStatus} = require('./quote-se
   if(!requests.some(x=>x.id==='ui-example' && x.status==='신규')) throw new Error('관리자 목록 누락');
   await setStatus(admin,'ui-example','상담중');
   if(!(await listQuotes(admin)).some(x=>x.id==='ui-example' && x.status==='상담중')) throw new Error('관리자 상태 저장 실패');
-  console.log('PASS create-only, validation, admin access and write separation');
+  console.log('PASS request validation, admin receipt lookup, versioned partner approval and grant-based offers');
  } finally {await env.cleanup();}
 })().catch(err=>{console.error(err);process.exit(1)});

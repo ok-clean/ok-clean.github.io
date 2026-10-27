@@ -3,6 +3,7 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function admin() { return request.auth != null && request.auth.token.get('admin', false) == true; }
+    function safeId(id) { return id is string && id.matches('^[A-Za-z0-9_-]{1,80}$'); }
     function newRequest() {
       let d = request.resource.data;
       return request.auth != null && request.auth.token.firebase.sign_in_provider == 'anonymous'
@@ -18,67 +19,97 @@ service cloud.firestore {
         && d.ownerUid == request.auth.uid && d.status == '신규';
     }
     function partnerProfileValid(d) {
-      return d.keys().hasAll(['company','areas','specialties','status'])
-        && d.keys().hasOnly(['company','areas','specialties','status'])
+      return d.keys().hasAll(['company','areas','specialties','status','approvalVersion'])
+        && d.keys().hasOnly(['company','areas','specialties','status','approvalVersion'])
         && d.company is string && d.company.size() >= 1 && d.company.size() <= 60
         && d.areas is list && d.areas.size() >= 1 && d.areas.size() <= 9
         && d.areas.hasOnly(['춘천','화천','양구','인제','철원','홍천','횡성','가평','그 외 지역'])
         && d.specialties is list && d.specialties.size() >= 1 && d.specialties.size() <= 6
         && d.specialties.hasOnly(['입주·이사 청소','거주·정기 청소','사무실·상가 청소','에어컨 청소','후드·주방 청소','그 외 청소'])
-        && d.status in ['검토중','승인','반려'];
+        && d.status in ['검토중','승인','반려']
+        && d.approvalVersion is int && d.approvalVersion >= 0 && d.approvalVersion <= 1000000;
     }
     function verifiedPartner(uid) {
       return request.auth != null && request.auth.uid == uid
         && request.auth.token.get('email_verified', false) == true
         && request.auth.token.firebase.sign_in_provider == 'password';
     }
+    function profileApproved(uid) {
+      return exists(/databases/$(database)/documents/partner_profiles/$(uid))
+        && get(/databases/$(database)/documents/partner_profiles/$(uid)).data.status == '승인';
+    }
+    function openRequest(id) {
+      return exists(/databases/$(database)/documents/quote_requests/$(id))
+        && get(/databases/$(database)/documents/quote_requests/$(id)).data.status in ['신규','검토중','상담중']
+        && get(/databases/$(database)/documents/quote_requests/$(id)).data.date >= request.time;
+    }
     match /partner_profiles/{uid} {
       allow create: if verifiedPartner(uid) && partnerProfileValid(request.resource.data)
-        && request.resource.data.status == '검토중';
+        && request.resource.data.status == '검토중' && request.resource.data.approvalVersion == 0;
       allow get: if admin() || verifiedPartner(uid);
       allow list: if admin();
       allow update: if partnerProfileValid(request.resource.data) &&
-        ((verifiedPartner(uid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['company','areas','specialties']))
-          || (admin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])));
+        ((verifiedPartner(uid) && resource.data.status != '승인'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['company','areas','specialties']))
+        || (admin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','approvalVersion'])
+          && request.resource.data.status != resource.data.status
+          && request.resource.data.approvalVersion == resource.data.approvalVersion + 1));
       allow delete: if false;
     }
     match /quote_requests/{id} {
       allow create: if newRequest();
-      allow get: if admin();
-      allow list: if admin();
+      allow get, list: if admin();
       allow update: if admin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
         && (request.resource.data.status in ['신규','검토중','상담중','예약확정','작업완료','종료']);
       allow delete: if false;
     }
-    function approvedPartner(uid) {
-      return verifiedPartner(uid)
-        && get(/databases/$(database)/documents/partner_profiles/$(uid)).data.status == '승인';
-    }
-    function assigned(requestId, uid) {
-      return exists(/databases/$(database)/documents/quote_requests/$(requestId)/assignments/$(uid));
-    }
+    // A new pointer and immutable grant must be committed atomically. Old grants cannot be reused.
     match /quote_requests/{requestId}/assignments/{uid} {
-      allow create: if admin()
-        && exists(/databases/$(database)/documents/quote_requests/$(requestId))
-        && request.resource.data.keys().hasAll(['service','area','size','date'])
-        && request.resource.data.keys().hasOnly(['service','area','size','date'])
+      allow create: if admin() && safeId(uid) && openRequest(requestId) && profileApproved(uid)
+        && request.resource.data.keys().hasOnly(['grantId'])
+        && safeId(request.resource.data.grantId)
+        && !exists(/databases/$(database)/documents/quote_requests/$(requestId)/grants/$(request.resource.data.grantId))
+        && getAfter(/databases/$(database)/documents/quote_requests/$(requestId)/grants/$(request.resource.data.grantId)).data.partnerUid == uid
+        && getAfter(/databases/$(database)/documents/quote_requests/$(requestId)/grants/$(request.resource.data.grantId)).data.approvalVersion == get(/databases/$(database)/documents/partner_profiles/$(uid)).data.approvalVersion
+        && getAfter(/databases/$(database)/documents/quote_requests/$(requestId)/grants/$(request.resource.data.grantId)).data.createdAt == request.time;
+      allow get: if admin() || (verifiedPartner(uid) && activeGrant(requestId, resource.data.grantId));
+      allow list: if admin();
+      allow update: if false;
+      // Revocation is possible even after booking; immutable grant/offer records are kept.
+      allow delete: if admin();
+    }
+    function activeGrant(requestId, grantId) {
+      let g = get(/databases/$(database)/documents/quote_requests/$(requestId)/grants/$(grantId)).data;
+      return verifiedPartner(g.partnerUid) && openRequest(requestId) && profileApproved(g.partnerUid)
+        && g.approvalVersion == get(/databases/$(database)/documents/partner_profiles/$(g.partnerUid)).data.approvalVersion
+        && exists(/databases/$(database)/documents/quote_requests/$(requestId)/assignments/$(g.partnerUid))
+        && get(/databases/$(database)/documents/quote_requests/$(requestId)/assignments/$(g.partnerUid)).data.grantId == grantId;
+    }
+    match /quote_requests/{requestId}/grants/{grantId} {
+      allow create: if admin() && safeId(grantId) && openRequest(requestId)
+        && request.resource.data.keys().hasAll(['partnerUid','approvalVersion','service','area','size','date','createdAt'])
+        && request.resource.data.keys().hasOnly(['partnerUid','approvalVersion','service','area','size','date','createdAt'])
+        && safeId(request.resource.data.partnerUid) && profileApproved(request.resource.data.partnerUid)
+        && request.resource.data.approvalVersion == get(/databases/$(database)/documents/partner_profiles/$(request.resource.data.partnerUid)).data.approvalVersion
         && request.resource.data['service'] == get(/databases/$(database)/documents/quote_requests/$(requestId)).data['service']
         && request.resource.data.area == get(/databases/$(database)/documents/quote_requests/$(requestId)).data.area
         && request.resource.data.size == get(/databases/$(database)/documents/quote_requests/$(requestId)).data.size
-        && request.resource.data.date == get(/databases/$(database)/documents/quote_requests/$(requestId)).data.date;
-      allow get: if admin() || (approvedPartner(uid) && assigned(requestId, uid));
+        && request.resource.data.date == get(/databases/$(database)/documents/quote_requests/$(requestId)).data.date
+        && request.resource.data.createdAt == request.time
+        && getAfter(/databases/$(database)/documents/quote_requests/$(requestId)/assignments/$(request.resource.data.partnerUid)).data.grantId == grantId;
+      allow get: if admin() || activeGrant(requestId, grantId);
       allow list: if admin();
-      allow update: if false;
-      allow delete: if admin();
+      allow update, delete: if false;
     }
-    match /quote_requests/{requestId}/offers/{uid} {
-      allow create: if approvedPartner(uid) && assigned(requestId, uid)
+    // Offer ID is the immutable grant ID, not the partner UID. Reassignment gets a fresh offer.
+    match /quote_requests/{requestId}/offers/{grantId} {
+      allow create: if activeGrant(requestId, grantId)
         && request.resource.data.keys().hasAll(['price','note','createdAt'])
         && request.resource.data.keys().hasOnly(['price','note','createdAt'])
         && request.resource.data.price is int && request.resource.data.price >= 1 && request.resource.data.price <= 100000000
         && request.resource.data.note is string && request.resource.data.note.size() <= 500
         && request.resource.data.createdAt == request.time;
-      allow get: if admin() || (approvedPartner(uid) && assigned(requestId, uid));
+      allow get: if admin() || activeGrant(requestId, grantId);
       allow list: if admin();
       allow update, delete: if false;
     }
