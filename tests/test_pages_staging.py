@@ -32,5 +32,21 @@ class PagesStagingTest(unittest.TestCase):
                 else:
                     self.assertEqual(target.read_text(encoding="utf-8"), content)
 
+    def test_actual_tracked_site_files_preserved(self):
+        root = SCRIPT.parents[1]
+        with tempfile.TemporaryDirectory() as temp:
+            dest = Path(temp) / "output"
+            subprocess.run(["bash", str(SCRIPT), str(root), str(dest)], check=True)
+            names = subprocess.check_output(["git", "ls-files", "-z"], cwd=root).decode("utf-8").split("\\0")
+            for name in names:
+                if not name or name.startswith("prototype/"):
+                    continue
+                source, target = root / name, dest / name
+                if source.is_symlink():
+                    self.assertTrue(target.is_symlink(), name)
+                    self.assertEqual(target.readlink(), source.readlink(), name)
+                elif source.is_file():
+                    self.assertEqual(target.read_bytes(), source.read_bytes(), name)
+
 if __name__ == "__main__":
     unittest.main()
