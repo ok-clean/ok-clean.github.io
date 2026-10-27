@@ -44,11 +44,18 @@ function createDemoMatching() {
   if (!Number.isInteger(price) || price <= 0 || request.offers.has(partnerId)) throw Error('견적 정보 오류');
   request.offers.set(partnerId,price);request.status='견적도착';
  }
+ function setStatus(requestId, status) {
+  const request=requests.get(requestId);
+  if (!request || !STATES.includes(status)) throw Error('상태 정보 오류');
+  if (status === '예약확정' && request.offers.size === 0) throw Error('견적 없이 예약할 수 없습니다.');
+  if (status === '작업완료' && request.status !== '예약확정') throw Error('예약 확정 후 완료할 수 있습니다.');
+  request.status=status;
+ }
  function compare(requestId) {
   const request=requests.get(requestId);
   if (!request) throw Error('요청이 없습니다.');
   return [...request.offers].filter(([id])=>partners.get(id)?.approved && request.assigned.has(id)).map(([id,price])=>({company:partners.get(id).company,price})).sort((a,b)=>a.price-b.price);
  }
- return {registerPartner,approvePartner,revokePartner,unassign,createRequest,assign,offer,compare};
+ return {registerPartner,approvePartner,revokePartner,unassign,createRequest,assign,offer,setStatus,compare};
 }
 module.exports={createDemoMatching,STATES};
