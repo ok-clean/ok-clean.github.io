@@ -1,6 +1,8 @@
 const assert=require('node:assert/strict');
 const {createDemoMatching}=require('./matching-demo.cjs');
 const m=createDemoMatching();
+assert.throws(()=>m.registerPartner('../bad','업체'));
+assert.throws(()=>m.createRequest('../bad',{service:'청소',area:'춘천'}));
 m.registerPartner('p1','가상 업체 A');m.registerPartner('p2','가상 업체 B');
 m.createRequest('r1',{service:'입주·이사 청소',area:'춘천'});
 assert.throws(()=>m.assign('r1','p1'));
