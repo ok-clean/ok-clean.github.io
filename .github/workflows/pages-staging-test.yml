@@ -1,0 +1,16 @@
+name: Pages 배포 파일 준비 테스트
+on:
+  pull_request:
+    paths:
+      - 'scripts/stage-pages.sh'
+      - 'tests/test_pages_staging.py'
+      - '.github/workflows/pages-staging-test.yml'
+      - '.github/workflows/update.yml'
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tests/test_pages_staging.py
