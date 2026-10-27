@@ -1,0 +1,37 @@
+// Local-only mock matching workflow. Never use with real customer data.
+const STATES = ['신규','검토중','배정','견적도착','예약확정','작업완료'];
+function createDemoMatching() {
+ const requests = new Map();
+ const partners = new Map();
+ function registerPartner(id, company) {
+  if (!id || !company || partners.has(id)) throw Error('업체 정보를 확인하세요.');
+  partners.set(id, {company, approved:false});
+ }
+ function approvePartner(id) {
+  const partner = partners.get(id);
+  if (!partner) throw Error('등록된 업체가 아닙니다.');
+  partner.approved = true;
+ }
+ function createRequest(id, fields) {
+  if (!id || requests.has(id) || !fields || !fields.service || !fields.area) throw Error('요청 정보 오류');
+  requests.set(id,{service:fields.service,area:fields.area,status:'신규',assigned:new Set(),offers:new Map()});
+ }
+ function assign(requestId, partnerId) {
+  const request=requests.get(requestId), partner=partners.get(partnerId);
+  if (!request || !partner?.approved) throw Error('승인된 업체만 배정 가능합니다.');
+  request.assigned.add(partnerId);request.status='배정';
+ }
+ function offer(requestId, partnerId, price) {
+  const request=requests.get(requestId), partner=partners.get(partnerId);
+  if (!request || !partner?.approved || !request.assigned.has(partnerId)) throw Error('견적 권한이 없습니다.');
+  if (!Number.isInteger(price) || price <= 0 || request.offers.has(partnerId)) throw Error('견적 정보 오류');
+  request.offers.set(partnerId,price);request.status='견적도착';
+ }
+ function compare(requestId) {
+  const request=requests.get(requestId);
+  if (!request) throw Error('요청이 없습니다.');
+  return [...request.offers].map(([id,price])=>({company:partners.get(id).company,price})).sort((a,b)=>a.price-b.price);
+ }
+ return {registerPartner,approvePartner,createRequest,assign,offer,compare};
+}
+module.exports={createDemoMatching,STATES};
