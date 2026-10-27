@@ -36,13 +36,13 @@ const SV = C.services;
 const Q = store.get("quote", {}) || {};
 const urlSvc = new URLSearchParams(location.search).get("svc");
 let cur = { svc: urlSvc && SV.some(s => s.id === urlSvc) ? urlSvc : (Q.svc && SV.some(s => s.id === Q.svc) ? Q.svc : SV[0].id), v: 0, t: null, qty: null, opts: [] };
-if(cur.svc === Q.svc){ cur.v = Q.v || 0; cur.t = Q.t ?? null; cur.qty = Q.qty || null; cur.opts = Q.opts || []; }
+if(cur.svc === Q.svc){ cur.v = Q.v || 0; cur.t = Q.t ?? null; cur.qty = Q.qty == null || Q.qty === "" || !Number.isFinite(Number(Q.qty)) ? null : Math.min(999, Math.max(1, Math.trunc(Number(Q.qty)))); cur.opts = Q.opts || []; }
 const svc = () => SV.find(s => s.id === cur.svc);
 
 $("qSvc").innerHTML = C.categories.map(cat => `<optgroup label="${esc(cat.name)}">${SV.filter(s => s.cat === cat.id).map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("")}</optgroup>`).join("");
 if(Q.area) $("qArea").value = Q.area;
-if(Q.date) $("qDate").value = Q.date;
 const today = new Date(); $("qDate").min = new Date(today.getTime() + 9*3600e3).toISOString().slice(0, 10);
+if(Q.date && Q.date >= $("qDate").min) $("qDate").value = Q.date;
 
 // 가격 방식: tiers(집 크기별 정액, 입주청소) / variants(종류 × 수량) / quote(현장 견적)
 // 금액에 hi 가 없으면 '~부터' 금액, quote:true 는 현장 견적 항목
@@ -146,30 +146,46 @@ function calc(){
 $("qSvc").addEventListener("change", e => { cur = {svc: e.target.value, v: 0, t: null, qty: null, opts: []}; drawForm(); });
 $("qTier").addEventListener("click", e => { const b = e.target.closest("[data-t]"); if(!b) return; cur.t = +b.dataset.t; drawForm(); });
 $("qVar").addEventListener("click", e => { const b = e.target.closest("[data-v]"); if(!b) return; cur.v = +b.dataset.v; drawForm(); });
-$("qQty").addEventListener("input", e => { cur.qty = Math.min(999, Math.max(1, parseInt(e.target.value, 10) || 1)); calc(); });
+$("qQty").addEventListener("input", e => { cur.qty = Math.min(999, Math.max(1, parseInt(e.target.value, 10) || 1)); if(e.target.value !== "") e.target.value = cur.qty; calc(); });
+$("qQty").addEventListener("change", e => { e.target.value = cur.qty; });
 $("qMinus").onclick = () => { cur.qty = Math.max(1, (+cur.qty || 1) - 1); $("qQty").value = cur.qty; calc(); };
 $("qPlus").onclick = () => { cur.qty = Math.min(999, (+cur.qty || 0) + 1); $("qQty").value = cur.qty; calc(); };
 $("qOpt").addEventListener("change", e => { const i = +e.target.dataset.o; cur.opts = e.target.checked ? [...new Set([...cur.opts, i])] : cur.opts.filter(x => x !== i); calc(); });
 $("qArea").addEventListener("change", calc);
-$("qDate").addEventListener("change", calc);
+$("qDate").addEventListener("change", () => {
+  const input = $("qDate");
+  input.min = new Date(Date.now() + 9*3600e3).toISOString().slice(0, 10);
+  if(input.value && input.value < input.min){ input.value = ""; toast("지난 날짜는 선택할 수 없어요. 희망 날짜를 다시 선택해 주세요."); }
+  calc();
+});
+function validateQuoteDateBeforeSend(){
+  const input = $("qDate");
+  input.min = new Date(Date.now() + 9*3600e3).toISOString().slice(0, 10);
+  if(input.value && input.value < input.min){
+    input.value = ""; calc(); toast("지난 날짜가 지워졌어요. 희망 날짜를 다시 확인해 주세요."); input.focus(); return false;
+  }
+  return true;
+}
 window.goSms = u => { location.href = u; };
 // 문자로 견적 보내기: 견적 내용이 미리 적힌 문자 창을 엶 (아이폰은 &body=, 안드로이드는 ?body=)
 if($("qSms")) $("qSms").onclick = async () => {
+  if(!validateQuoteDateBeforeSend()) return;
   const num = (C.sms || "").replace(/[^0-9]/g, ""), body = encodeURIComponent(summary());
   const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const MOBILE = IOS || /Android/i.test(navigator.userAgent);
   if(!MOBILE){   // PC에서는 문자 앱이 없어서 번호와 내용을 안내
-    await copy(summary());
-    toast(`문의 내용을 복사했어요. 휴대폰에서 ${C.sms} 로 문자 보내주세요.`);
+    const copied = await copy(summary());
+    toast(copied ? `문의 내용을 복사했어요. 휴대폰에서 ${C.sms} 로 문자 보내주세요.` : `복사하지 못했어요. 견적 내용을 확인해 ${C.sms} 로 문자 보내주세요.`);
     return;
   }
   window.goSms(`sms:${num}${IOS ? "&" : "?"}body=${body}`);
 };
-$("qCopy").onclick = async () => { if(await copy(summary())) toast("문의 내용을 복사했어요. 원하는 곳에 붙여넣어 주세요."); };
+$("qCopy").onclick = async () => { if(!validateQuoteDateBeforeSend()) return; if(await copy(summary())) toast("문의 내용을 복사했어요. 원하는 곳에 붙여넣어 주세요."); else toast("복사하지 못했어요. 견적 내용을 직접 확인해 주세요."); };
 $("qKakao").onclick = async () => {
+  if(!validateQuoteDateBeforeSend()) return;
   if(C.kakao) return kakaoSend("카톡으로 견적 문의", summary());
-  await copy(summary());
-  toast("문의 내용을 복사했어요. 전화로 연결할게요."); setTimeout(() => location.href = "tel:" + phoneDigits, 600);
+  const copied = await copy(summary());
+  toast(copied ? "문의 내용을 복사했어요. 전화로 연결할게요." : "복사하지 못했어요. 견적 내용을 확인해 전화로 문의해 주세요."); setTimeout(() => location.href = "tel:" + phoneDigits, 600);
 };
 drawForm();
 
