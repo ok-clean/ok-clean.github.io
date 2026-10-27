@@ -1,6 +1,6 @@
 // Emulator prototype only: not connected to the public request form.
 const { koreanDayEnd } = require('./kst-date.cjs');
-const { doc, collection, setDoc, getDocs, updateDoc, serverTimestamp } = require('firebase/firestore');
+const { doc, collection, setDoc, getDoc, getDocs, updateDoc, serverTimestamp } = require('firebase/firestore');
 const SERVICES = ['입주·이사 청소','거주·정기 청소','사무실·상가 청소','에어컨 청소','후드·주방 청소','그 외 청소'];
 const AREAS = ['춘천','화천','양구','인제','철원','홍천','횡성','가평','그 외 지역'];
 const STATUSES = ['신규','검토중','상담중','예약확정','작업완료','종료'];
@@ -23,6 +23,14 @@ async function createQuote(db, uid, id, form) {
  await setDoc(doc(db,'quote_requests',id),payload);
  return {id};
 }
+// TEST ONLY: currently admin-scoped; customer direct reads are denied by emulator rules.
+// Do not call this from a public customer browser or treat it as a customer receipt API.
+async function checkQuoteAsAdmin(db, id) {
+ if (!safeId(id)) throw new Error('접수 식별자를 확인해 주세요.');
+ const snapshot = await getDoc(doc(db, 'quote_requests', id));
+ // Only use with an authenticated administrator client in this prototype.
+ return snapshot.exists() ? 'confirmed' : 'absent';
+}
 async function listQuotes(db) {
  const result = await getDocs(collection(db,'quote_requests'));
  return result.docs.map(d => ({id:d.id,...d.data()}));
@@ -31,4 +39,4 @@ async function setStatus(db,id,status) {
  if (!safeId(id) || !STATUSES.includes(status)) throw new Error('요청 상태를 확인해 주세요.');
  await updateDoc(doc(db,'quote_requests',id),{status});
 }
-module.exports = {createQuote, listQuotes, setStatus};
+module.exports = {createQuote, checkQuoteAsAdmin, listQuotes, setStatus};
