@@ -152,7 +152,12 @@ $("qMinus").onclick = () => { cur.qty = Math.max(1, (+cur.qty || 1) - 1); $("qQt
 $("qPlus").onclick = () => { cur.qty = Math.min(999, (+cur.qty || 0) + 1); $("qQty").value = cur.qty; calc(); };
 $("qOpt").addEventListener("change", e => { const i = +e.target.dataset.o; cur.opts = e.target.checked ? [...new Set([...cur.opts, i])] : cur.opts.filter(x => x !== i); calc(); });
 $("qArea").addEventListener("change", calc);
-$("qDate").addEventListener("change", calc);
+$("qDate").addEventListener("change", () => {
+  const input = $("qDate");
+  input.min = new Date(Date.now() + 9*3600e3).toISOString().slice(0, 10);
+  if(input.value && input.value < input.min){ input.value = ""; toast("지난 날짜는 선택할 수 없어요. 희망 날짜를 다시 선택해 주세요."); }
+  calc();
+});
 window.goSms = u => { location.href = u; };
 // 문자로 견적 보내기: 견적 내용이 미리 적힌 문자 창을 엶 (아이폰은 &body=, 안드로이드는 ?body=)
 if($("qSms")) $("qSms").onclick = async () => {
