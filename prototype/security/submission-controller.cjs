@@ -7,6 +7,7 @@ function createSubmissionController(send, options = {}) {
  function update(next) { state = next; for (const fn of listeners) fn(next); }
  function submit(id, form) {
   if (state !== 'idle') throw new Error('현재 접수 상태를 먼저 확인해 주세요.');
+  if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(id)) throw new Error('접수 식별자를 확인해 주세요.');
   requestId = id;
   update('pending');
   timer = setTimeout(() => { if (state === 'pending') update('unknown'); }, timeoutMs);
