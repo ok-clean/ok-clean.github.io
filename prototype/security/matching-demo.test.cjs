@@ -1,0 +1,13 @@
+const assert=require('node:assert/strict');
+const {createDemoMatching}=require('./matching-demo.cjs');
+const m=createDemoMatching();
+m.registerPartner('p1','가상 업체 A');m.registerPartner('p2','가상 업체 B');
+m.createRequest('r1',{service:'입주·이사 청소',area:'춘천'});
+assert.throws(()=>m.assign('r1','p1'));
+m.approvePartner('p1');m.assign('r1','p1');
+assert.throws(()=>m.offer('r1','p2',100000));
+assert.throws(()=>m.offer('r1','p1',0));
+m.offer('r1','p1',250000);
+assert.throws(()=>m.offer('r1','p1',200000));
+assert.deepEqual(m.compare('r1'),[{company:'가상 업체 A',price:250000}]);
+console.log('PASS demo matching assignment and offer isolation');
