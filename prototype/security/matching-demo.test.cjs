@@ -30,6 +30,7 @@ m.setStatus('r1','검토중');
 assert.throws(()=>m.setStatus('r1','예약확정'));
 m.setStatus('r1','견적도착');
 m.setStatus('r1','예약확정');
+assert.throws(()=>m.unassign('r1','p1'));
 assert.throws(()=>m.setStatus('r1','예약확정'));
 assert.throws(()=>m.assign('r1','p1'));
 assert.throws(()=>m.offer('r1','p1',280000));
