@@ -10,6 +10,7 @@ const { doc, collection, setDoc, getDoc, getDocs, updateDoc, deleteDoc, serverTi
   const stranger=env.unauthenticatedContext().firestore();
   const payload={service:'입주·이사 청소',area:'춘천',size:25,date:new Date(Date.now() + 7 * 86400000),name:'테스트',phone:'01000000000',consentVersion:'test-v1',consentAt:serverTimestamp(),createdAt:serverTimestamp(),ownerUid:'customer-1',status:'신규'};
   await assertSucceeds(setDoc(doc(anon,'quote_requests','a'),payload));
+  await assertFails(setDoc(doc(anon,'quote_requests','a'),payload));
   await assertFails(getDoc(doc(anon,'quote_requests','a')));
   await assertFails(getDoc(doc(other,'quote_requests','a')));
   await assertFails(getDocs(collection(stranger,'quote_requests')));
@@ -17,12 +18,18 @@ const { doc, collection, setDoc, getDoc, getDocs, updateDoc, deleteDoc, serverTi
   await assertFails(setDoc(doc(anon,'quote_requests','c'),{...payload,status:'예약확정'}));
   await assertFails(setDoc(doc(anon,'quote_requests','d'),{...payload,extra:'unexpected'}));
   await assertFails(setDoc(doc(anon,'quote_requests','e'),{...payload,size:1000}));
+  await assertFails(setDoc(doc(anon,'quote_requests','noconsent'),{...payload,consentVersion:''}));
+  await assertFails(setDoc(doc(anon,'quote_requests','badphone'),{...payload,phone:'wrong'}));
   await assertFails(setDoc(doc(anon,'quote_requests','past'),{...payload,date:new Date(Date.now()-86400000)}));
   await assertFails(setDoc(doc(anon,'quote_requests','invalid'),{...payload,date:'2099-99-99'}));
   await assertFails(setDoc(doc(anon,'quote_requests','far'),{...payload,date:new Date(Date.now()+400*86400000)}));
   await assertFails(updateDoc(doc(anon,'quote_requests','a'),{status:'예약확정'}));
   await assertSucceeds(getDoc(doc(admin,'quote_requests','a')));
+  const adminList = await assertSucceeds(getDocs(collection(admin,'quote_requests')));
+  if (adminList.size !== 1 || adminList.docs[0].data().status !== '신규') throw new Error('관리자 요청 목록 검증 실패');
   await assertSucceeds(updateDoc(doc(admin,'quote_requests','a'),{status:'상담중'}));
+  const changed = await assertSucceeds(getDoc(doc(admin,'quote_requests','a')));
+  if (changed.data().status !== '상담중') throw new Error('관리자 상태 갱신 검증 실패');
   await assertFails(updateDoc(doc(admin,'quote_requests','a'),{phone:'01011112222'}));
   await assertFails(deleteDoc(doc(admin,'quote_requests','a')));
   console.log('PASS create-only, validation, admin access and write separation');
