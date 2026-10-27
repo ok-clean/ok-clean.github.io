@@ -4,6 +4,7 @@ on:
     paths:
       - 'prototype/**'
       - 'tests/quote-prototype.cjs'
+      - 'tests/receipt-browser.cjs'
       - '.github/workflows/quote-prototype.yml'
 permissions:
   contents: read
@@ -20,3 +21,14 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: python3 -m http.server 8765 --bind 127.0.0.1 > /tmp/okclean-prototype.log 2>&1 &
       - run: node tests/quote-prototype.cjs
+      - name: Receipt browser UI and loopback HTTPS checks
+        run: node tests/receipt-browser.cjs
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/receipt-browser-evidence
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: receipt-browser-${{ github.sha }}
+          path: ${{ runner.temp }}/receipt-browser-evidence
+          if-no-files-found: ignore
+          retention-days: 3
