@@ -1,0 +1,86 @@
+// TEST ONLY: standalone emulator policy. Never deploy over existing production rules.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function admin() { return request.auth != null && request.auth.token.get('admin', false) == true; }
+    function newRequest() {
+      let d = request.resource.data;
+      return request.auth != null && request.auth.token.firebase.sign_in_provider == 'anonymous'
+        && d.keys().hasAll(['service','area','size','date','name','phone','consentVersion','consentAt','createdAt','ownerUid','status'])
+        && d.keys().hasOnly(['service','area','size','date','name','phone','consentVersion','consentAt','createdAt','ownerUid','status'])
+        && (d['service'] in ['입주·이사 청소','거주·정기 청소','사무실·상가 청소','에어컨 청소','후드·주방 청소','그 외 청소'])
+        && (d.area in ['춘천','화천','양구','인제','철원','홍천','횡성','가평','그 외 지역'])
+        && d.size is int && d.size >= 1 && d.size <= 999
+        && d.date is timestamp && d.date >= request.time && d.date <= request.time + duration.value(366, 'd')
+        && d.name is string && d.name.size() >= 1 && d.name.size() <= 30
+        && d.phone is string && d.phone.matches('^01[016789]-?[0-9]{3,4}-?[0-9]{4}$')
+        && d.consentVersion == 'test-v1' && d.consentAt == request.time && d.createdAt == request.time
+        && d.ownerUid == request.auth.uid && d.status == '신규';
+    }
+    function partnerProfileValid(d) {
+      return d.keys().hasAll(['company','areas','specialties','status'])
+        && d.keys().hasOnly(['company','areas','specialties','status'])
+        && d.company is string && d.company.size() >= 1 && d.company.size() <= 60
+        && d.areas is list && d.areas.size() >= 1 && d.areas.size() <= 9
+        && d.areas.hasOnly(['춘천','화천','양구','인제','철원','홍천','횡성','가평','그 외 지역'])
+        && d.specialties is list && d.specialties.size() >= 1 && d.specialties.size() <= 6
+        && d.specialties.hasOnly(['입주·이사 청소','거주·정기 청소','사무실·상가 청소','에어컨 청소','후드·주방 청소','그 외 청소'])
+        && d.status in ['검토중','승인','반려'];
+    }
+    function verifiedPartner(uid) {
+      return request.auth != null && request.auth.uid == uid
+        && request.auth.token.get('email_verified', false) == true
+        && request.auth.token.firebase.sign_in_provider == 'password';
+    }
+    match /partner_profiles/{uid} {
+      allow create: if verifiedPartner(uid) && partnerProfileValid(request.resource.data)
+        && request.resource.data.status == '검토중';
+      allow get: if admin() || verifiedPartner(uid);
+      allow list: if admin();
+      allow update: if partnerProfileValid(request.resource.data) &&
+        ((verifiedPartner(uid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['company','areas','specialties']))
+          || (admin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])));
+      allow delete: if false;
+    }
+    match /quote_requests/{id} {
+      allow create: if newRequest();
+      allow get, list: if admin();
+      allow update: if admin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        && (request.resource.data.status in ['신규','검토중','상담중','예약확정','작업완료','종료']);
+      allow delete: if false;
+    }
+    function approvedPartner(uid) {
+      return verifiedPartner(uid)
+        && get(/databases/$(database)/documents/partner_profiles/$(uid)).data.status == '승인';
+    }
+    function assigned(requestId, uid) {
+      return exists(/databases/$(database)/documents/quote_requests/$(requestId)/assignments/$(uid));
+    }
+    match /quote_requests/{requestId}/assignments/{uid} {
+      allow create: if admin()
+        && exists(/databases/$(database)/documents/quote_requests/$(requestId))
+        && request.resource.data.keys().hasAll(['service','area','size','date'])
+        && request.resource.data.keys().hasOnly(['service','area','size','date'])
+        && request.resource.data['service'] == get(/databases/$(database)/documents/quote_requests/$(requestId)).data['service']
+        && request.resource.data.area == get(/databases/$(database)/documents/quote_requests/$(requestId)).data.area
+        && request.resource.data.size == get(/databases/$(database)/documents/quote_requests/$(requestId)).data.size
+        && request.resource.data.date == get(/databases/$(database)/documents/quote_requests/$(requestId)).data.date;
+      allow get: if admin() || (approvedPartner(uid) && assigned(requestId, uid));
+      allow list: if admin();
+      allow update: if false;
+      allow delete: if admin();
+    }
+    match /quote_requests/{requestId}/offers/{uid} {
+      allow create: if approvedPartner(uid) && assigned(requestId, uid)
+        && request.resource.data.keys().hasAll(['price','note','createdAt'])
+        && request.resource.data.keys().hasOnly(['price','note','createdAt'])
+        && request.resource.data.price is int && request.resource.data.price >= 1 && request.resource.data.price <= 100000000
+        && request.resource.data.note is string && request.resource.data.note.size() <= 500
+        && request.resource.data.createdAt == request.time;
+      allow get: if admin() || (approvedPartner(uid) && assigned(requestId, uid));
+      allow list: if admin();
+      allow update, delete: if false;
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

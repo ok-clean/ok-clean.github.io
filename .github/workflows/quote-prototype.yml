@@ -1,0 +1,22 @@
+name: 견적 요청서 시제품 테스트
+on:
+  pull_request:
+    paths:
+      - 'prototype/**'
+      - 'tests/quote-prototype.cjs'
+      - '.github/workflows/quote-prototype.yml'
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-save --no-package-lock playwright@1.56.1
+      - run: npx playwright install --with-deps chromium
+      - run: python3 -m http.server 8765 --bind 127.0.0.1 > /tmp/okclean-prototype.log 2>&1 &
+      - run: node tests/quote-prototype.cjs
