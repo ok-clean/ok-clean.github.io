@@ -2,7 +2,7 @@
 function createSubmissionController(send, options = {}) {
  const timeoutMs = options.timeoutMs ?? 15000;
  if (typeof send !== 'function' || !Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error('Invalid configuration');
- let state = 'idle', pending = null, timer = null, requestId = null;
+ let state = 'idle', pending = null, timer = null, requestId = null, checking = null;
  const listeners = new Set();
  function update(next) { state = next; for (const fn of listeners) fn(next); }
  function submit(id, form) {
@@ -19,9 +19,12 @@ function createSubmissionController(send, options = {}) {
  }
  async function reconcile(check) {
   if (state !== 'unknown' || typeof check !== 'function') throw new Error('접수 확인을 진행할 수 없습니다.');
-  const result = await check(requestId);
-  if (result === 'confirmed') update('success');
-  return result;
+  if (checking) return checking;
+  checking = Promise.resolve().then(() => check(requestId)).then(result => {
+   if (result === 'confirmed') update('success');
+   return result;
+  }).finally(() => { checking = null; });
+  return checking;
  }
  return {submit, reconcile, getState: () => state, onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }};
 }
