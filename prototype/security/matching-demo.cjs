@@ -11,11 +11,16 @@ function createDemoMatching() {
   const partner=partners.get(id);
   if (!partner) throw Error('등록된 업체가 아닙니다.');
   partner.approved=false;
+  for (const request of requests.values()) {
+   request.assigned.delete(id);
+   request.offers.delete(id);
+  }
  }
  function unassign(requestId, partnerId) {
   const request=requests.get(requestId);
   if (!request) throw Error('요청이 없습니다.');
   request.assigned.delete(partnerId);
+  request.offers.delete(partnerId);
  }
  function approvePartner(id) {
   const partner = partners.get(id);
