@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const assert = require('node:assert/strict');
 const { initializeTestEnvironment, assertFails, assertSucceeds } = require('@firebase/rules-unit-testing');
 const { doc, collection, setDoc, getDoc, getDocs, updateDoc, deleteDoc, serverTimestamp } = require('firebase/firestore');
-const {createQuote,checkOwnQuote,listQuotes,setStatus} = require('./quote-service.cjs');
+const {createQuote,checkQuoteAsAdmin,listQuotes,setStatus} = require('./quote-service.cjs');
 (async () => {
  const env = await initializeTestEnvironment({projectId:'demo-okclean-matching',firestore:{rules:fs.readFileSync('prototype/security/firestore.rules','utf8')}});
  try {
@@ -36,10 +36,10 @@ const {createQuote,checkOwnQuote,listQuotes,setStatus} = require('./quote-servic
   await assertFails(setDoc(doc(anon,'quote_requests','a'),payload));
   await assertFails(getDoc(doc(anon,'quote_requests','a')));
   await assertFails(getDoc(doc(other,'quote_requests','a')));
-  await assert.rejects(checkOwnQuote(anon,'a'));
-  await assert.rejects(checkOwnQuote(other,'a'));
-  assert.equal(await checkOwnQuote(admin,'a'),'confirmed');
-  assert.equal(await checkOwnQuote(admin,'not-created'),'absent');
+  await assert.rejects(checkQuoteAsAdmin(anon,'a'));
+  await assert.rejects(checkQuoteAsAdmin(other,'a'));
+  assert.equal(await checkQuoteAsAdmin(admin,'a'),'confirmed');
+  assert.equal(await checkQuoteAsAdmin(admin,'not-created'),'absent');
   await assertFails(getDocs(collection(stranger,'quote_requests')));
   await assertFails(setDoc(doc(anon,'quote_requests','b'),{...payload,ownerUid:'customer-2'}));
   await assertFails(setDoc(doc(anon,'quote_requests','c'),{...payload,status:'예약확정'}));
