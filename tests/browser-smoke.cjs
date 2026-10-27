@@ -29,6 +29,15 @@ const assert = require('node:assert/strict');
       assert.match(await page.locator('#sheetB').innerText(), /에어컨 청소/);
       assert.equal(await page.locator('#sheetB a').getAttribute('href'), 'https://open.kakao.com/o/s3TIhwSi');
       await page.locator('#sheet [data-close]').first().click();
+      await page.evaluate(() => {
+        Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {writeText: async () => {throw new Error('denied');}}});
+        document.execCommand = () => false;
+      });
+      await page.locator('#qCopy').click();
+      assert.match(await page.locator('.toast').innerText(), /복사하지 못했어요/);
+      await page.locator('#qSms').click();
+      assert.match(await page.locator('.toast').innerText(), /복사하지 못했어요/);
+      assert.doesNotMatch(await page.locator('.toast').innerText(), /복사했어요/);
       await page.locator('[data-join]').first().click();
       await page.locator('#jSubmit').click();
       assert.match(await page.locator('#jErr').innerText(), /이름/);
