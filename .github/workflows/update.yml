@@ -44,9 +44,11 @@ jobs:
             git push || (git pull --rebase -X theirs origin main && git push)
           fi
 
+      - name: Pages 배포 파일 준비 (시제품 제외)
+        run: bash scripts/stage-pages.sh . "$RUNNER_TEMP/okclean-pages"
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: "."
+          path: ${{ runner.temp }}/okclean-pages
       - id: deployment
         uses: actions/deploy-pages@v4
