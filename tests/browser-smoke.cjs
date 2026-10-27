@@ -14,6 +14,13 @@ const assert = require('node:assert/strict');
       const errors = [];
       page.on('pageerror', e => errors.push(e.message));
       await page.goto('http://127.0.0.1:8765/', {waitUntil: 'domcontentloaded'});
+      for (const [saved, expected] of [[1000, '999'], [-5, '1'], [2.9, '2']]) {
+        await page.evaluate(value => localStorage.setItem('quote', JSON.stringify({svc:'aircon', v:0, t:null, qty:value, opts:[]})), saved);
+        await page.reload({waitUntil: 'domcontentloaded'});
+        assert.equal(await page.locator('#qQty').inputValue(), expected);
+        assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('quote')).qty), Number(expected));
+      }
+      await page.locator('#qSvc').selectOption('move-in');
       await page.locator('#qTier [data-t="0"]').click();
       assert.match(await page.locator('#qV').innerText(), /15만/);
       await page.locator('#qOpt input[data-o="0"]').check();
