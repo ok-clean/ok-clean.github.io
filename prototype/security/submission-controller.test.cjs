@@ -20,5 +20,17 @@ function deferred(){let resolve,reject;let promise=new Promise((a,b)=>{resolve=a
  assert.equal(await absent.reconcile(async()=> 'absent'),'absent');
  assert.equal(absent.getState(),'unknown');
  assert.throws(()=>absent.submit('missing',{}));
+ const gate = deferred(); let checks = 0;
+ const concurrent = createSubmissionController(async()=>{throw Error('offline')});
+ await assert.rejects(concurrent.submit('same',{}));
+ const verify = async()=>{checks++;return gate.promise};
+ const a = concurrent.reconcile(verify), b = concurrent.reconcile(verify);
+ gate.resolve('confirmed');
+ assert.equal(await a,'confirmed');assert.equal(await b,'confirmed');
+ assert.equal(checks,1);assert.equal(concurrent.getState(),'success');
+ const failedCheck = createSubmissionController(async()=>{throw Error('offline')});
+ await assert.rejects(failedCheck.submit('fail',{}));
+ await assert.rejects(failedCheck.reconcile(async()=>{throw Error('offline')}));
+ assert.equal(failedCheck.getState(),'unknown');
  console.log('PASS pending, repeated-click prevention, uncertain timeout, late acknowledgement, and error');
 })().catch(e=>{console.error(e);process.exit(1)});
