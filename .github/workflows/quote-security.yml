@@ -19,5 +19,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      - run: node prototype/security/submission-controller.test.cjs
       - run: npm install --no-save --no-package-lock firebase@10.14.1 @firebase/rules-unit-testing@3.0.4 firebase-tools@13.35.1
       - run: npx firebase emulators:exec --project demo-okclean-matching --only firestore --config prototype/security/firebase.json 'node prototype/security/rules.test.cjs'
