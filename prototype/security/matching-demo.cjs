@@ -19,6 +19,7 @@ function createDemoMatching() {
  function unassign(requestId, partnerId) {
   const request=requests.get(requestId);
   if (!request) throw Error('요청이 없습니다.');
+  if (request.status === '예약확정' || request.status === '작업완료') throw Error('확정된 요청의 배정은 변경할 수 없습니다.');
   if (!request.assigned.has(partnerId)) throw Error('배정되지 않은 업체입니다.');
   request.assigned.delete(partnerId);
   request.offers.delete(partnerId);
