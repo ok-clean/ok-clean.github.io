@@ -32,5 +32,9 @@ function deferred(){let resolve,reject;let promise=new Promise((a,b)=>{resolve=a
  await assert.rejects(failedCheck.submit('fail',{}));
  await assert.rejects(failedCheck.reconcile(async()=>{throw Error('offline')}));
  assert.equal(failedCheck.getState(),'unknown');
+ const invalid = createSubmissionController(async()=>{throw Error('offline')});
+ await assert.rejects(invalid.submit('bad',{}));
+ await assert.rejects(invalid.reconcile(async()=> 'success'));
+ assert.equal(invalid.getState(),'unknown');
  console.log('PASS pending, repeated-click prevention, uncertain timeout, late acknowledgement, and error');
 })().catch(e=>{console.error(e);process.exit(1)});
