@@ -21,6 +21,7 @@ m.approvePartner('p1');m.assign('r1','p1');
 assert.deepEqual(m.compare('r1'),[]);
 m.offer('r1','p1',260000);
 m.unassign('r1','p1');
+assert.throws(()=>m.unassign('r1','p1'));
 assert.deepEqual(m.compare('r1'),[]);
 m.assign('r1','p1');
 assert.throws(()=>m.setStatus('r1','예약확정'));
