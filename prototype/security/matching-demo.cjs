@@ -5,7 +5,7 @@ function createDemoMatching() {
  const partners = new Map();
  function registerPartner(id, company) {
   if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(id) || typeof company !== 'string' || !company.trim() || company.length > 60 || partners.has(id)) throw Error('업체 정보를 확인하세요.');
-  partners.set(id, {company, approved:false});
+  partners.set(id, {company:company.trim(), approved:false});
  }
  function revokePartner(id) {
   const partner=partners.get(id);
