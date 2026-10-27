@@ -4,7 +4,7 @@ function createDemoMatching() {
  const requests = new Map();
  const partners = new Map();
  function registerPartner(id, company) {
-  if (!id || !company || partners.has(id)) throw Error('업체 정보를 확인하세요.');
+  if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(id) || typeof company !== 'string' || !company.trim() || company.length > 60 || partners.has(id)) throw Error('업체 정보를 확인하세요.');
   partners.set(id, {company, approved:false});
  }
  function revokePartner(id) {
@@ -28,7 +28,7 @@ function createDemoMatching() {
   partner.approved = true;
  }
  function createRequest(id, fields) {
-  if (!id || requests.has(id) || !fields || !fields.service || !fields.area) throw Error('요청 정보 오류');
+  if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(id) || requests.has(id) || !fields || typeof fields.service !== 'string' || !fields.service.trim() || typeof fields.area !== 'string' || !fields.area.trim()) throw Error('요청 정보 오류');
   requests.set(id,{service:fields.service,area:fields.area,status:'신규',assigned:new Set(),offers:new Map()});
  }
  function assign(requestId, partnerId) {
