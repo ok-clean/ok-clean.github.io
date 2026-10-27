@@ -61,7 +61,7 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/quote_requests/$(requestId))
         && request.resource.data.keys().hasAll(['service','area','size','date'])
         && request.resource.data.keys().hasOnly(['service','area','size','date'])
-        && request.resource.data.service == get(/databases/$(database)/documents/quote_requests/$(requestId)).data.service
+        && request.resource.data['service'] == get(/databases/$(database)/documents/quote_requests/$(requestId)).data['service']
         && request.resource.data.area == get(/databases/$(database)/documents/quote_requests/$(requestId)).data.area
         && request.resource.data.size == get(/databases/$(database)/documents/quote_requests/$(requestId)).data.size
         && request.resource.data.date == get(/databases/$(database)/documents/quote_requests/$(requestId)).data.date;
