@@ -1,4 +1,5 @@
 // Emulator prototype only: not connected to the public request form.
+const { koreanDayEnd } = require('./kst-date.cjs');
 const { doc, collection, setDoc, getDocs, updateDoc, serverTimestamp } = require('firebase/firestore');
 const SERVICES = ['입주·이사 청소','거주·정기 청소','사무실·상가 청소','에어컨 청소','후드·주방 청소','그 외 청소'];
 const AREAS = ['춘천','화천','양구','인제','철원','홍천','횡성','가평','그 외 지역'];
@@ -14,8 +15,9 @@ function validateRequest(form) {
 }
 async function createQuote(db, uid, id, form) {
  if (!uid || !safeId(id)) throw new Error('요청 식별자를 확인해 주세요.');
- validateRequest(form);
- const payload = {service:form.service,area:form.area,size:form.size,date:form.date,name:form.name.trim(),phone:form.phone,
+ const date = typeof form?.date === 'string' ? koreanDayEnd(form.date) : form?.date;
+ validateRequest({...form, date});
+ const payload = {service:form.service,area:form.area,size:form.size,date,name:form.name.trim(),phone:form.phone,
   consentVersion:'test-v1',consentAt:serverTimestamp(),createdAt:serverTimestamp(),ownerUid:uid,status:'신규'};
  // The returned promise settles only when the Firestore write is acknowledged.
  await setDoc(doc(db,'quote_requests',id),payload);
