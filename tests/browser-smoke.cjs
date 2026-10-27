@@ -31,6 +31,13 @@ const assert = require('node:assert/strict');
       await page.locator('#qDate').fill('2000-01-01');
       await page.locator('#qDate').dispatchEvent('change');
       assert.equal(await page.locator('#qDate').inputValue(), '');
+      for (const button of ['#qCopy', '#qSms', '#qKakao']) {
+        await page.evaluate(() => { document.querySelector('#qDate').value = '2000-01-01'; });
+        await page.locator(button).click();
+        assert.equal(await page.locator('#qDate').inputValue(), '');
+        assert.match(await page.locator('.toast').innerText(), /지난 날짜/);
+        assert.equal(await page.locator('#sheet').isVisible(), false);
+      }
       await page.locator('#qKakao').click();
       await page.locator('#sheet').waitFor({state: 'visible'});
       assert.match(await page.locator('#sheetB').innerText(), /에어컨 청소/);
