@@ -1,6 +1,10 @@
 const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
+const {spawn} = require('node:child_process');
+const net = require('node:net');
 (async () => {
+  const server = spawn("python3", ["-m", "http.server", "8765", "--bind", "127.0.0.1"]);
+  await new Promise((resolve, reject) => { let attempts = 0; function probe() { const s = net.connect(8765, "127.0.0.1"); s.on("connect", () => {s.destroy(); resolve();}); s.on("error", () => {if (++attempts > 100) reject(new Error("server did not start")); else setTimeout(probe, 50);}); } probe(); });
   const browser = await chromium.launch();
   try {
     const context = await browser.newContext({viewport: {width: 390, height: 844}});
@@ -12,6 +16,8 @@ const assert = require('node:assert/strict');
     await page.waitForFunction(() => !!navigator.serviceWorker.controller);
     await page.evaluate(() => fetch('/app.js'));
     await page.waitForFunction(async () => !!(await caches.match('/app.js')));
+    server.kill();
+    await new Promise(resolve => server.once("exit", resolve));
     await context.setOffline(true);
     const result = await page.evaluate(async () => {
       const cached = await fetch('/app.js');
@@ -26,5 +32,5 @@ const assert = require('node:assert/strict');
     assert.match(await page.title(), /오케이청소/);
     console.log('PASS offline cached page, cached script and missing script');
     await context.close();
-  } finally { await browser.close(); }
+  } finally { server.kill(); await browser.close(); }
 })().catch(e => { console.error(e); process.exit(1); });
