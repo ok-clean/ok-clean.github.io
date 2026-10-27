@@ -10,7 +10,7 @@ function createSubmissionController(send, options = {}) {
   update('pending');
   timer = setTimeout(() => { if (state === 'pending') update('unknown'); }, timeoutMs);
   pending = Promise.resolve().then(() => send(id,form)).then(result => {
-    clearTimeout(timer); update('success'); return result;
+    clearTimeout(timer); if (state !== 'unknown') update('success'); return result;
   }, error => {
     clearTimeout(timer); update('unknown'); throw error;
   });
