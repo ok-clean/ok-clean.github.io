@@ -1,0 +1,23 @@
+name: 오프라인 처리 테스트
+on:
+  pull_request:
+    paths:
+      - 'sw.js'
+      - 'tests/offline*'
+      - '.github/workflows/offline-tests.yml'
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node tests/offline.test.cjs
+      - run: npm install --no-save --no-package-lock playwright@1.56.1
+      - run: npx playwright install --with-deps chromium
+      - run: python3 -m http.server 8765 --bind 127.0.0.1 > /tmp/okclean-offline-server.log 2>&1 &
+      - run: node tests/offline-browser.cjs
