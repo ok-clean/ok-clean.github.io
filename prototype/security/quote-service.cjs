@@ -23,10 +23,12 @@ async function createQuote(db, uid, id, form) {
  await setDoc(doc(db,'quote_requests',id),payload);
  return {id};
 }
+// TEST ONLY: currently admin-scoped; customer direct reads are denied by emulator rules.
+// Do not call this from a public customer browser or treat it as a customer receipt API.
 async function checkOwnQuote(db, id) {
  if (!safeId(id)) throw new Error('접수 식별자를 확인해 주세요.');
  const snapshot = await getDoc(doc(db, 'quote_requests', id));
- // Only use this with an authenticated owner-scoped Firestore client.
+ // Only use with an authenticated administrator client in this prototype.
  return snapshot.exists() ? 'confirmed' : 'absent';
 }
 async function listQuotes(db) {
