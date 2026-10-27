@@ -8,8 +8,8 @@ service cloud.firestore {
       return request.auth != null && request.auth.token.firebase.sign_in_provider == 'anonymous'
         && d.keys().hasAll(['service','area','size','date','name','phone','consentVersion','consentAt','createdAt','ownerUid','status'])
         && d.keys().hasOnly(['service','area','size','date','name','phone','consentVersion','consentAt','createdAt','ownerUid','status'])
-        && d.service in ['입주·이사 청소','거주·정기 청소','사무실·상가 청소','에어컨 청소','후드·주방 청소','그 외 청소']
-        && d.area in ['춘천','화천','양구','인제','철원','홍천','횡성','가평','그 외 지역']
+        && (d.service in ['입주·이사 청소','거주·정기 청소','사무실·상가 청소','에어컨 청소','후드·주방 청소','그 외 청소'])
+        && (d.area in ['춘천','화천','양구','인제','철원','홍천','횡성','가평','그 외 지역'])
         && d.size is int && d.size >= 1 && d.size <= 999
         && d.date is string && d.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
         && d.name is string && d.name.size() >= 1 && d.name.size() <= 30
@@ -21,7 +21,7 @@ service cloud.firestore {
       allow create: if newRequest();
       allow get, list: if admin();
       allow update: if admin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
-        && request.resource.data.status in ['신규','검토중','상담중','예약확정','작업완료','종료'];
+        && (request.resource.data.status in ['신규','검토중','상담중','예약확정','작업완료','종료']);
       allow delete: if false;
     }
     match /{document=**} { allow read, write: if false; }
