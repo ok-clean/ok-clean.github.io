@@ -49,6 +49,38 @@ service cloud.firestore {
         && (request.resource.data.status in ['신규','검토중','상담중','예약확정','작업완료','종료']);
       allow delete: if false;
     }
+    function approvedPartner(uid) {
+      return verifiedPartner(uid)
+        && get(/databases/$(database)/documents/partner_profiles/$(uid)).data.status == '승인';
+    }
+    function assigned(requestId, uid) {
+      return exists(/databases/$(database)/documents/quote_requests/$(requestId)/assignments/$(uid));
+    }
+    match /quote_requests/{requestId}/assignments/{uid} {
+      allow create: if admin()
+        && exists(/databases/$(database)/documents/quote_requests/$(requestId))
+        && request.resource.data.keys().hasAll(['service','area','size','date'])
+        && request.resource.data.keys().hasOnly(['service','area','size','date'])
+        && request.resource.data.service == get(/databases/$(database)/documents/quote_requests/$(requestId)).data.service
+        && request.resource.data.area == get(/databases/$(database)/documents/quote_requests/$(requestId)).data.area
+        && request.resource.data.size == get(/databases/$(database)/documents/quote_requests/$(requestId)).data.size
+        && request.resource.data.date == get(/databases/$(database)/documents/quote_requests/$(requestId)).data.date;
+      allow get: if admin() || (approvedPartner(uid) && assigned(requestId, uid));
+      allow list: if admin();
+      allow update: if false;
+      allow delete: if admin();
+    }
+    match /quote_requests/{requestId}/offers/{uid} {
+      allow create: if approvedPartner(uid) && assigned(requestId, uid)
+        && request.resource.data.keys().hasAll(['price','note','createdAt'])
+        && request.resource.data.keys().hasOnly(['price','note','createdAt'])
+        && request.resource.data.price is int && request.resource.data.price >= 1 && request.resource.data.price <= 100000000
+        && request.resource.data.note is string && request.resource.data.note.size() <= 500
+        && request.resource.data.createdAt == request.time;
+      allow get: if admin() || (approvedPartner(uid) && assigned(requestId, uid));
+      allow list: if admin();
+      allow update, delete: if false;
+    }
     match /{document=**} { allow read, write: if false; }
   }
 }
