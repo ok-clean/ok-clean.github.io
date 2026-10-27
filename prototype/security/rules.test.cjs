@@ -8,7 +8,7 @@ const { doc, collection, setDoc, getDoc, getDocs, updateDoc, deleteDoc, serverTi
   const other=env.authenticatedContext('customer-2',{firebase:{sign_in_provider:'anonymous'}}).firestore();
   const admin=env.authenticatedContext('admin-test',{admin:true}).firestore();
   const stranger=env.unauthenticatedContext().firestore();
-  const payload={service:'입주·이사 청소',area:'춘천',size:25,date:'2099-01-01',name:'테스트',phone:'01000000000',consentVersion:'test-v1',consentAt:serverTimestamp(),createdAt:serverTimestamp(),ownerUid:'customer-1',status:'신규'};
+  const payload={service:'입주·이사 청소',area:'춘천',size:25,date:new Date(Date.now() + 7 * 86400000),name:'테스트',phone:'01000000000',consentVersion:'test-v1',consentAt:serverTimestamp(),createdAt:serverTimestamp(),ownerUid:'customer-1',status:'신규'};
   await assertSucceeds(setDoc(doc(anon,'quote_requests','a'),payload));
   await assertFails(getDoc(doc(anon,'quote_requests','a')));
   await assertFails(getDoc(doc(other,'quote_requests','a')));
@@ -17,6 +17,9 @@ const { doc, collection, setDoc, getDoc, getDocs, updateDoc, deleteDoc, serverTi
   await assertFails(setDoc(doc(anon,'quote_requests','c'),{...payload,status:'예약확정'}));
   await assertFails(setDoc(doc(anon,'quote_requests','d'),{...payload,extra:'unexpected'}));
   await assertFails(setDoc(doc(anon,'quote_requests','e'),{...payload,size:1000}));
+  await assertFails(setDoc(doc(anon,'quote_requests','past'),{...payload,date:new Date(Date.now()-86400000)}));
+  await assertFails(setDoc(doc(anon,'quote_requests','invalid'),{...payload,date:'2099-99-99'}));
+  await assertFails(setDoc(doc(anon,'quote_requests','far'),{...payload,date:new Date(Date.now()+400*86400000)}));
   await assertFails(updateDoc(doc(anon,'quote_requests','a'),{status:'예약확정'}));
   await assertSucceeds(getDoc(doc(admin,'quote_requests','a')));
   await assertSucceeds(updateDoc(doc(admin,'quote_requests','a'),{status:'상담중'}));
