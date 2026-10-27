@@ -26,8 +26,23 @@
   };
 
   // ── 팝업 창 열고 닫기 ──
-  window.openModal = function(id){ const m = $(id); if(!m) return; m.hidden = false; document.body.classList.add("modal-open"); const f = m.querySelector("input,button:not(.x)"); if(f) setTimeout(() => f.focus(), 50); };
-  window.closeModal = function(m){ if(!m) return; m.hidden = true; if(!document.querySelector(".modal:not([hidden])")) document.body.classList.remove("modal-open"); };
+  const modalOpeners = new WeakMap();
+  window.openModal = function(id){
+    const m = $(id); if(!m || !m.hidden) return;
+    modalOpeners.set(m, document.activeElement);
+    m.hidden = false; document.body.classList.add("modal-open");
+    const candidates = m.querySelectorAll('input:not([type="hidden"]), select, textarea, button:not(.x), a[href], button.x');
+    const first = [...candidates].find(el => !el.disabled && el.getClientRects().length);
+    if(first) setTimeout(() => { if(!m.hidden && first.isConnected && first.getClientRects().length) first.focus(); }, 50);
+  };
+  window.closeModal = function(m){
+    if(!m || m.hidden) return;
+    m.hidden = true;
+    if(!document.querySelector(".modal:not([hidden])")) document.body.classList.remove("modal-open");
+    const opener = modalOpeners.get(m);
+    modalOpeners.delete(m);
+    if(opener && opener.isConnected && opener.getClientRects().length && typeof opener.focus === "function") opener.focus();
+  };
   function sheet(title, html){ document.querySelectorAll(".modal:not([hidden])").forEach(window.closeModal); $("sheetT").textContent = title; $("sheetB").innerHTML = html; window.openModal("sheet"); }
 
   // ── 카톡으로 보내기: 오픈채팅은 글을 미리 넣어 열 수 없어서(카카오 정책), 자동 복사 + 붙여넣기 안내 ──
