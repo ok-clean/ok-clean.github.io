@@ -16,6 +16,15 @@ const assert = require('node:assert/strict');
    assert.match(await page.locator('#error').innerText(),/날짜/); assert.equal(await page.locator('#result').isVisible(),false);
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
    assert.equal(requests.every(x=>x.origin==='http://127.0.0.1:8765' && x.method==='GET'),true);
+   await page.goto('http://127.0.0.1:8765/prototype/admin-requests.html');
+   assert.equal(await page.locator('.card').count(),2);
+   await page.locator('#route-demo-1').selectOption({label:'직접 시공 검토'});
+   await page.locator('#status-demo-1').selectOption({label:'상담중'});
+   await page.locator('.card button').first().click();
+   assert.match(await page.locator('#message').innerText(),/직접 시공 검토.*상담중/);
+   await page.reload(); assert.equal(await page.locator('#status-demo-1').inputValue(),'신규');
+   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+   assert.equal(requests.every(x=>x.origin==='http://127.0.0.1:8765' && x.method==='GET'),true);
    console.log('PASS '+viewport.width+'px'); await ctx.close();
   }
  } finally {await browser.close();}
