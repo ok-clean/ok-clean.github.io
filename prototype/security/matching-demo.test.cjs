@@ -8,6 +8,7 @@ m.createRequest('r1',{service:'입주·이사 청소',area:'춘천'});
 assert.throws(()=>m.setStatus('r1','견적도착'));
 assert.throws(()=>m.assign('r1','p1'));
 m.approvePartner('p1');m.assign('r1','p1');
+assert.throws(()=>m.assign('r1','p1'));
 assert.throws(()=>m.offer('r1','p2',100000));
 assert.throws(()=>m.offer('r1','p1',0));
 m.offer('r1','p1',250000);
