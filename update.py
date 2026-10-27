@@ -62,11 +62,18 @@ def judge(c, title, cat, desc="", old_svc=""):
     if is_edu(c, title, cat):
         return None, ""
     t = norm(title)
-    # 공지나 서비스 소개는 개별 시공 후기가 아니므로 사례 목록에서 제외합니다.\n    if "공지" in t:\n        return None, ""\n    svc = svc_by_title(c, title, cat)
+    # 공지 글은 개별 시공 사례에서 제외합니다.
+    if "공지" in t:
+        return None, ""
+    svc = svc_by_title(c, title, cat)
     topic = svc or "청소" in t or any(norm(w) in t for w in c.get("tipTopics", []))
     if not topic:
         return None, ""                       # 영화·여행·일상 글
-    # 시공 후기라는 명시가 없는 설명형 제목은 정보 글로 분류합니다.\n    info_title = ("알려주는" in t or bool(re.search(r"[가-힣]+는법", t)) or bool(re.search(r"\\d+단계", t)))\n    if info_title and not any(mark in t for mark in ("후기", "시공사례", "작업사례")):\n        return "tip", svc\n    if any(norm(w).lower() in t.lower() for w in c.get("tipWords", [])):
+    # 설명형 제목은 후기 표시가 없다면 정보 글로 분류합니다.
+    info_title = ("알려주는" in t or bool(re.search(r"[가-힣]+는법", t)) or bool(re.search(r"\d+단계", t)))
+    if info_title and not any(mark in t for mark in ("후기", "시공사례", "작업사례")):
+        return "tip", svc
+    if any(norm(w).lower() in t.lower() for w in c.get("tipWords", [])):
         return "tip", svc
     if not (svc or "청소" in t):
         return None, ""
