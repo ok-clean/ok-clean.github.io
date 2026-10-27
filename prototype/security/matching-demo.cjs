@@ -47,7 +47,7 @@ function createDemoMatching() {
  function setStatus(requestId, status) {
   const request=requests.get(requestId);
   if (!request || !STATES.includes(status)) throw Error('상태 정보 오류');
-  if (status === '예약확정' && request.offers.size === 0) throw Error('견적 없이 예약할 수 없습니다.');
+  if (status === '예약확정' && compare(requestId).length === 0) throw Error('유효한 견적 없이 예약할 수 없습니다.');
   if (status === '작업완료' && request.status !== '예약확정') throw Error('예약 확정 후 완료할 수 있습니다.');
   request.status=status;
  }
