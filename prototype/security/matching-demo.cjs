@@ -44,7 +44,7 @@ function createDemoMatching() {
   const request=requests.get(requestId), partner=partners.get(partnerId);
   if (!request || !partner?.approved || !request.assigned.has(partnerId)) throw Error('견적 권한이 없습니다.');
   if (request.status === '예약확정' || request.status === '작업완료') throw Error('마감된 요청에는 견적을 제출할 수 없습니다.');
-  if (!Number.isInteger(price) || price <= 0 || request.offers.has(partnerId)) throw Error('견적 정보 오류');
+  if (!Number.isSafeInteger(price) || price <= 0 || price > 100000000 || request.offers.has(partnerId)) throw Error('견적 정보 오류');
   request.offers.set(partnerId,price);request.status='견적도착';
  }
  function setStatus(requestId, status) {
