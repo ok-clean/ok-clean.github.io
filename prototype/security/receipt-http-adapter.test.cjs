@@ -36,7 +36,7 @@ const {createReceiptHttpHandler} = require('./receipt-http-adapter.cjs');
     r=await post('mine',{...auth,'content-type':'text/plain'});assert.equal(r.status,415);
     r=await fetch(base+'/api/receipt-status',{method:'GET'});assert.equal(r.status,405);
     r=await fetch(base+'/wrong',{method:'POST',headers:auth,body:'{}'});assert.equal(r.status,404);
-    r=await fetch(base+'/api/receipt-status',{method:'OPTIONS',headers:{origin:'https://ok-clean.github.io','access-control-request-headers':'authorization,content-type'}});
+    r=await fetch(base+'/api/receipt-status',{method:'OPTIONS',headers:{origin:'https://ok-clean.github.io','access-control-request-method':'POST','access-control-request-headers':'authorization,content-type'}});
     assert.equal(r.status,204);assert.equal(r.headers.get('access-control-allow-methods'),'POST, OPTIONS');
     r=await fetch(base+'/api/receipt-status',{method:'POST',headers:auth,body:JSON.stringify({requestId:'mine',phone:'01012345678'})});assert.equal(r.status,400);
     r=await fetch(base+'/api/receipt-status',{method:'POST',headers:auth,body:'not-json'});assert.equal(r.status,400);
