@@ -7,6 +7,16 @@ function createDemoMatching() {
   if (!id || !company || partners.has(id)) throw Error('업체 정보를 확인하세요.');
   partners.set(id, {company, approved:false});
  }
+ function revokePartner(id) {
+  const partner=partners.get(id);
+  if (!partner) throw Error('등록된 업체가 아닙니다.');
+  partner.approved=false;
+ }
+ function unassign(requestId, partnerId) {
+  const request=requests.get(requestId);
+  if (!request) throw Error('요청이 없습니다.');
+  request.assigned.delete(partnerId);
+ }
  function approvePartner(id) {
   const partner = partners.get(id);
   if (!partner) throw Error('등록된 업체가 아닙니다.');
@@ -30,8 +40,8 @@ function createDemoMatching() {
  function compare(requestId) {
   const request=requests.get(requestId);
   if (!request) throw Error('요청이 없습니다.');
-  return [...request.offers].map(([id,price])=>({company:partners.get(id).company,price})).sort((a,b)=>a.price-b.price);
+  return [...request.offers].filter(([id])=>partners.get(id)?.approved && request.assigned.has(id)).map(([id,price])=>({company:partners.get(id).company,price})).sort((a,b)=>a.price-b.price);
  }
- return {registerPartner,approvePartner,createRequest,assign,offer,compare};
+ return {registerPartner,approvePartner,revokePartner,unassign,createRequest,assign,offer,compare};
 }
 module.exports={createDemoMatching,STATES};
