@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const { initializeTestEnvironment, assertFails, assertSucceeds } = require('@firebase/rules-unit-testing');
 const { doc, collection, setDoc, getDoc, getDocs, updateDoc, deleteDoc, serverTimestamp } = require('firebase/firestore');
+const {createQuote,listQuotes,setStatus} = require('./quote-service.cjs');
 (async () => {
  const env = await initializeTestEnvironment({projectId:'demo-okclean-matching',firestore:{rules:fs.readFileSync('prototype/security/firestore.rules','utf8')}});
  try {
@@ -32,6 +33,16 @@ const { doc, collection, setDoc, getDoc, getDocs, updateDoc, deleteDoc, serverTi
   if (changed.data().status !== '상담중') throw new Error('관리자 상태 갱신 검증 실패');
   await assertFails(updateDoc(doc(admin,'quote_requests','a'),{phone:'01011112222'}));
   await assertFails(deleteDoc(doc(admin,'quote_requests','a')));
+  const form={service:'입주·이사 청소',area:'춘천',size:25,date:new Date(Date.now()+86400000),name:'가상고객',phone:'01000000000',consent:true};
+  await assert.rejects(createQuote(anon,'customer-1','ui-invalid',{...form,consent:false}));
+  const receipt=await createQuote(anon,'customer-1','ui-example',form);
+  if(receipt.id !== 'ui-example') throw new Error('접수 식별자 불일치');
+  await assertFails(createQuote(anon,'customer-1','ui-example',form));
+  await assertFails(listQuotes(anon));
+  const requests=await listQuotes(admin);
+  if(!requests.some(x=>x.id==='ui-example' && x.status==='신규')) throw new Error('관리자 목록 누락');
+  await setStatus(admin,'ui-example','상담중');
+  if(!(await listQuotes(admin)).some(x=>x.id==='ui-example' && x.status==='상담중')) throw new Error('관리자 상태 저장 실패');
   console.log('PASS create-only, validation, admin access and write separation');
  } finally {await env.cleanup();}
 })().catch(err=>{console.error(err);process.exit(1)});
