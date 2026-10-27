@@ -18,8 +18,9 @@ function createSubmissionController(send, options = {}) {
   return pending;
  }
  async function reconcile(check) {
-  if (state !== 'unknown' || typeof check !== 'function') throw new Error('접수 확인을 진행할 수 없습니다.');
+  if (state !== 'unknown') throw new Error('접수 확인을 진행할 수 없습니다.');
   if (checking) return checking;
+  if (typeof check !== 'function') throw new Error('접수 확인 함수를 지정해 주세요.');
   checking = Promise.resolve().then(() => check(requestId)).then(result => {
    if (result !== 'confirmed' && result !== 'absent' && result !== 'unavailable') throw new Error('접수 확인 응답이 올바르지 않습니다.');
    if (result === 'confirmed') update('success');
