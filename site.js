@@ -61,7 +61,19 @@
   document.addEventListener("click", e => {
     if(e.target.closest("[data-close]") || e.target.classList.contains("modal")) window.closeModal(e.target.closest(".modal"));
   });
-  document.addEventListener("keydown", e => { if(e.key === "Escape") document.querySelectorAll(".modal:not([hidden])").forEach(window.closeModal); });
+  document.addEventListener("keydown", e => {
+    const dialogs = [...document.querySelectorAll(".modal:not([hidden])")];
+    if(e.key === "Escape"){ dialogs.forEach(window.closeModal); return; }
+    if(e.key !== "Tab" || !dialogs.length) return;
+    const modal = dialogs[dialogs.length - 1];
+    const items = [...modal.querySelectorAll('a[href], button, input:not([type="hidden"]), select, textarea, [tabindex]:not([tabindex="-1"])')]
+      .filter(el => !el.disabled && el.tabIndex >= 0 && el.getClientRects().length && getComputedStyle(el).visibility !== "hidden");
+    if(!items.length){ e.preventDefault(); return; }
+    const first = items[0], last = items[items.length - 1], current = document.activeElement;
+    if(!modal.contains(current)){ e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+    else if(e.shiftKey && current === first){ e.preventDefault(); last.focus(); }
+    else if(!e.shiftKey && current === last){ e.preventDefault(); first.focus(); }
+  });
 
   // ── 공유하기 ──
   let myCode = ""; try { myCode = (JSON.parse(localStorage.getItem("member") || "null") || {}).code || ""; } catch(e){}
