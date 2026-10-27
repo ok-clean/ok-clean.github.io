@@ -44,7 +44,7 @@ service cloud.firestore {
     }
     match /quote_requests/{id} {
       allow create: if newRequest();
-      allow get: if admin() || (request.auth != null && resource != null && request.auth.uid == resource.data.ownerUid);
+      allow get: if admin() || (request.auth != null && resource != null && resource.data.get('ownerUid', '') == request.auth.uid);
       allow list: if admin();
       allow update: if admin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
         && (request.resource.data.status in ['신규','검토중','상담중','예약확정','작업완료','종료']);
