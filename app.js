@@ -165,17 +165,17 @@ if($("qSms")) $("qSms").onclick = async () => {
   const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const MOBILE = IOS || /Android/i.test(navigator.userAgent);
   if(!MOBILE){   // PC에서는 문자 앱이 없어서 번호와 내용을 안내
-    await copy(summary());
-    toast(`문의 내용을 복사했어요. 휴대폰에서 ${C.sms} 로 문자 보내주세요.`);
+    const copied = await copy(summary());
+    toast(copied ? `문의 내용을 복사했어요. 휴대폰에서 ${C.sms} 로 문자 보내주세요.` : `복사하지 못했어요. 견적 내용을 확인해 ${C.sms} 로 문자 보내주세요.`);
     return;
   }
   window.goSms(`sms:${num}${IOS ? "&" : "?"}body=${body}`);
 };
-$("qCopy").onclick = async () => { if(await copy(summary())) toast("문의 내용을 복사했어요. 원하는 곳에 붙여넣어 주세요."); };
+$("qCopy").onclick = async () => { if(await copy(summary())) toast("문의 내용을 복사했어요. 원하는 곳에 붙여넣어 주세요."); else toast("복사하지 못했어요. 견적 내용을 직접 확인해 주세요."); };
 $("qKakao").onclick = async () => {
   if(C.kakao) return kakaoSend("카톡으로 견적 문의", summary());
-  await copy(summary());
-  toast("문의 내용을 복사했어요. 전화로 연결할게요."); setTimeout(() => location.href = "tel:" + phoneDigits, 600);
+  const copied = await copy(summary());
+  toast(copied ? "문의 내용을 복사했어요. 전화로 연결할게요." : "복사하지 못했어요. 견적 내용을 확인해 전화로 문의해 주세요."); setTimeout(() => location.href = "tel:" + phoneDigits, 600);
 };
 drawForm();
 
