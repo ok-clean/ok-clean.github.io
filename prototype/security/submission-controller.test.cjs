@@ -4,6 +4,7 @@ function deferred(){let resolve,reject;let promise=new Promise((a,b)=>{resolve=a
 (async()=>{
  let d=deferred(), count=0;
  let ctrl=createSubmissionController(()=>{count++;return d.promise},{timeoutMs:20});
+ assert.throws(()=>ctrl.submit('../bad',{}));assert.equal(ctrl.getState(),'idle');
  const first=ctrl.submit('one',{});assert.equal(ctrl.getState(),'pending');
  assert.throws(()=>ctrl.submit('two',{}));
  await new Promise(r=>setTimeout(r,50));assert.equal(ctrl.getState(),'unknown');assert.throws(()=>ctrl.submit('three',{}));
