@@ -31,8 +31,8 @@
     const m = $(id); if(!m || !m.hidden) return;
     modalOpeners.set(m, document.activeElement);
     m.hidden = false; document.body.classList.add("modal-open");
-    const candidates = m.querySelectorAll('input:not([type="hidden"]), select, textarea, button:not(.x), a[href], button.x');
-    const first = [...candidates].find(el => !el.disabled && el.getClientRects().length);
+    const candidates = m.querySelectorAll('input:not([type="hidden"]), select, textarea, button:not(.x), a[href]');
+    const first = [...candidates].find(el => !el.disabled && el.getClientRects().length) || m.querySelector("button.x");
     if(first) setTimeout(() => { if(!m.hidden && first.isConnected && first.getClientRects().length) first.focus(); }, 50);
   };
   window.closeModal = function(m){
