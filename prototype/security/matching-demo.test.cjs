@@ -11,6 +11,7 @@ m.approvePartner('p1');m.assign('r1','p1');
 assert.throws(()=>m.assign('r1','p1'));
 assert.throws(()=>m.offer('r1','p2',100000));
 assert.throws(()=>m.offer('r1','p1',0));
+assert.throws(()=>m.offer('r1','p1',100000001));
 m.offer('r1','p1',250000);
 assert.throws(()=>m.offer('r1','p1',200000));
 assert.deepEqual(m.compare('r1'),[{company:'가상 업체 A',price:250000}]);
