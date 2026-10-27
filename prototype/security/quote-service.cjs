@@ -25,7 +25,7 @@ async function createQuote(db, uid, id, form) {
 }
 // TEST ONLY: currently admin-scoped; customer direct reads are denied by emulator rules.
 // Do not call this from a public customer browser or treat it as a customer receipt API.
-async function checkOwnQuote(db, id) {
+async function checkQuoteAsAdmin(db, id) {
  if (!safeId(id)) throw new Error('접수 식별자를 확인해 주세요.');
  const snapshot = await getDoc(doc(db, 'quote_requests', id));
  // Only use with an authenticated administrator client in this prototype.
@@ -39,4 +39,4 @@ async function setStatus(db,id,status) {
  if (!safeId(id) || !STATUSES.includes(status)) throw new Error('요청 상태를 확인해 주세요.');
  await updateDoc(doc(db,'quote_requests',id),{status});
 }
-module.exports = {createQuote, checkOwnQuote, listQuotes, setStatus};
+module.exports = {createQuote, checkQuoteAsAdmin, listQuotes, setStatus};
