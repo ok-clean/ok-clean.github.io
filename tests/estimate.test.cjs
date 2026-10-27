@@ -30,3 +30,14 @@ for (const [raw, expected] of [['1000', 999], ['0', 1], ['-5', 1], ['42', 42]]) 
 }
 assert.equal(changes, 4);
 console.log('견적 예시 8건과 수량 경계 4건 통과');
+const dateCode = source.slice(source.indexOf('const today = new Date();'), source.indexOf('\n\n// 가격 방식'));
+function restoredDate(saved) {
+  const element = {min: '', value: ''};
+  class FixedDate extends Date { constructor(...args) { super(...(args.length ? args : ['2026-10-27T12:00:00Z'])); } }
+  vm.runInNewContext(dateCode, {Date: FixedDate, Q: {date: saved}, $: () => element});
+  return element.value;
+}
+assert.equal(restoredDate('2026-10-26'), '');
+assert.equal(restoredDate('2026-10-27'), '2026-10-27');
+assert.equal(restoredDate('2026-11-01'), '2026-11-01');
+console.log('과거·당일·미래 날짜 복원 검사 통과');
