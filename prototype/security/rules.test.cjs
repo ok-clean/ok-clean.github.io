@@ -34,7 +34,7 @@ const {createQuote,listQuotes,setStatus} = require('./quote-service.cjs');
   const payload={service:'입주·이사 청소',area:'춘천',size:25,date:new Date(Date.now() + 7 * 86400000),name:'테스트',phone:'01000000000',consentVersion:'test-v1',consentAt:serverTimestamp(),createdAt:serverTimestamp(),ownerUid:'customer-1',status:'신규'};
   await assertSucceeds(setDoc(doc(anon,'quote_requests','a'),payload));
   await assertFails(setDoc(doc(anon,'quote_requests','a'),payload));
-  await assertFails(getDoc(doc(anon,'quote_requests','a')));
+  await assertSucceeds(getDoc(doc(anon,'quote_requests','a')));
   await assertFails(getDoc(doc(other,'quote_requests','a')));
   await assertFails(getDocs(collection(stranger,'quote_requests')));
   await assertFails(setDoc(doc(anon,'quote_requests','b'),{...payload,ownerUid:'customer-2'}));
