@@ -41,3 +41,11 @@ assert.equal(restoredDate('2026-10-26'), '');
 assert.equal(restoredDate('2026-10-27'), '2026-10-27');
 assert.equal(restoredDate('2026-11-01'), '2026-11-01');
 console.log('과거·당일·미래 날짜 복원 검사 통과');
+const dateHandlerCode = source.slice(source.indexOf('$("qDate").addEventListener("change"'), source.indexOf('window.goSms'));
+let changeDate, notices = [], recalculations = 0;
+const dateInput = {min: '', value: ''};
+class FixedDate extends Date { constructor(...args) { super(...(args.length ? args : ['2026-10-27T12:00:00Z'])); } static now() { return Date.parse('2026-10-27T12:00:00Z'); } }
+vm.runInNewContext(dateHandlerCode, {$: () => Object.assign(dateInput, {addEventListener: (_, cb) => changeDate = cb}), Date: FixedDate, toast: msg => notices.push(msg), calc: () => recalculations++});
+dateInput.value = '2026-10-26'; changeDate(); assert.equal(dateInput.value, ''); assert.equal(notices.length, 1);
+dateInput.value = '2026-10-28'; changeDate(); assert.equal(dateInput.value, '2026-10-28'); assert.equal(recalculations, 2);
+console.log('수동 과거 날짜 입력 차단 및 유효 날짜 유지 통과');
