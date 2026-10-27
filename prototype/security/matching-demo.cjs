@@ -54,6 +54,7 @@ function createDemoMatching() {
   if (status === '작업완료' && request.status === '작업완료') throw Error('이미 완료된 요청입니다.');
   if (status === '작업완료' && request.status !== '예약확정') throw Error('예약 확정 후 완료할 수 있습니다.');
   if ((request.status === '예약확정' || request.status === '작업완료') && status !== '작업완료') throw Error('확정된 요청을 이전 상태로 되돌릴 수 없습니다.');
+  if (status === '작업완료' && compare(requestId).length === 0) throw Error('유효한 업체 견적을 확인할 수 없습니다.');
   request.status=status;
  }
  function compare(requestId) {
