@@ -26,6 +26,7 @@ async function createQuote(db, uid, id, form) {
 async function checkOwnQuote(db, id) {
  if (!safeId(id)) throw new Error('접수 식별자를 확인해 주세요.');
  const snapshot = await getDoc(doc(db, 'quote_requests', id));
+ // Only use this with an authenticated owner-scoped Firestore client.
  return snapshot.exists() ? 'confirmed' : 'absent';
 }
 async function listQuotes(db) {
