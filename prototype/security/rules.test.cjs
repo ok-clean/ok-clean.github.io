@@ -1,4 +1,5 @@
 const fs = require('node:fs');
+const assert = require('node:assert/strict');
 const { initializeTestEnvironment, assertFails, assertSucceeds } = require('@firebase/rules-unit-testing');
 const { doc, collection, setDoc, getDoc, getDocs, updateDoc, deleteDoc, serverTimestamp } = require('firebase/firestore');
 const {createQuote,listQuotes,setStatus} = require('./quote-service.cjs');
