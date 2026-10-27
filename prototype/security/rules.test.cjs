@@ -1,0 +1,27 @@
+const fs = require('node:fs');
+const { initializeTestEnvironment, assertFails, assertSucceeds } = require('@firebase/rules-unit-testing');
+const { doc, collection, setDoc, getDoc, getDocs, updateDoc, deleteDoc, serverTimestamp } = require('firebase/firestore');
+(async () => {
+ const env = await initializeTestEnvironment({projectId:'demo-okclean-matching',firestore:{rules:fs.readFileSync('prototype/security/firestore.rules','utf8')}});
+ try {
+  const anon=env.authenticatedContext('customer-1',{firebase:{sign_in_provider:'anonymous'}}).firestore();
+  const other=env.authenticatedContext('customer-2',{firebase:{sign_in_provider:'anonymous'}}).firestore();
+  const admin=env.authenticatedContext('admin-test',{admin:true}).firestore();
+  const stranger=env.unauthenticatedContext().firestore();
+  const payload={service:'입주·이사 청소',area:'춘천',size:25,date:'2099-01-01',name:'테스트',phone:'01000000000',consentVersion:'test-v1',consentAt:serverTimestamp(),createdAt:serverTimestamp(),ownerUid:'customer-1',status:'신규'};
+  await assertSucceeds(setDoc(doc(anon,'quote_requests','a'),payload));
+  await assertFails(getDoc(doc(anon,'quote_requests','a')));
+  await assertFails(getDoc(doc(other,'quote_requests','a')));
+  await assertFails(getDocs(collection(stranger,'quote_requests')));
+  await assertFails(setDoc(doc(anon,'quote_requests','b'),{...payload,ownerUid:'customer-2'}));
+  await assertFails(setDoc(doc(anon,'quote_requests','c'),{...payload,status:'예약확정'}));
+  await assertFails(setDoc(doc(anon,'quote_requests','d'),{...payload,extra:'unexpected'}));
+  await assertFails(setDoc(doc(anon,'quote_requests','e'),{...payload,size:1000}));
+  await assertFails(updateDoc(doc(anon,'quote_requests','a'),{status:'예약확정'}));
+  await assertSucceeds(getDoc(doc(admin,'quote_requests','a')));
+  await assertSucceeds(updateDoc(doc(admin,'quote_requests','a'),{status:'상담중'}));
+  await assertFails(updateDoc(doc(admin,'quote_requests','a'),{phone:'01011112222'}));
+  await assertFails(deleteDoc(doc(admin,'quote_requests','a')));
+  console.log('PASS create-only, validation, admin access and write separation');
+ } finally {await env.cleanup();}
+})().catch(err=>{console.error(err);process.exit(1)});
