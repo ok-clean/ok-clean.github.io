@@ -17,6 +17,31 @@ service cloud.firestore {
         && d.consentVersion == 'test-v1' && d.consentAt == request.time && d.createdAt == request.time
         && d.ownerUid == request.auth.uid && d.status == '신규';
     }
+    function partnerProfileValid(d) {
+      return d.keys().hasAll(['company','areas','specialties','status'])
+        && d.keys().hasOnly(['company','areas','specialties','status'])
+        && d.company is string && d.company.size() >= 1 && d.company.size() <= 60
+        && d.areas is list && d.areas.size() >= 1 && d.areas.size() <= 9
+        && d.areas.hasOnly(['춘천','화천','양구','인제','철원','홍천','횡성','가평','그 외 지역'])
+        && d.specialties is list && d.specialties.size() >= 1 && d.specialties.size() <= 6
+        && d.specialties.hasOnly(['입주·이사 청소','거주·정기 청소','사무실·상가 청소','에어컨 청소','후드·주방 청소','그 외 청소'])
+        && d.status in ['검토중','승인','반려'];
+    }
+    function verifiedPartner(uid) {
+      return request.auth != null && request.auth.uid == uid
+        && request.auth.token.get('email_verified', false) == true
+        && request.auth.token.firebase.sign_in_provider == 'password';
+    }
+    match /partner_profiles/{uid} {
+      allow create: if verifiedPartner(uid) && partnerProfileValid(request.resource.data)
+        && request.resource.data.status == '검토중';
+      allow get: if admin() || verifiedPartner(uid);
+      allow list: if admin();
+      allow update: if partnerProfileValid(request.resource.data) &&
+        ((verifiedPartner(uid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['company','areas','specialties']))
+          || (admin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])));
+      allow delete: if false;
+    }
     match /quote_requests/{id} {
       allow create: if newRequest();
       allow get, list: if admin();
