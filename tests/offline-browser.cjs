@@ -14,7 +14,11 @@ home = home.replace(/(<script id="cfg" type="application\/json">)([\s\S]*?)(<\/s
   return start + JSON.stringify(cfg).replace(/<\//g, '<\\/') + end;
 });
 const scripts = Object.fromEntries(['sw.js', 'app.js', 'site.js', 'style.css'].map(name => [name, fs.readFileSync(name, 'utf8')]));
+let networkDown = false;
 const server = http.createServer((req, res) => {
+  // Playwright's page offline emulation may not apply to the service worker's
+  // own network fetch. Force an actual connection failure for both contexts.
+  if(networkDown) { req.socket.destroy(); return; }
   const path = new URL(req.url, 'http://127.0.0.1').pathname;
   if(path === '/' || path === '/index.html') { res.writeHead(200, {'Content-Type':'text/html; charset=utf-8'}); return res.end(home); }
   if(path === '/bootstrap') { res.writeHead(200, {'Content-Type':'text/html; charset=utf-8'}); return res.end('<!doctype html><title>시험 준비</title>'); }
@@ -49,6 +53,10 @@ const server = http.createServer((req, res) => {
         return (await Promise.all(['/index.html','/site.js','/app.js','/style.css','/fixture-data.json'].map(x => c.match(x)))).every(Boolean);
       });
       assert.equal(await page.evaluate(async () => !!(await caches.match('/index.html?area=%EC%B6%98%EC%B2%9C'))), false);
+      assert.deepEqual(await page.evaluate(async () => Promise.all(
+        ['/uncached.js','/uncached.css','/uncached.json','/uncached-script.js'].map(async path => !!(await caches.match(path)))
+      )), [false, false, false, false]);
+      networkDown = true;
       await context.setOffline(true);
       const response = await page.goto(base + '/index.html?area=' + encodeURIComponent('춘천') + '#quote', {waitUntil:'domcontentloaded'});
       assert.equal(response.status(), 200);
@@ -79,6 +87,7 @@ const server = http.createServer((req, res) => {
       await context.close();
 
       // With no cached /index.html the existing document fallback cannot work.
+      networkDown = false;
       const cold = await browser.newContext({viewport});
       await cold.route('**/*', route => new URL(route.request().url()).origin === base ? route.continue() : route.abort());
       const coldPage = await cold.newPage();
@@ -87,9 +96,11 @@ const server = http.createServer((req, res) => {
       await coldPage.reload();
       await coldPage.waitForFunction(() => !!navigator.serviceWorker.controller);
       assert.equal(await coldPage.evaluate(async () => !!(await caches.match('/index.html'))), false);
+      networkDown = true;
       await cold.setOffline(true);
       await assert.rejects(coldPage.goto(base + '/index.html?area=' + encodeURIComponent('춘천'), {waitUntil:'domcontentloaded'}));
       await cold.close();
+      networkDown = false;
       console.log('offline PASS ' + viewport.width);
     }
   } finally {
