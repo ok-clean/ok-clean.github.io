@@ -87,6 +87,17 @@ async function done(s){ assert.deepEqual(s.errors, []); await s.context.close();
         assert.equal(await visible(s.page),true);
         await done(s);
       }
+      for(const kind of ['click','scroll']) {
+        const s = await session(browser,viewport);
+        await advance(s.page,24000);
+        if(kind === 'click') await act(s.page,'click','quote');
+        else await s.page.evaluate(() => $('quote').dispatchEvent(new Event('scroll')));
+        await advance(s.page,1000);
+        assert.equal(await visible(s.page),false, `${kind} interaction defers the popup`);
+        await advance(s.page,14000);
+        assert.equal(await visible(s.page),true);
+        await done(s);
+      }
       for(const option of [{member:true},{later:true},{search:'?src=app'}]) {
         const s = await session(browser,viewport,option);
         await advance(s.page,45000);
