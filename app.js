@@ -246,7 +246,13 @@ function drawCases(){
 }
 $("caseList").addEventListener("click", e => { if(e.target.id === "caseMore"){ caseN += 8; drawCases(); } });
 $("caseChips").addEventListener("click", e => { const b = e.target.closest("[data-f]"); if(!b) return; caseF = b.dataset.f; caseN = 8; drawCases(); });
-fetch("cases.json?t=" + Date.now(), {cache: "no-store"}).then(r => r.ok ? r.json() : {cases: []}).catch(() => ({cases: []})).then(d => {
+fetch("cases.json?t=" + Date.now(), {cache: "no-store"}).then(r => {
+  if(!r.ok) throw new Error("cases unavailable");
+  return r.json();
+}).then(d => {
+  if(!d || !Array.isArray(d.cases)) throw new Error("invalid cases");
+  const fields = ["title", "link", "date", "img", "region", "svc", "kind"];
+  if(d.cases.some(x => !x || typeof x !== "object" || Array.isArray(x) || fields.some(k => x[k] != null && typeof x[k] !== "string"))) throw new Error("invalid case item");
   const ex = (C.excludeWords || []).map(w => w.replace(/\s/g, ""));
   const all = (d.cases || []).filter(x => x.link && x.title && !ex.some(w => x.title.replace(/\s/g, "").includes(w))).sort((p, q) => (q.date || "").localeCompare(p.date || ""));
   CASES = all.filter(x => (x.kind || "case") === "case");
@@ -258,6 +264,28 @@ fetch("cases.json?t=" + Date.now(), {cache: "no-store"}).then(r => r.ok ? r.json
   if(CASES.length) drawCases();
   else if(C.sample || !BLOGS.length) $("caseList").outerHTML = `<div class="hint">${BLOGS.length ? "블로그 후기를 불러오는 중이에요. 1시간 안에 자동으로 채워져요." : "config.json 의 blog 에 네이버 블로그 아이디를 넣으면, 블로그에 올린 시공 후기가 여기에 자동으로 모여요."}</div>`;
   else $("cases").hidden = true;
+}).catch(() => {
+  // 조회 실패와 실제 빈 목록을 구분해 방문자가 다른 확인 경로를 알 수 있게 합니다.
+  $("cases").hidden = false;
+  $("caseChips").replaceChildren();
+  const box = document.createElement("div");
+  box.className = "hint";
+  box.setAttribute("role", "status");
+  box.style.gridColumn = "1 / -1";
+  const message = document.createElement("p");
+  message.textContent = "시공 사례를 불러오지 못했어요. 잠시 후 다시 확인해 주세요.";
+  box.append(message);
+  const blogIds = [...new Set(BLOGS.filter(id => typeof id === "string" && /^[A-Za-z0-9_-]+$/.test(id)))];
+  blogIds.forEach((id, i) => {
+    const link = document.createElement("a");
+    link.href = "https://blog.naver.com/" + encodeURIComponent(id);
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = blogIds.length > 1 ? `블로그 ${i + 1}에서 확인하기` : "블로그에서 확인하기";
+    link.style.display = "block";
+    box.append(link);
+  });
+  $("caseList").replaceChildren(box);
 });
 
 // ── 계절 달력 ──
