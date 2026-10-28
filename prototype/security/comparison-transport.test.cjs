@@ -34,6 +34,12 @@ test('client fails closed for extra fields, oversized payloads, invalid response
  const load=makeClient({timeoutMs:20,getIdToken:()=>new Promise(r=>setTimeout(()=>r('test.token'),80)),fetchImpl:async()=>{calls++;return response(accepted)}});
  await assert.rejects(load(),/불러오지/);await new Promise(r=>setTimeout(r,100));assert.equal(calls,0);
 });
+test('external reset aborts an outstanding token lookup before a request is sent',async()=>{
+ let calls=0;const abort=new AbortController();
+ const load=makeClient({getIdToken:()=>new Promise(r=>setTimeout(()=>r('test.token'),80)),fetchImpl:async()=>{calls++;return response(accepted)}});
+ const pending=load({signal:abort.signal});setTimeout(()=>abort.abort(),10);
+ await assert.rejects(pending,/불러오지/);await new Promise(r=>setTimeout(r,100));assert.equal(calls,0);
+});
 test('HTTP adapter restricts origin, payload and response without exposing secret fields',async()=>{
  let calls=0;
  const handler=createComparisonHttpHandler({allowedOrigins:['https://ok-clean.example'],lookupComparison:async({requestId})=>{
