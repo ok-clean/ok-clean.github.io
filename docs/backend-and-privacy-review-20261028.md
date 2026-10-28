@@ -8,6 +8,8 @@
 - 저장소의 Firebase 설정에는 프로젝트 식별을 위한 웹 앱 설정이 있지만 여기에는 값을 옮기지 않는다. Firebase는 해당 설정의 공개 여부와 별개로 데이터 접근을 보안 규칙과 인증으로 통제한다. 서비스 계정 키나 관리자 비밀은 브라우저와 저장소에 두지 않는다.
 - 저장소의 `firestore.rules`에는 관리자 UID 자리표시자가 있다. 이 파일이 현재 운영 Firebase에 그대로 배포되어 있는지, 실제 관리자 계정·인증 설정·백업·요금제·보관 위치가 무엇인지는 확인하지 못했다. 이 파일만 보고 운영 데이터의 안전성이나 접수 성공 여부를 단정하지 않는다.
 - 가입 완료 화면은 기존과 같이 로컬 쿠폰을 표시한다. 이 PR의 선택 버튼은 현재 탭과 이 브라우저의 `member` 저장 항목만 지운다. 관리자 접수 기록, 진행 중인 전송, 다른 탭의 메모리, 카카오톡 대화, 브라우저 자동완성이나 백업은 지우지 않는다. 다른 탭을 닫도록 안내하며 서버 기록 삭제는 별도 상담이 필요하다.
+- 기존 개인정보처리방침의 가입 전송 설명은 Firebase 접수 시도를 빠뜨리고 있었다. 이 PR은 실제 연동 설정에 따라 Firebase·Apps Script 전송 시도와 기기 삭제의 한계를 안내한다. 저장 성공이나 실제 위탁·국외 이전을 코드만으로 확정하지 않는다.
+- 기존 방침에는 마지막 이용 후 2년 또는 탈퇴 요청 시 파기한다는 문구가 있다. 실제 보관 기간, 처리위탁·국외 이전, 백업·카카오톡 기록의 파기 및 요청 처리 절차는 확인하지 못했으며 이 PR이 구현한 기능도 아니다. 운영 반영 전 실제 절차와 방침이 맞는지 소유자가 확인해야 한다.
 - 현재 Pages workflow는 저장소 루트를 배포한다. PR #8은 시제품을 배포물에서 제외하는 제안이지만, 공개 저장소의 브랜치나 파일 자체를 비공개로 만들지는 않는다. GitHub Pages는 정적 파일을 제공하므로 서버 함수는 별도 실행 환경이 필요하다.
 - PR #21의 비교 화면과 서버 통신은 가짜 계정과 에뮬레이터를 사용한 시험이다. 운영 인증·서버·DB에 연결되거나 사진 업로드가 구현된 상태가 아니다.
 
@@ -61,3 +63,4 @@ Supabase 무료 사용량은 조직 단위로 합산되는 항목이 있다. 나
 - Supabase 할당량 초과: https://supabase.com/docs/guides/platform/billing-faq
 - Supabase 비공개 버킷: https://supabase.com/docs/guides/storage/buckets/fundamentals
 - GitHub Pages 정적 파일: https://docs.github.com/en/pages/getting-started-with-github-pages/creating-a-github-pages-site
+- 개인정보 처리방침 기재사항: https://www.law.go.kr/LSW/lsSideInfoP.do?docCls=jo&joBrNo=00&joNo=0030&lsiSeq=283839&urlMode=lsScJoRltInfoR
