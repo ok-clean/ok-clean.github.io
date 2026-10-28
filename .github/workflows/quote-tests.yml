@@ -10,6 +10,7 @@ on:
       - 'build.py'
       - 'update.py'
       - 'area/**'
+      - 'admin/**'
       - 'privacy.html'
       - 'sitemap.xml'
       - 'config.json'
@@ -54,6 +55,7 @@ jobs:
       - run: node tests/quote-empty-quantity-browser.cjs
       - run: node tests/kakao-copy-retry-browser.cjs
       - run: node tests/member-delete-async-browser.cjs
+      - run: node tests/admin-session-browser.cjs
       - run: node tests/minimum-notice-browser.cjs
       - name: Generate an isolated site with fake settings and RSS
         run: python3 tests/build-generated-fixture.py
