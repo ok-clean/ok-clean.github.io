@@ -51,6 +51,8 @@ const base = 'http://127.0.0.1:8765';
       }
       await seed();
       await page.goto(base + '/index.html#quote');
+      // The previous replaceState may already leave this exact URL; reload to test fresh initialization.
+      await page.reload();
       assert.equal(await page.locator('#qArea').inputValue(), '원주');
       assert.deepEqual(errors, []);
       await context.close();
