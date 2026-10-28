@@ -73,11 +73,11 @@ const base = 'http://127.0.0.1:8765';
       await p.evaluate(() => localStorage.setItem('quote', JSON.stringify({svc:'washer',v:0,qty:1,opts:[],area:'춘천'})));
       await p.goto(base + '/index.html?svc=move-in#quote');
       assert.equal(await p.locator('#qSvc').inputValue(), 'washer');
-      assert.match(await p.locator('#qSvcLinkNote').innerText(), /서비스.*확인/);
+      assert.match(await p.locator('#qSvcLinkNote').innerText(), /자동 선택하지 못했어요.*서비스를 확인/);
       await p.locator('#qSvc').selectOption('office');
       await p.reload();
       assert.equal(await p.locator('#qSvc').inputValue(), 'office');
-      assert.match(await p.locator('#qSvcLinkNote').innerText(), /서비스.*확인/);
+      assert.match(await p.locator('#qSvcLinkNote').innerText(), /자동 선택하지 못했어요.*서비스를 확인/);
       await failed.close();
 
       const blocked = await browser.newContext({viewport, serviceWorkers:'block'});
