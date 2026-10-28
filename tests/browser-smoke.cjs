@@ -1,5 +1,7 @@
 const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const config = JSON.parse(fs.readFileSync('config.json', 'utf8'));
 (async () => {
   const browser = await chromium.launch({headless: true});
   try {
@@ -157,6 +159,16 @@ const assert = require('node:assert/strict');
       assert.equal(await page.locator('#jPhone').inputValue(), '');
       await page.keyboard.press('Escape');
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'horizontal overflow');
+      await page.goto('http://127.0.0.1:8765/privacy.html', {waitUntil: 'domcontentloaded'});
+      const privacyText = await page.locator('main').innerText();
+      if (config.member && config.firebase && config.firebase.apiKey && config.firebase.projectId) {
+        assert.match(privacyText, /Firebase의 Cloud Firestore/);
+      } else {
+        assert.doesNotMatch(privacyText, /Firebase의 Cloud Firestore/);
+      }
+      if (config.member) assert.match(privacyText, /이 기기의 회원정보 지우기/);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'privacy page overflow');
+      await page.locator('main').screenshot({path: `/tmp/okclean-privacy-notice-${viewport.width}.png`});
       assert.deepEqual(errors, []);
       console.log(`PASS ${viewport.width}x${viewport.height}`);
       await context.close();
