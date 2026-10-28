@@ -4,7 +4,7 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
 const store = {
   get(k, d){ try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch(e){ return d; } },
-  set(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} }
+  set(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch(e){ return false; } }
 };
 function toast(msg){
   let t = document.querySelector(".toast");
@@ -34,12 +34,34 @@ const REF = store.get("ref", "");
 // ── 견적 계산기 ──
 const SV = C.services;
 const Q = store.get("quote", {}) || {};
-const urlSvc = new URLSearchParams(location.search).get("svc");
+const serviceParams = new URLSearchParams(location.search).getAll("svc");
+let urlSvc = null, serviceLinkIssue = false;
+if(serviceParams.length){
+  let consumed = false;
+  try {
+    const cleanURL = new URL(location.href);
+    cleanURL.searchParams.delete("svc");
+    history.replaceState(history.state, "", cleanURL.href);
+    consumed = true;
+  } catch(_) {} // 주소를 정리할 수 없으면 링크로 자동 선택하지 않습니다.
+  if(consumed && serviceParams.length === 1 && SV.some(s => s.id === serviceParams[0])) urlSvc = serviceParams[0];
+  else serviceLinkIssue = true;
+}
 let cur = { svc: urlSvc && SV.some(s => s.id === urlSvc) ? urlSvc : (Q.svc && SV.some(s => s.id === Q.svc) ? Q.svc : SV[0].id), v: 0, t: null, qty: null, opts: [] };
 if(cur.svc === Q.svc){ cur.v = Q.v || 0; cur.t = Q.t ?? null; cur.qty = Q.qty == null || Q.qty === "" || !Number.isFinite(Number(Q.qty)) ? null : Math.min(999, Math.max(1, Math.trunc(Number(Q.qty)))); cur.opts = Q.opts || []; }
 const svc = () => SV.find(s => s.id === cur.svc);
 
 $("qSvc").innerHTML = C.categories.map(cat => `<optgroup label="${esc(cat.name)}">${SV.filter(s => s.cat === cat.id).map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("")}</optgroup>`).join("");
+if(serviceLinkIssue){
+  const note = document.createElement("p");
+  note.id = "qSvcLinkNote";
+  note.className = "hint";
+  note.setAttribute("role", "status");
+  note.textContent = "청소 서비스를 확인하고 선택해 주세요.";
+  $("qSvc").insertAdjacentElement("afterend", note);
+  $("qSvc").setAttribute("aria-describedby", note.id);
+  $("qSvc").addEventListener("change", () => { note.remove(); $("qSvc").removeAttribute("aria-describedby"); }, {once:true});
+}
 // 지역 페이지의 선택은 최초 진입에만 적용하고 사용자가 이후 변경한 값을 존중합니다.
 const areaParams = new URLSearchParams(location.search).getAll("area");
 if(areaParams.length){
@@ -166,7 +188,16 @@ function calc(){
     if(MEMBER) box.innerHTML = r ? `🎟 회원 쿠폰 적용 시 <b>${priceText(Math.max(0, r.lo - M.coupon), r.hi == null ? null : Math.max(0, r.hi - M.coupon))}</b> + ${esc(MEMBER.free)} 무료` : `🎟 회원 쿠폰 ${won(M.coupon)}원 할인 + ${esc(MEMBER.free)} 무료가 적용돼요`;
     else box.innerHTML = `<button type="button" class="mem-join" data-join>🎟 회원가입하면 여기서 <b>${won(M.coupon)}원 더 할인</b> + 무료 서비스 →</button>`;
   }
-  store.set("quote", {svc: cur.svc, v: cur.v, t: cur.t, qty: cur.qty, opts: cur.opts, area: $("qArea").value, date: $("qDate").value});
+  const saved = store.set("quote", {svc: cur.svc, v: cur.v, t: cur.t, qty: cur.qty, opts: cur.opts, area: $("qArea").value, date: $("qDate").value});
+  let warning = $("qStorageNote");
+  if(!saved && !warning){
+    warning = document.createElement("p");
+    warning.id = "qStorageNote";
+    warning.className = "hint";
+    warning.setAttribute("role", "status");
+    warning.textContent = "이 기기에 견적이 저장되지 않아 새로고침하면 선택이 바뀔 수 있어요.";
+    $("qSvc").insertAdjacentElement("afterend", warning);
+  } else if(saved && warning) warning.remove();
 }
 $("qSvc").addEventListener("change", e => { cur = {svc: e.target.value, v: 0, t: null, qty: null, opts: []}; drawForm(); });
 $("qTier").addEventListener("click", e => { const b = e.target.closest("[data-t]"); if(!b) return; cur.t = +b.dataset.t; drawForm(); });
