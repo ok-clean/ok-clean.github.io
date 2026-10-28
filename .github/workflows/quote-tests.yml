@@ -51,6 +51,7 @@ jobs:
       - run: node tests/quote-empty-quantity-browser.cjs
       - run: node tests/kakao-copy-retry-browser.cjs
       - run: node tests/member-delete-async-browser.cjs
+      - run: node tests/minimum-notice-browser.cjs
       - name: Save member screen captures
         if: always()
         uses: actions/upload-artifact@v4
@@ -62,4 +63,5 @@ jobs:
             /tmp/okclean-mobile-nav-*.png
             /tmp/okclean-member-storage-*.png
             /tmp/okclean-member-sheet-*.png
+            /tmp/okclean-minimum-notice-*.png
           if-no-files-found: ignore
