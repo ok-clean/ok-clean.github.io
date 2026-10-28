@@ -60,6 +60,26 @@ test('concurrent four-partner assignments cannot exceed three slots',async()=>{
  assert.equal((await getDocs(collection(admin,'quote_requests','r','slots'))).size,3);
  assert.equal((await getDocs(collection(admin,'quote_requests','r','assignments'))).size,3);
 });
+test('approval withdrawal blocks access but slot remains occupied until explicitly released',async()=>{
+ await seed(async db=>{await setDoc(doc(db,'partner_profiles','p3'),profile);await setDoc(doc(db,'partner_profiles','p4'),profile);});
+ const old=await assignPartnerAsAdmin(admin,'r','p1');
+ await assignPartnerAsAdmin(admin,'r','p2');await assignPartnerAsAdmin(admin,'r','p3');
+ await reviewPartnerAsAdmin(admin,'p1','반려');
+ await assertFails(getDocFromServer(ref(p1,'grants',old.grantId)));
+ await assert.rejects(assignPartnerAsAdmin(admin,'r','p4'));
+ await revokeAssignmentAsAdmin(admin,'r','p1');
+ const fresh=await assignPartnerAsAdmin(admin,'r','p4');
+ assert.notEqual(fresh.grantId,old.grantId);
+ assert.equal((await getDocs(collection(admin,'quote_requests','r','slots'))).size,3);
+});
+test('concurrent revocations release one matching slot without touching others',async()=>{
+ await assignPartnerAsAdmin(admin,'r','p1');await assignPartnerAsAdmin(admin,'r','p2');
+ const results=await Promise.allSettled([revokeAssignmentAsAdmin(admin,'r','p1'),revokeAssignmentAsAdmin(admin,'r','p1')]);
+ assert.equal(results.filter(x=>x.status==='fulfilled').length,1);
+ assert.equal((await getDocs(collection(admin,'quote_requests','r','slots'))).size,1);
+ assert.equal((await getDocs(collection(admin,'quote_requests','r','assignments'))).size,1);
+ assert.equal((await readAssignedQuote(p2,'r','p2')).area,'춘천');
+});
 test('slot and pointer cannot be detached with direct writes',async()=>{
  const grantId=await assign();
  await assertFails(deleteDoc(ref(admin,'assignments','p1')));
