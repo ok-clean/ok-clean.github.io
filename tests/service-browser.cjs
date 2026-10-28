@@ -20,7 +20,13 @@ const base = 'http://127.0.0.1:8765';
       const seed = () => page.evaluate(() => localStorage.setItem('quote', JSON.stringify({svc:'move-in',v:0,t:0,qty:null,opts:[],area:'춘천',date:'2099-10-29'})));
       await seed();
       await page.goto(base + '/services/aircon.html');
-      await page.getByRole('link', {name:'내 견적 계산하기'}).click();
+      // 상세 페이지의 링크가 실제 견적 페이지로 이동해 스크립트 로드까지
+      // 끝난 뒤 선택 상태를 확인합니다. 기대값이 나올 때까지 기다리지는 않습니다.
+      await Promise.all([
+        page.waitForURL(url => url.pathname === '/index.html' && url.hash === '#quote', {waitUntil:'load'}),
+        page.getByRole('link', {name:'내 견적 계산하기'}).click()
+      ]);
+      await page.locator('#qSvc option').first().waitFor({state:'attached'});
       assert.equal(await page.locator('#qSvc').inputValue(), 'aircon');
       assert.equal(new URL(page.url()).searchParams.has('svc'), false);
       assert.equal(await page.locator('#qArea').inputValue(), '춘천');
