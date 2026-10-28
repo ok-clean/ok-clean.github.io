@@ -4,6 +4,7 @@ on:
     paths:
       - 'firestore.rules'
       - 'member-sync.js'
+      - 'tests/member-auth-ready.test.cjs'
       - 'tests/rule-coexistence.test.cjs'
       - 'tests/fixtures/matching-test-only.rules'
       - 'tests/fixtures/deny-test-only.rules'
@@ -20,6 +21,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - name: Member authentication restoration tests
+        run: node --test tests/member-auth-ready.test.cjs
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
