@@ -86,6 +86,33 @@ async function finish(s){assert.deepEqual(s.errors,[]);await s.context.close();}
         await p.locator('#jKakao').click(); await p.locator('#sheet').waitFor({state:'visible'});
         assert.match(await p.locator('#sheetB').innerText(),/새가상고객/); await finish(s);
       }
+      // 이전 공통 스크립트와 섞여 안전 API가 없다면 복사를 시작하지 않습니다.
+      {
+        const s=await session(browser,viewport), p=s.page;
+        await openJoin(p); await p.evaluate(() => {window.modalSession=undefined;});
+        await p.locator('#jKakao').click();
+        assert.equal(await p.evaluate(() => window.copyPending.length),0);
+        assert.match(await p.locator('.toast').innerText(),/쿠폰번호.*새로고침/);
+        assert.equal(await p.locator('#sheet').isHidden(),true);
+        assert.equal(await p.locator('#joinDone').isVisible(),true); await finish(s);
+      }
+      // 구형 공통 스크립트가 남긴 숨은 회원 안내만 확인해 지웁니다.
+      {
+        const s=await session(browser,viewport), p=s.page;
+        await p.evaluate(() => {window.copyMode='allow';});
+        await p.evaluate(() => window.kakaoSend('카톡으로 가입 완료하기','[오케이청소 회원가입]\n이름: 가상고객','',{memberData:true}));
+        await p.locator('#sheet').waitFor({state:'visible'}); await p.keyboard.press('Escape');
+        await openJoin(p); await p.evaluate(() => {window.clearHiddenMemberSheet=undefined;}); await clear(p);
+        assert.doesNotMatch(await p.locator('#sheetB').textContent(),/가상고객/); await finish(s);
+      }
+      // 구형 회원 스크립트의 호출은 새 공통 스크립트에서 복사를 중지합니다.
+      {
+        const s=await session(browser,viewport), p=s.page;
+        await p.evaluate(() => window.kakaoSend('카톡으로 가입 완료하기','[오케이청소 회원가입]\n이름: 가상고객'));
+        assert.equal(await p.evaluate(() => window.copyPending.length),0);
+        assert.match(await p.locator('.toast').innerText(),/쿠폰번호.*새로고침/);
+        assert.equal(await p.locator('#sheet').isHidden(),true); await finish(s);
+      }
       // 숨겨진 일반 카카오 안내는 회원정보 삭제 시 제거하지 않습니다.
       {
         const s=await session(browser,viewport), p=s.page;
