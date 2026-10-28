@@ -10,6 +10,7 @@ const fakeCases = Array.from({length: 10}, (_, i) => ({
   svc: i === 0 ? 'washer' : 'aircon', region: '춘천', kind: 'case'
 }));
 fakeCases.push({title:'가상 청소 팁', link:'https://example.test/tip', date:'2026-01-11', kind:'tip'});
+fakeCases.push({title:'가상 보존 공지', link:'https://example.test/notice', date:'2026-01-12', kind:'notice'});
 
 function withBlogs(blogs) {
   return home.replace(/(<script id="cfg" type="application\/json">)([\s\S]*?)(<\/script>)/, (_, start, raw, end) => {
@@ -94,6 +95,8 @@ async function visit(browser, viewport, payload, blogs = ['safe_blog', 'safe-blo
         assert.match(await page.locator('#tipList').innerText(), /가상 청소 팁/);
         assert.doesNotMatch(await page.locator('#cases').innerText(), /위험한 링크/);
         assert.doesNotMatch(await page.locator('#tips').innerText(), /위험한 링크/);
+        assert.doesNotMatch(await page.locator('#cases').innerText(), /가상 보존 공지/);
+        assert.doesNotMatch(await page.locator('#tips').innerText(), /가상 보존 공지/);
         assert.deepEqual(errors, []);
         await context.close();
       }
