@@ -7,6 +7,7 @@ on:
       - 'style.css'
       - 'index.html'
       - 'build.py'
+      - 'area/**'
       - 'privacy.html'
       - 'sitemap.xml'
       - 'config.json'
@@ -26,11 +27,13 @@ jobs:
       - run: node tests/estimate.test.cjs
       - run: python3 tests/test_privacy_page.py
       - run: python3 tests/test_sitemap.py
+      - run: python3 tests/test_region_pages.py
       - run: npm install --no-save --no-package-lock playwright@1.56.1
       - run: npx playwright install --with-deps chromium
       - name: Start local test server
         run: python3 -m http.server 8765 --bind 127.0.0.1 > /tmp/okclean-test-server.log 2>&1 &
       - run: node tests/browser-smoke.cjs
+      - run: node tests/region-browser.cjs
       - name: Save member screen captures
         if: always()
         uses: actions/upload-artifact@v4
