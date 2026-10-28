@@ -3,20 +3,53 @@ import {getAuth,GoogleAuthProvider,signInWithPopup,signInWithRedirect,getRedirec
 import {getFirestore,collection,query,orderBy,limit,onSnapshot,doc,updateDoc} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 const $=id=>document.getElementById(id), esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const msg=s=>$('message').textContent=s;
-let db,auth,unsub,records=[];
+let db,auth,unsub,records=[],session=0,viewVersion=0,currentUser=null,serverReady=false;
+// 인증 세대가 바뀌거나 서버 확인이 불가능할 때 화면과 메모리를 즉시 비웁니다.
+function clearMembers(){
+ ++viewVersion;records=[];serverReady=false;$('dashboard').hidden=true;
+ $('members').replaceChildren();$('stats').replaceChildren();$('search').value='';$('statusFilter').value='';
+}
+function resetSession(){
+ ++session;currentUser=null;clearMembers();
+ if(unsub){const stop=unsub;unsub=null;stop();}
+ return session;
+}
+function validAuth(started,user){
+ if(started!==session||currentUser!==user)return false;
+ if(auth.currentUser===user)return true;
+ resetSession();msg('인증 상태를 확인하는 중이에요.');return false;
+}
+function hasAccess(){return !!(serverReady&&currentUser&&validAuth(session,currentUser));}
 const config=await fetch('../config.json',{cache:'no-store'}).then(r=>r.json()).then(c=>c.firebase).catch(()=>null);
 if(!config?.apiKey||!config?.projectId){msg('Firebase 연결 전입니다. 설치방법에 따라 config.json의 firebase 설정을 입력해 주세요.');$('loginBtn').disabled=true;}
 else{
  const app=initializeApp(config);auth=getAuth(app);db=getFirestore(app);
- $('loginBtn').onclick=async()=>{try{await signInWithPopup(auth,new GoogleAuthProvider())}catch(e){if(e.code==='auth/popup-blocked')await signInWithRedirect(auth,new GoogleAuthProvider());else msg('로그인 실패: '+e.message)}};
- $('logout').onclick=()=>signOut(auth);
- getRedirectResult(auth).catch(e=>msg('로그인 실패: '+e.message));
+ $('loginBtn').onclick=async()=>{const started=session;try{await signInWithPopup(auth,new GoogleAuthProvider())}catch(e){if(started!==session)return;if(e.code==='auth/popup-blocked'){try{await signInWithRedirect(auth,new GoogleAuthProvider())}catch(err){if(started===session)msg('로그인 실패: '+err.message)}}else msg('로그인 실패: '+e.message)}};
+ $('logout').onclick=async()=>{const started=resetSession();msg('로그아웃 중…');try{await signOut(auth)}catch(e){if(started===session)msg('로그아웃하지 못했어요. 다시 시도해 주세요.')}};
+ getRedirectResult(auth).catch(e=>{if(session<=1&&!currentUser&&!$('login').hidden)msg('로그인 실패: '+e.message)});
  onAuthStateChanged(auth,user=>{
-  if(unsub){unsub();unsub=null;} $('login').hidden=!!user;$('dashboard').hidden=!user;$('logout').hidden=!user;
-  if(!user){records=[];msg('');return;} msg('회원정보를 불러오는 중…');
-  unsub=onSnapshot(query(collection(db,'member_requests'),orderBy('joined','desc'),limit(500)),snapshot=>{
-    records=snapshot.docs.map(d=>({id:d.id,...d.data()}));msg('최근 500건까지 표시됩니다.');render();
-  },e=>{records=[];$('dashboard').hidden=true;msg('회원 목록에 접근할 수 없습니다. Firebase 관리자 UID 등록과 보안 규칙을 확인해 주세요. ('+e.code+')');});
+  const started=resetSession();currentUser=user;
+  $('login').hidden=!!user;$('logout').hidden=!user;
+  if(!user){msg('');return;}
+  msg('서버에서 회원정보 접근을 확인하는 중…');
+  const isCurrent=()=>validAuth(started,user);
+  try{
+   unsub=onSnapshot(query(collection(db,'member_requests'),orderBy('joined','desc'),limit(500)),{includeMetadataChanges:true},snapshot=>{
+    if(!isCurrent())return;
+    // 로컬 캐시는 권한 확인이 아닙니다.
+    if(snapshot.metadata?.fromCache !== false){
+     clearMembers();msg('서버 확인 전에는 회원정보를 표시하지 않아요. 연결을 확인해 주세요.');return;
+    }
+    // 이미 확인된 같은 세대에서는 기존 화면을 유지하되 미확정 값은 표시하지 않습니다.
+    if(snapshot.metadata?.hasPendingWrites !== false){
+     if(!serverReady){clearMembers();msg('서버에서 회원정보 접근을 확인하는 중…');}
+     else msg('변경사항을 서버에서 확인하는 중…');
+     return;
+    }
+    records=snapshot.docs.map(d=>({id:d.id,...d.data()}));serverReady=true;render();$('dashboard').hidden=false;
+    msg('최근 500건까지 표시됩니다.');
+   },e=>{if(!isCurrent())return;resetSession();msg('회원 목록에 접근할 수 없습니다. Firebase 관리자 UID 등록과 보안 규칙을 확인해 주세요. ('+e.code+')');});
+  }catch(e){if(isCurrent()){clearMembers();msg('회원 목록을 불러오지 못했어요. 연결과 권한을 확인해 주세요.');}}
  });
 }
 const option=(arr,value)=>arr.map(x=>`<option ${x===value?'selected':''}>${esc(x)}</option>`).join('');
@@ -37,8 +70,11 @@ function render(){
  <label class="wide">관리 메모<textarea name="memo" maxlength="1000" rows="3">${esc(m.memo)}</textarea></label>
  <button class="primary" data-save="${esc(m.id)}">변경사항 저장</button></div></details>`).join(''):'<p class="muted">표시할 회원이 없습니다.</p>';
 }
-$('search').oninput=render;$('statusFilter').onchange=render;
+$('search').oninput=()=>{if(hasAccess())render();};$('statusFilter').onchange=()=>{if(hasAccess())render();};
 $('members').addEventListener('click',async e=>{
- const b=e.target.closest('[data-save]');if(!b)return;const el=b.closest('details');const id=b.dataset.save;const v=k=>el.querySelector(`[name="${k}"]`).value;
- b.disabled=true;try{await updateDoc(doc(db,'member_requests',id),{status:v('status'),couponStatus:v('couponStatus'),freeStatus:v('freeStatus'),grade:v('grade'),points:Math.max(0,Math.min(10000000,Number(v('points'))||0)),memo:v('memo').slice(0,1000)});msg('저장되었습니다.')}catch(err){msg('저장 실패: '+err.message)}finally{b.disabled=false}
+ const b=e.target.closest('[data-save]');if(!b||!hasAccess())return;const el=b.closest('details');const id=b.dataset.save;
+ if(!el||!records.some(record=>record.id===id))return;
+ const started=session, view=viewVersion, user=currentUser, v=k=>el.querySelector(`[name="${k}"]`).value;
+ const isCurrent=()=>view===viewVersion&&serverReady&&validAuth(started,user);
+ b.disabled=true;try{await updateDoc(doc(db,'member_requests',id),{status:v('status'),couponStatus:v('couponStatus'),freeStatus:v('freeStatus'),grade:v('grade'),points:Math.max(0,Math.min(10000000,Number(v('points'))||0)),memo:v('memo').slice(0,1000)});if(isCurrent())msg('저장되었습니다.')}catch(err){if(isCurrent())msg('저장 실패: '+err.message)}finally{if(isCurrent()&&b.isConnected)b.disabled=false}
 });
