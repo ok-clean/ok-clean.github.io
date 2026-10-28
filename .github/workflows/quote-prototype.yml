@@ -5,6 +5,7 @@ on:
       - 'prototype/**'
       - 'tests/quote-prototype.cjs'
       - 'tests/receipt-browser.cjs'
+      - 'tests/comparison-preview.cjs'
       - '.github/workflows/quote-prototype.yml'
 permissions:
   contents: read
@@ -23,6 +24,10 @@ jobs:
       - run: node tests/quote-prototype.cjs
       - name: Receipt browser UI and loopback HTTPS checks
         run: node tests/receipt-browser.cjs
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/receipt-browser-evidence
+      - name: Customer comparison preview checks
+        run: node tests/comparison-preview.cjs
         env:
           EVIDENCE_DIR: ${{ runner.temp }}/receipt-browser-evidence
       - uses: actions/upload-artifact@v4
