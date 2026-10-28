@@ -253,11 +253,27 @@ function joinDone(){
     <p class="step-k"><b>마지막 단계</b> · 아래 버튼으로 가입 내용을 카톡에 보내 주시면 쿠폰이 등록돼요.</p>
     <button class="btn glove" type="button" id="jKakao">카톡으로 가입 완료하기</button>
     ${M.referral ? `<button class="btn line small" type="button" data-invite>친구 초대하고 ${won(M.referral.point)}P 받기</button>` : ""}
+    <button class="link" type="button" id="jClearDevice">이 기기의 회원정보 지우기</button>
     <button class="link" type="button" data-close>나중에 보낼게요</button>`;
   $("jKakao").onclick = async () => {
     const text = `[${C.name} 회원가입]\n이름: ${m.name}\n연락처: ${m.phone}\n지역: ${m.area || "-"}\n무료 서비스: ${m.free}\n쿠폰번호: ${m.code}${m.ref ? `\n추천인 코드: ${m.ref}` : ""}\n이벤트 소식: ${m.ad ? "받음" : "안 받음"}`;
     MEMBER.sent = true; store.set("member", MEMBER);
     kakaoSend("카톡으로 가입 완료하기", text);
+  };
+  $("jClearDevice").onclick = () => {
+    const msg = "이 사이트가 이 브라우저에 저장한 회원정보와 쿠폰번호가 지워져요. 다른 탭은 먼저 닫아 주세요. 관리자에게 전송 중이거나 접수된 정보와 카톡 대화는 지워지지 않아요. 계속할까요?";
+    if(!window.confirm(msg)) return;
+    try {
+      localStorage.removeItem("member");
+      if(localStorage.getItem("member") !== null) throw new Error("Member data remains");
+    } catch(e) { toast("기기 정보 삭제에 실패했어요. 브라우저 설정을 확인해 주세요."); return; }
+    MEMBER = null;
+    d.replaceChildren(); d.hidden = true;
+    $("jName").value = ""; $("jPhone").value = ""; $("jArea").value = "";
+    $("jAgree").checked = false; $("jAd").checked = false; $("jErr").textContent = "";
+    $("joinForm").hidden = false;
+    calc(); $("jName").focus();
+    toast("이 기기의 회원정보를 지웠어요. 관리자에게 접수된 정보는 별도 문의해 주세요.");
   };
 }
 // 친구 초대: 내 쿠폰번호가 들어간 링크를 공유 (친구가 가입하면 카톡 가입 메시지에 추천인 코드가 함께 와요)
@@ -299,9 +315,10 @@ if(M){
     // Firebase가 설정되어 있으면 회원 가입 요청을 비공개 Firestore에 전송합니다.
     // 실패 시 카카오톡 가입 확인 절차를 그대로 안내합니다.
     if(C.firebase && C.firebase.apiKey && C.firebase.projectId){
-      import('./member-sync.js').then(mod => mod.submitMember(C.firebase, MEMBER))
-        .then(() => toast('회원정보 접수 요청이 완료됐어요. 카톡으로 가입을 확인해 주세요.'))
-        .catch(err => { console.warn('회원 접수 실패', err); toast('자동 접수가 되지 않았어요. 카톡으로 가입을 완료해 주세요.'); });
+      const submittedMember = MEMBER;
+      import('./member-sync.js').then(mod => mod.submitMember(C.firebase, submittedMember))
+        .then(() => { if(MEMBER === submittedMember) toast('회원정보 접수 요청이 완료됐어요. 카톡으로 가입을 확인해 주세요.'); })
+        .catch(err => { console.warn('회원 접수 실패', err); if(MEMBER === submittedMember) toast('자동 접수가 되지 않았어요. 카톡으로 가입을 완료해 주세요.'); });
     }
     // 관리자 대장 연결이 설정된 경우 가입 정보를 접수합니다.
     // Google Apps Script 웹앱은 교차 출처 응답을 브라우저에서 검증할 수 없으므로
