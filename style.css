@@ -25,10 +25,15 @@ img{max-width:100%;display:block}
 .brand svg{flex:none}
 .brand b{font-size:19px;font-weight:800;letter-spacing:-.02em}
 .top nav{display:flex;gap:16px;font-size:14.5px;font-weight:600}
-.top nav a{color:var(--muted);text-decoration:none}
+.top nav a{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;color:var(--muted);text-decoration:none}
 .top nav a:hover{color:var(--ink)}
 .top .call{font-weight:700;color:var(--ink);text-decoration:none;font-size:15px}
-@media (max-width:720px){ .top nav{display:none} }
+@media (max-width:1000px){
+  .top{flex-wrap:wrap;row-gap:4px}
+  .top nav{order:3;flex:0 0 100%;min-width:0;gap:4px;overflow-x:auto;scroll-padding-inline:4px;
+    padding:6px;border-top:1px solid var(--line);scrollbar-width:thin}
+  .top nav a{flex:none;white-space:nowrap;padding:0 10px}
+}
 
 /* 첫 화면: 타일 줄눈 + 견적 계산기 */
 .hero{background:

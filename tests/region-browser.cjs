@@ -15,6 +15,12 @@ const base = 'http://127.0.0.1:8765';
       await seed();
       await page.goto(base + '/area/' + encodeURIComponent('춘천') + '.html');
       await page.getByRole('link', {name:'춘천 견적 계산하기'}).click();
+      // Navigation may expose the select before app.js has applied the region.
+      // Wait independently for the destination, URL consumption and selected value;
+      // a missing/broken area update still fails by timeout.
+      await page.waitForURL(url => url.pathname === '/index.html' && url.hash === '#quote');
+      await page.waitForFunction(() => !new URL(location.href).searchParams.has('area'));
+      await page.waitForFunction(() => document.querySelector('#qArea')?.value === '춘천');
       assert.equal(await page.locator('#qArea').inputValue(), '춘천');
       assert.equal(await page.locator('#qSvc').inputValue(), 'aircon');
       assert.equal(await page.locator('#qQty').inputValue(), '2');
