@@ -60,7 +60,10 @@ service cloud.firestore {
       allow create: if newRequest();
       allow get, list: if admin();
       allow update: if admin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
-        && (request.resource.data.status in ['신규','검토중','상담중','예약확정','작업완료','종료']);
+        && (request.resource.data.status in ['신규','검토중','상담중','예약확정','작업완료','종료'])
+        // A closed request cannot become open again: that would revive old partner grants.
+        && (!(resource.data.status in ['예약확정','작업완료','종료'])
+          || !(request.resource.data.status in ['신규','검토중','상담중']));
       allow delete: if false;
     }
     // A new pointer and immutable grant must be committed atomically. Old grants cannot be reused.
