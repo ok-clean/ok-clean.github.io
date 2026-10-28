@@ -58,9 +58,14 @@ const base = 'http://127.0.0.1:8765';
       await failed.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort());
       await failed.addInitScript(() => { history.replaceState = () => { throw new Error('blocked'); }; });
       const p = await failed.newPage();
+      await p.goto(base + '/index.html');
+      await p.evaluate(() => localStorage.setItem('quote', JSON.stringify({svc:'aircon', v:0, qty:2, opts:[], area:'원주'})));
       await p.goto(base + '/index.html?area=' + encodeURIComponent('춘천') + '#quote');
       assert.equal(await p.locator('#qArea').inputValue(), '');
       assert.match(await p.locator('#qAreaLinkNote').innerText(), /지역을 선택/);
+      await p.locator('#qArea').selectOption('홍천');
+      await p.reload();
+      assert.equal(await p.locator('#qArea').inputValue(), '');
       await failed.close();
       console.log('region PASS ' + viewport.width);
     }
