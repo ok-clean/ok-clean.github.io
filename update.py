@@ -58,7 +58,10 @@ def svc_by_body(c, desc):
 
 
 def judge(c, title, cat, desc="", old_svc=""):
-    """글 하나를 (종류, 서비스)로 판정. 종류: 'case'(시공 사례) / 'tip'(청소 꿀팁) / None(안 보여줌)"""
+    """글을 case·tip·notice로 분류; None은 기존 제외 규칙에 해당한다."""
+    # 공지 표기만 구분합니다. '시공지역'처럼 단어 안의 공지는 제외하지 않습니다.
+    if re.search(r"(?<![가-힣A-Za-z0-9])(?:필독\s*)?공지(?:사항)?(?=$|[\s:：|!！\])】\-])", title):
+        return "notice", ""
     if is_edu(c, title, cat):
         return None, ""
     t = norm(title)
@@ -116,7 +119,11 @@ def read_blog(c, blog_id):
         cat = html.unescape(it.findtext("category") or "")
         desc = it.findtext("description") or ""
         kind, svc = judge(c, title, cat, desc)
-        if not (title and link and kind):
+        if not (title and link):
+            continue
+        if not kind:
+            # 기존 링크가 제외 대상으로 바뀐 경우에만 사용할 임시 신호입니다.
+            out.append({"link": link, "kind": "_exclude"})
             continue
         try:
             date = parsedate_to_datetime(it.findtext("pubDate")).astimezone(KST).strftime("%Y-%m-%d %H:%M")
@@ -132,22 +139,48 @@ def main():
     blogs = blogs_of(c)
     if blogs:
         old = json.loads(OUT.read_text("utf-8")).get("cases", []) if OUT.exists() else []
+        previously_saved = {x['link']: x for x in old if x.get('link')}
         # 블로그 RSS 는 최근 글만 주므로, 예전에 모은 사례는 지우지 않고 계속 쌓아 둠
         box = {}
         for x in old:                          # 예전에 모은 글도 지금 규칙으로 다시 판정
             if not x.get("link"):
                 continue
+            # 숨겨진 기록은 최신 RSS에서 유효한 글을 확인할 때까지 보존합니다.
+            if x.get("kind") in ("notice", "archived"):
+                box[x["link"]] = x
+                continue
             kind, svc = judge(c, x.get("title", ""), "", "", x.get("svc", ""))
-            if kind:
+            if kind == "notice":
+                box[x["link"]] = {**x, "kind": "notice"}
+            elif kind:
                 box[x["link"]] = {**x, "title": clean_title(c, x["title"]), "kind": kind, "svc": svc}
+            else:
+                # 제외된 기존 글은 공개 데이터에 남지만 화면에는 표시되지 않습니다.
+                box[x["link"]] = {**x, "kind": "archived"}
         ok = 0
         for b in blogs:
             try:
                 got = read_blog(c, b)
                 for x in got:
+                    previous = previously_saved.get(x["link"])
+                    same_source = not previous or not previous.get("blog") or previous["blog"] == b
+                    if x["kind"] == "_exclude":
+                        # 신규 제외 글은 저장하지 않고 기존 레코드만 숨김 처리합니다.
+                        if previous and same_source:
+                            box[x["link"]] = previous if previous.get("kind") == "notice" else {**previous, "kind": "archived"}
+                        continue
+                    if x["kind"] == "notice":
+                        # 공지로 바뀐 기존 링크만 보존하고, 새 공지는 수집하지 않습니다.
+                        if previous and same_source:
+                            box[x["link"]] = {**previous, "kind": "notice"}
+                        continue
+                    # 다른 블로그 RSS가 보관·공지 글을 다시 노출하지 않게 합니다.
+                    current = box.get(x["link"])
+                    if previous and not same_source and ((current and current.get("kind") in ("archived", "notice")) or previous.get("kind") in ("archived", "notice")):
+                        continue
                     box[x["link"]] = x
                 ok += 1
-                print(f"블로그 {b}: 시공 사례 {len(got)}건 확인")
+                print(f"블로그 {b}: 분류한 글 {len(got)}건 확인")
             except Exception as err:
                 print(f"블로그 {b} 읽기 실패(기존 사례 유지):", repr(err))
         # 설정에서 뺀 블로그의 글은 정리
@@ -166,3 +199,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
