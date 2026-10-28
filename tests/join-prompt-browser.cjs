@@ -32,6 +32,11 @@ async function session(browser, viewport, options={}) {
     }
     window.fakeHidden = !!opts.hidden;
     Object.defineProperty(document, 'hidden', {configurable:true,get(){return window.fakeHidden;}});
+    // 이벤트 종류와 가상 시각만 기록합니다. 입력 값은 기록하지 않습니다.
+    window.fakeActivityTrace = [];
+    const trace = e => window.fakeActivityTrace.push([e.type, e.target.id || (e.target === window ? 'window' : e.target.tagName || 'document'), e.isTrusted, Date.now()]);
+    ['pointerdown','keydown','click','input','change','focusin','wheel','touchmove'].forEach(type => document.addEventListener(type,trace));
+    window.addEventListener('scroll',trace,{capture:true});
   }, options);
   const page = await context.newPage();
   await page.clock.install({time:new Date('2026-10-28T12:00:00Z')});
@@ -66,7 +71,7 @@ async function done(s){ assert.deepEqual(s.errors, []); await s.context.close();
         await advance(s.page,1000);
         assert.equal(await visible(s.page),false, 'activity prevents popup at initial deadline');
         await advance(s.page,14000);
-        assert.equal(await visible(s.page),true, 'popup opens after 15 seconds idle');
+        assert.equal(await visible(s.page),true, 'popup opens after 15 seconds idle; events=' + JSON.stringify(await s.page.evaluate(() => window.fakeActivityTrace)));
         assert.ok(await s.page.evaluate(() => Number(JSON.parse(localStorage.getItem('joinLater'))) > 0));
         await s.page.evaluate(() => closeModal($('join')));
         await advance(s.page,30000);
@@ -75,6 +80,7 @@ async function done(s){ assert.deepEqual(s.errors, []); await s.context.close();
       }
       {
         const s = await session(browser,viewport,{search:'?ref=OK-ABC234'});
+        await s.page.evaluate(() => $('months').dispatchEvent(new Event('scroll')));
         await advance(s.page,3999);
         assert.equal(await visible(s.page),false);
         await advance(s.page,1);
@@ -91,11 +97,10 @@ async function done(s){ assert.deepEqual(s.errors, []); await s.context.close();
         assert.equal(await visible(s.page),true);
         await done(s);
       }
-      for(const kind of ['click','scroll']) {
+      for(const kind of ['click','wheel','touchmove','keydown','pointerdown']) {
         const s = await session(browser,viewport);
         await advance(s.page,24000);
-        if(kind === 'click') await act(s.page,'click','quote');
-        else await s.page.evaluate(() => $('quote').dispatchEvent(new Event('scroll')));
+        await act(s.page,kind,'quote');
         await advance(s.page,1000);
         assert.equal(await visible(s.page),false, `${kind} interaction defers the popup`);
         await advance(s.page,14000);
