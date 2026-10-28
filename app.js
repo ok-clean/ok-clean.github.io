@@ -436,9 +436,13 @@ function joinDone(){
   let memberKakaoAttempt = 0;
   $("jKakao").onclick = async () => {
     const text = `[${C.name} 회원가입]\n이름: ${m.name}\n연락처: ${m.phone}\n지역: ${m.area || "-"}\n무료 서비스: ${m.free}\n쿠폰번호: ${m.code}${m.ref ? `\n추천인 코드: ${m.ref}` : ""}\n이벤트 소식: ${m.ad ? "받음" : "안 받음"}`;
+    const button = $("jKakao"), join = $("join");
+    const session = typeof window.modalSession === "function" ? window.modalSession(join) : null;
+    if(!session || typeof window.clearHiddenMemberSheet !== "function"){
+      toast("회원정보와 쿠폰번호를 먼저 확인한 뒤 페이지를 새로고침해 주세요."); return;
+    }
     MEMBER.sent = true; memberSaved = store.set("member", MEMBER);
     $("jStorageNote").hidden = memberSaved;
-    const button = $("jKakao"), join = $("join"), session = window.modalSession(join);
     const attempt = ++memberKakaoAttempt;
     const isCurrent = () => MEMBER === m && button.isConnected && !join.hidden && window.modalSession(join) === session && attempt === memberKakaoAttempt;
     kakaoSend("카톡으로 가입 완료하기", text, memberSaved ? "" : memberStorageWarning, {isCurrent, memberData:true});
@@ -451,7 +455,14 @@ function joinDone(){
       if(localStorage.getItem("member") !== null) throw new Error("Member data remains");
     } catch(e) { toast("기기 정보 삭제에 실패했어요. 브라우저 설정을 확인해 주세요."); return; }
     MEMBER = null; memberSaved = false;
-    window.clearHiddenMemberSheet?.();
+    if(typeof window.clearHiddenMemberSheet === "function") window.clearHiddenMemberSheet();
+    else {
+      // 예전 공통 스크립트가 남긴 회원 안내는 제목과 내용으로 확인한 경우만 지웁니다.
+      const sheet = $("sheet"), title = $("sheetT"), body = $("sheetB"), pre = body?.querySelector(".send-pre");
+      if(sheet?.hidden && title?.textContent === "카톡으로 가입 완료하기" && pre?.textContent.startsWith(`[${C.name} 회원가입]\n`)){
+        body.replaceChildren(); title.textContent = "";
+      }
+    }
     d.replaceChildren(); d.hidden = true;
     $("jName").value = ""; $("jPhone").value = ""; $("jArea").value = "";
     $("jAgree").checked = false; $("jAd").checked = false; $("jErr").textContent = "";
