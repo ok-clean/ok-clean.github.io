@@ -21,7 +21,7 @@ async function session(browser, viewport, initialBlocked) {
     if(url.pathname === '/' || url.pathname === '/index.html') return route.fulfill({status:200,contentType:'text/html',body:home});
     if(url.pathname === '/cases.json') return route.fulfill({status:200,contentType:'application/json',body:'{"cases":[]}'});
     if(url.pathname === '/member-sync.js') return route.fulfill({status:200,contentType:'application/javascript',body:
-      'export function submitMember(){window.fakeSubmitStarted=true;return new Promise(resolve=>window.fakeSubmitDone=resolve)}'});
+      'export function submitMember(){window.fakeSubmitStarted=true;return new Promise((resolve,reject)=>{window.fakeSubmitDone=resolve;window.fakeSubmitFail=()=>reject(new Error("synthetic backend failure"))})}'});
     return route.continue();
   });
   await context.addInitScript(blocked => {
@@ -138,6 +138,23 @@ async function clickKakao(page) {
         assert.equal(await page.evaluate(() => localStorage.getItem('member')), null);
         await page.evaluate(() => window.fakeSubmitDone());
         assert.doesNotMatch(await page.locator('.toast').innerText(), /접수 요청이 완료/);
+        assert.deepEqual(errors, []);
+        await context.close();
+      }
+      {
+        const {context,page,errors} = await session(browser, viewport, true);
+        await submit(page);
+        await page.evaluate(() => {
+          Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async () => {throw new Error('clipboard denied');}}});
+          document.execCommand = () => false;
+        });
+        await clickKakao(page);
+        assert.equal(await page.locator('#sheet .err').isVisible(), true);
+        assert.match(await page.locator('#sheetB').innerText(), /길게 눌러 복사/);
+        assert.equal(await page.locator('#sheet [data-copy-again]').isVisible(), true);
+        await page.evaluate(() => window.fakeSubmitFail());
+        await page.waitForFunction(() => document.querySelector('.toast')?.textContent.includes('자동 접수가 되지 않았어요'));
+        assert.equal(await page.locator('#sheet .err').isVisible(), true);
         assert.deepEqual(errors, []);
         await context.close();
       }
