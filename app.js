@@ -59,7 +59,9 @@ if(refParams.length){
 
 // ── 견적 계산기 ──
 const SV = C.services;
-const Q = store.get("quote", {}) || {};
+// 오래된 형식이나 손상된 저장값도 계산기 전체를 멈추지 않도록 확인합니다.
+const savedQuote = store.get("quote", {});
+const Q = savedQuote && typeof savedQuote === "object" && !Array.isArray(savedQuote) ? savedQuote : {};
 const serviceParams = new URLSearchParams(location.search).getAll("svc");
 let urlSvc = null, serviceLinkIssue = "";
 if(serviceParams.length){
@@ -74,7 +76,14 @@ if(serviceParams.length){
   else serviceLinkIssue = consumed ? "청소 서비스를 확인하고 선택해 주세요." : "링크의 청소 서비스를 자동 선택하지 못했어요. 원하는 서비스를 확인해 주세요.";
 }
 let cur = { svc: urlSvc && SV.some(s => s.id === urlSvc) ? urlSvc : (Q.svc && SV.some(s => s.id === Q.svc) ? Q.svc : SV[0].id), v: 0, t: null, qty: null, opts: [] };
-if(cur.svc === Q.svc){ cur.v = Q.v || 0; cur.t = Q.t ?? null; cur.qty = Q.qty === "" ? "" : Q.qty == null || !Number.isFinite(Number(Q.qty)) ? null : Math.min(999, Math.max(1, Math.trunc(Number(Q.qty)))); cur.opts = Q.opts || []; }
+if(cur.svc === Q.svc){
+  const selected = SV.find(s => s.id === cur.svc);
+  const variants = (selected.tiers || []).length ? (selected.kinds || []) : (selected.variants || []);
+  cur.v = Number.isInteger(Q.v) && Q.v >= 0 && Q.v < variants.length ? Q.v : 0;
+  cur.t = Number.isInteger(Q.t) && Q.t >= 0 && Q.t < (selected.tiers || []).length ? Q.t : null;
+  cur.qty = Q.qty === "" ? "" : (typeof Q.qty === "number" || typeof Q.qty === "string") && Number.isFinite(Number(Q.qty)) ? Math.min(999, Math.max(1, Math.trunc(Number(Q.qty)))) : null;
+  cur.opts = Array.isArray(Q.opts) ? [...new Set(Q.opts.filter(i => Number.isInteger(i) && i >= 0 && i < (selected.options || []).length))] : [];
+}
 const svc = () => SV.find(s => s.id === cur.svc);
 
 if(refNotice){
@@ -121,9 +130,9 @@ if(areaParams.length){
     $("qArea").setAttribute("aria-describedby", note.id);
     $("qArea").addEventListener("change", () => { note.remove(); $("qArea").removeAttribute("aria-describedby"); }, {once:true});
   }
-} else if(Q.area) $("qArea").value = Q.area;
+} else if(typeof Q.area === "string" && Q.area) $("qArea").value = Q.area;
 const today = new Date(); $("qDate").min = new Date(today.getTime() + 9*3600e3).toISOString().slice(0, 10);
-if(Q.date && Q.date >= $("qDate").min) $("qDate").value = Q.date;
+if(typeof Q.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(Q.date) && Q.date >= $("qDate").min) $("qDate").value = Q.date;
 
 // 가격 방식: tiers(집 크기별 정액, 입주청소) / variants(종류 × 수량) / quote(현장 견적)
 // 금액에 hi 가 없으면 '~부터' 금액, quote:true 는 현장 견적 항목
