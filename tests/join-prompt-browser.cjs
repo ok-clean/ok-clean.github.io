@@ -40,6 +40,8 @@ async function session(browser, viewport, options={}) {
   }, options);
   const page = await context.newPage();
   await page.clock.install({time:new Date('2026-10-28T12:00:00Z')});
+  // 페이지 탐색/로드가 걸리는 실시간이 경계 검증에 섞이지 않도록 먼저 고정합니다.
+  await page.clock.pauseAt(new Date('2026-10-28T12:00:01Z'));
   const errors=[];
   page.on('pageerror', e => errors.push(e.message));
   await page.goto(base + '/' + (options.search || ''), {waitUntil:'load'});
