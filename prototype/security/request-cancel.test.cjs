@@ -119,6 +119,10 @@ test('concurrent booking and cancellation produce one compatible final state', {
   assert.equal(booking.status,'rejected');
  } else {
   assert.equal(state,'예약확정');assert.equal(booking.status,'fulfilled');
-  assert.deepEqual(cancel.value,unavailable(409));
+  // A concurrent rule rejection can surface as an unknown 503 instead of a 409.
+  // Never claim cancellation; a later owner retry must observe the booked state.
+  assert.ok([409,503].includes(cancel.value.httpStatus));
+  assert.deepEqual(cancel.value.body,{status:'unavailable'});
+  assert.deepEqual(await handler(args),unavailable(409));
  }
 });
