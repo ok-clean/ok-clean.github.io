@@ -76,6 +76,10 @@
 
   // ── 카톡으로 보내기: 오픈채팅은 글을 미리 넣어 열 수 없어서(카카오 정책), 자동 복사 + 붙여넣기 안내 ──
   window.kakaoSend = async function(title, text, notice = "", options = {}){
+    // 이전 회원 스크립트와 혼합되면 삭제 후 늦게 복사된 안내가 다시 열릴 수 있습니다.
+    if(title === "카톡으로 가입 완료하기" && options.memberData !== true){
+      window.toast("회원정보와 쿠폰번호를 먼저 확인한 뒤 페이지를 새로고침해 주세요."); return;
+    }
     const isCurrent = options.isCurrent || (() => true);
     const active = document.activeElement, activeModal = active && active.closest(".modal:not([hidden])");
     const opener = activeModal ? (modalOpeners.get(activeModal) || active) : active;
