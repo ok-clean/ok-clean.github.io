@@ -36,13 +36,38 @@ const SV = C.services;
 const Q = store.get("quote", {}) || {};
 const urlSvc = new URLSearchParams(location.search).get("svc");
 let cur = { svc: urlSvc && SV.some(s => s.id === urlSvc) ? urlSvc : (Q.svc && SV.some(s => s.id === Q.svc) ? Q.svc : SV[0].id), v: 0, t: null, qty: null, opts: [] };
-if(cur.svc === Q.svc){ cur.v = Q.v || 0; cur.t = Q.t ?? null; cur.qty = Q.qty || null; cur.opts = Q.opts || []; }
+if(cur.svc === Q.svc){ cur.v = Q.v || 0; cur.t = Q.t ?? null; cur.qty = Q.qty == null || Q.qty === "" || !Number.isFinite(Number(Q.qty)) ? null : Math.min(999, Math.max(1, Math.trunc(Number(Q.qty)))); cur.opts = Q.opts || []; }
 const svc = () => SV.find(s => s.id === cur.svc);
 
 $("qSvc").innerHTML = C.categories.map(cat => `<optgroup label="${esc(cat.name)}">${SV.filter(s => s.cat === cat.id).map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("")}</optgroup>`).join("");
-if(Q.area) $("qArea").value = Q.area;
-if(Q.date) $("qDate").value = Q.date;
+// 지역 페이지의 선택은 최초 진입에만 적용하고 사용자가 이후 변경한 값을 존중합니다.
+const areaParams = new URLSearchParams(location.search).getAll("area");
+if(areaParams.length){
+  let consumed = false;
+  try {
+    const cleanURL = new URL(location.href);
+    cleanURL.searchParams.delete("area");
+    history.replaceState(history.state, "", cleanURL.href);
+    consumed = true;
+  } catch(_) {} // 주소를 정리할 수 없을 때에는 자동 선택하지 않습니다.
+  const region = areaParams.length === 1 ? areaParams[0] : "";
+  const isKnownRegion = (C.regions || []).includes(region);
+  const isSelectable = Array.from($("qArea").options).some(option => option.value === region && region !== "");
+  if(consumed && isKnownRegion && isSelectable) $("qArea").value = region;
+  else {
+    $("qArea").value = "";
+    const note = document.createElement("p");
+    note.id = "qAreaLinkNote";
+    note.className = "hint";
+    note.setAttribute("role", "status");
+    note.textContent = consumed && isKnownRegion ? "세부 지역을 선택해 주세요." : "지역을 선택해 주세요.";
+    $("qArea").insertAdjacentElement("afterend", note);
+    $("qArea").setAttribute("aria-describedby", note.id);
+    $("qArea").addEventListener("change", () => { note.remove(); $("qArea").removeAttribute("aria-describedby"); }, {once:true});
+  }
+} else if(Q.area) $("qArea").value = Q.area;
 const today = new Date(); $("qDate").min = new Date(today.getTime() + 9*3600e3).toISOString().slice(0, 10);
+if(Q.date && Q.date >= $("qDate").min) $("qDate").value = Q.date;
 
 // 가격 방식: tiers(집 크기별 정액, 입주청소) / variants(종류 × 수량) / quote(현장 견적)
 // 금액에 hi 가 없으면 '~부터' 금액, quote:true 는 현장 견적 항목
@@ -146,30 +171,46 @@ function calc(){
 $("qSvc").addEventListener("change", e => { cur = {svc: e.target.value, v: 0, t: null, qty: null, opts: []}; drawForm(); });
 $("qTier").addEventListener("click", e => { const b = e.target.closest("[data-t]"); if(!b) return; cur.t = +b.dataset.t; drawForm(); });
 $("qVar").addEventListener("click", e => { const b = e.target.closest("[data-v]"); if(!b) return; cur.v = +b.dataset.v; drawForm(); });
-$("qQty").addEventListener("input", e => { cur.qty = Math.min(999, Math.max(1, parseInt(e.target.value, 10) || 1)); calc(); });
+$("qQty").addEventListener("input", e => { cur.qty = Math.min(999, Math.max(1, parseInt(e.target.value, 10) || 1)); if(e.target.value !== "") e.target.value = cur.qty; calc(); });
+$("qQty").addEventListener("change", e => { e.target.value = cur.qty; });
 $("qMinus").onclick = () => { cur.qty = Math.max(1, (+cur.qty || 1) - 1); $("qQty").value = cur.qty; calc(); };
 $("qPlus").onclick = () => { cur.qty = Math.min(999, (+cur.qty || 0) + 1); $("qQty").value = cur.qty; calc(); };
 $("qOpt").addEventListener("change", e => { const i = +e.target.dataset.o; cur.opts = e.target.checked ? [...new Set([...cur.opts, i])] : cur.opts.filter(x => x !== i); calc(); });
 $("qArea").addEventListener("change", calc);
-$("qDate").addEventListener("change", calc);
+$("qDate").addEventListener("change", () => {
+  const input = $("qDate");
+  input.min = new Date(Date.now() + 9*3600e3).toISOString().slice(0, 10);
+  if(input.value && input.value < input.min){ input.value = ""; toast("지난 날짜는 선택할 수 없어요. 희망 날짜를 다시 선택해 주세요."); }
+  calc();
+});
+function validateQuoteDateBeforeSend(){
+  const input = $("qDate");
+  input.min = new Date(Date.now() + 9*3600e3).toISOString().slice(0, 10);
+  if(input.value && input.value < input.min){
+    input.value = ""; calc(); toast("지난 날짜가 지워졌어요. 희망 날짜를 다시 확인해 주세요."); input.focus(); return false;
+  }
+  return true;
+}
 window.goSms = u => { location.href = u; };
 // 문자로 견적 보내기: 견적 내용이 미리 적힌 문자 창을 엶 (아이폰은 &body=, 안드로이드는 ?body=)
 if($("qSms")) $("qSms").onclick = async () => {
+  if(!validateQuoteDateBeforeSend()) return;
   const num = (C.sms || "").replace(/[^0-9]/g, ""), body = encodeURIComponent(summary());
   const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const MOBILE = IOS || /Android/i.test(navigator.userAgent);
   if(!MOBILE){   // PC에서는 문자 앱이 없어서 번호와 내용을 안내
-    await copy(summary());
-    toast(`문의 내용을 복사했어요. 휴대폰에서 ${C.sms} 로 문자 보내주세요.`);
+    const copied = await copy(summary());
+    toast(copied ? `문의 내용을 복사했어요. 휴대폰에서 ${C.sms} 로 문자 보내주세요.` : `복사하지 못했어요. 견적 내용을 확인해 ${C.sms} 로 문자 보내주세요.`);
     return;
   }
   window.goSms(`sms:${num}${IOS ? "&" : "?"}body=${body}`);
 };
-$("qCopy").onclick = async () => { if(await copy(summary())) toast("문의 내용을 복사했어요. 원하는 곳에 붙여넣어 주세요."); };
+$("qCopy").onclick = async () => { if(!validateQuoteDateBeforeSend()) return; if(await copy(summary())) toast("문의 내용을 복사했어요. 원하는 곳에 붙여넣어 주세요."); else toast("복사하지 못했어요. 견적 내용을 직접 확인해 주세요."); };
 $("qKakao").onclick = async () => {
+  if(!validateQuoteDateBeforeSend()) return;
   if(C.kakao) return kakaoSend("카톡으로 견적 문의", summary());
-  await copy(summary());
-  toast("문의 내용을 복사했어요. 전화로 연결할게요."); setTimeout(() => location.href = "tel:" + phoneDigits, 600);
+  const copied = await copy(summary());
+  toast(copied ? "문의 내용을 복사했어요. 전화로 연결할게요." : "복사하지 못했어요. 견적 내용을 확인해 전화로 문의해 주세요."); setTimeout(() => location.href = "tel:" + phoneDigits, 600);
 };
 drawForm();
 
@@ -181,6 +222,24 @@ document.querySelectorAll("#services .cats .chip").forEach(b => b.addEventListen
 
 // ── 시공 사례 (블로그 후기 자동 연동: update.py 가 cases.json 으로 정리) ──
 let CASES = [], caseF = "", caseN = 8;
+// 수집된 데이터의 링크는 절대 http(s) 주소만 허용합니다.
+function safeCaseLink(value){
+  if(typeof value !== "string" || !/^https?:\/\//i.test(value) || /[\s\x00-\x1f\x7f\u0085\\]/u.test(value)) return false;
+  const authority = value.match(/^https?:\/\/([^/?#]*)/i)?.[1] || "";
+  if(authority.includes("%") || authority.includes("@")) return false;
+  try {
+    const url = new URL(value);
+    const host = url.hostname;
+    const domain = /^[a-z0-9.-]+$/i.test(host) && !host.replace(/\.$/, "").split(".").some(part => !part || part.length > 63);
+    const ipv6 = /^\[[0-9a-f:.]+\]$/i.test(host);
+    const rawHost = authority.replace(/:\d*$/, "").replace(/\.$/, "");
+    if(/^\d+\.\d+\.\d+\.\d+$/.test(host) && host !== rawHost) return false;
+    if(!rawHost.startsWith("[") && /(?:^|\.)\d+$/.test(rawHost)) {
+      if(!/^\d+\.\d+\.\d+\.\d+$/.test(rawHost) || host !== rawHost) return false;
+    }
+    return (url.protocol === "http:" || url.protocol === "https:") && (domain || ipv6) && !url.username && !url.password;
+  } catch(_) { return false; }
+}
 // 네이버 블로그 사진: 외부 사이트에서도 잘 열리는 서버(mblogthumb-phinf)의 큰 사진을 먼저 쓰고, 안 되면 원래 썸네일로
 function naverImgs(src){
   if(!/pstatic\.net/.test(src)) return [src, src];
@@ -205,9 +264,15 @@ function drawCases(){
 }
 $("caseList").addEventListener("click", e => { if(e.target.id === "caseMore"){ caseN += 8; drawCases(); } });
 $("caseChips").addEventListener("click", e => { const b = e.target.closest("[data-f]"); if(!b) return; caseF = b.dataset.f; caseN = 8; drawCases(); });
-fetch("cases.json?t=" + Date.now(), {cache: "no-store"}).then(r => r.ok ? r.json() : {cases: []}).catch(() => ({cases: []})).then(d => {
+fetch("cases.json?t=" + Date.now(), {cache: "no-store"}).then(r => {
+  if(!r.ok) throw new Error("cases unavailable");
+  return r.json();
+}).then(d => {
+  if(!d || !Array.isArray(d.cases)) throw new Error("invalid cases");
+  const fields = ["title", "link", "date", "img", "region", "svc", "kind"];
+  if(d.cases.some(x => !x || typeof x !== "object" || Array.isArray(x) || fields.some(k => x[k] != null && typeof x[k] !== "string"))) throw new Error("invalid case item");
   const ex = (C.excludeWords || []).map(w => w.replace(/\s/g, ""));
-  const all = (d.cases || []).filter(x => x.link && x.title && !ex.some(w => x.title.replace(/\s/g, "").includes(w))).sort((p, q) => (q.date || "").localeCompare(p.date || ""));
+  const all = (d.cases || []).filter(x => safeCaseLink(x.link) && x.title && !ex.some(w => x.title.replace(/\s/g, "").includes(w))).sort((p, q) => (q.date || "").localeCompare(p.date || ""));
   CASES = all.filter(x => (x.kind || "case") === "case");
   const tips = all.filter(x => x.kind === "tip").slice(0, 6);
   if(tips.length){
@@ -217,6 +282,28 @@ fetch("cases.json?t=" + Date.now(), {cache: "no-store"}).then(r => r.ok ? r.json
   if(CASES.length) drawCases();
   else if(C.sample || !BLOGS.length) $("caseList").outerHTML = `<div class="hint">${BLOGS.length ? "블로그 후기를 불러오는 중이에요. 1시간 안에 자동으로 채워져요." : "config.json 의 blog 에 네이버 블로그 아이디를 넣으면, 블로그에 올린 시공 후기가 여기에 자동으로 모여요."}</div>`;
   else $("cases").hidden = true;
+}).catch(() => {
+  // 조회 실패와 실제 빈 목록을 구분해 방문자가 다른 확인 경로를 알 수 있게 합니다.
+  $("cases").hidden = false;
+  $("caseChips").replaceChildren();
+  const box = document.createElement("div");
+  box.className = "hint";
+  box.setAttribute("role", "status");
+  box.style.gridColumn = "1 / -1";
+  const message = document.createElement("p");
+  message.textContent = "시공 사례를 불러오지 못했어요. 잠시 후 다시 확인해 주세요.";
+  box.append(message);
+  const blogIds = [...new Set(BLOGS.filter(id => typeof id === "string" && /^[A-Za-z0-9_-]+$/.test(id)))];
+  blogIds.forEach((id, i) => {
+    const link = document.createElement("a");
+    link.href = "https://blog.naver.com/" + encodeURIComponent(id);
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = blogIds.length > 1 ? `블로그 ${i + 1}에서 확인하기` : "블로그에서 확인하기";
+    link.style.display = "block";
+    box.append(link);
+  });
+  $("caseList").replaceChildren(box);
 });
 
 // ── 계절 달력 ──
@@ -237,11 +324,27 @@ function joinDone(){
     <p class="step-k"><b>마지막 단계</b> · 아래 버튼으로 가입 내용을 카톡에 보내 주시면 쿠폰이 등록돼요.</p>
     <button class="btn glove" type="button" id="jKakao">카톡으로 가입 완료하기</button>
     ${M.referral ? `<button class="btn line small" type="button" data-invite>친구 초대하고 ${won(M.referral.point)}P 받기</button>` : ""}
+    <button class="link member-clear" type="button" id="jClearDevice">이 기기의 회원정보 지우기</button>
     <button class="link" type="button" data-close>나중에 보낼게요</button>`;
   $("jKakao").onclick = async () => {
     const text = `[${C.name} 회원가입]\n이름: ${m.name}\n연락처: ${m.phone}\n지역: ${m.area || "-"}\n무료 서비스: ${m.free}\n쿠폰번호: ${m.code}${m.ref ? `\n추천인 코드: ${m.ref}` : ""}\n이벤트 소식: ${m.ad ? "받음" : "안 받음"}`;
     MEMBER.sent = true; store.set("member", MEMBER);
     kakaoSend("카톡으로 가입 완료하기", text);
+  };
+  $("jClearDevice").onclick = () => {
+    const msg = "이 사이트가 이 브라우저에 저장한 회원정보와 쿠폰번호가 지워져요. 다른 탭은 먼저 닫아 주세요. 관리자에게 전송 중이거나 접수된 정보와 카톡 대화는 지워지지 않아요. 계속할까요?";
+    if(!window.confirm(msg)) return;
+    try {
+      localStorage.removeItem("member");
+      if(localStorage.getItem("member") !== null) throw new Error("Member data remains");
+    } catch(e) { toast("기기 정보 삭제에 실패했어요. 브라우저 설정을 확인해 주세요."); return; }
+    MEMBER = null;
+    d.replaceChildren(); d.hidden = true;
+    $("jName").value = ""; $("jPhone").value = ""; $("jArea").value = "";
+    $("jAgree").checked = false; $("jAd").checked = false; $("jErr").textContent = "";
+    $("joinForm").hidden = false;
+    calc(); $("jName").focus();
+    toast("이 기기의 회원정보를 지웠어요. 관리자에게 접수된 정보는 별도 문의해 주세요.");
   };
 }
 // 친구 초대: 내 쿠폰번호가 들어간 링크를 공유 (친구가 가입하면 카톡 가입 메시지에 추천인 코드가 함께 와요)
@@ -283,9 +386,10 @@ if(M){
     // Firebase가 설정되어 있으면 회원 가입 요청을 비공개 Firestore에 전송합니다.
     // 실패 시 카카오톡 가입 확인 절차를 그대로 안내합니다.
     if(C.firebase && C.firebase.apiKey && C.firebase.projectId){
-      import('./member-sync.js').then(mod => mod.submitMember(C.firebase, MEMBER))
-        .then(() => toast('회원정보 접수 요청이 완료됐어요. 카톡으로 가입을 확인해 주세요.'))
-        .catch(err => { console.warn('회원 접수 실패', err); toast('자동 접수가 되지 않았어요. 카톡으로 가입을 완료해 주세요.'); });
+      const submittedMember = MEMBER;
+      import('./member-sync.js').then(mod => mod.submitMember(C.firebase, submittedMember))
+        .then(() => { if(MEMBER === submittedMember) toast('회원정보 접수 요청이 완료됐어요. 카톡으로 가입을 확인해 주세요.'); })
+        .catch(err => { console.warn('회원 접수 실패', err); if(MEMBER === submittedMember) toast('자동 접수가 되지 않았어요. 카톡으로 가입을 완료해 주세요.'); });
     }
     // 관리자 대장 연결이 설정된 경우 가입 정보를 접수합니다.
     // Google Apps Script 웹앱은 교차 출처 응답을 브라우저에서 검증할 수 없으므로
