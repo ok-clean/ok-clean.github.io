@@ -30,16 +30,16 @@
   }
   function reset({focus=true}={}){
    if(disposed)return;revision++;
-   if(active){clearTimeout(active.timer);active.cancel(null);active=null;}
+   if(active){clearTimeout(active.timer);active.controller.abort();active.cancel(null);active=null;}
    render('idle');if(focus)load.focus();
   }
   async function onLoad(){
    if(disposed || active)return;
-   const ticket=++revision,operation={timer:null,cancel:null};
-   const deadline=new Promise(resolve=>{operation.cancel=resolve;operation.timer=setTimeout(()=>resolve(null),timeoutMs);});
+   const ticket=++revision,operation={timer:null,cancel:null,controller:new AbortController()};
+   const deadline=new Promise(resolve=>{operation.cancel=resolve;operation.timer=setTimeout(()=>{operation.controller.abort();resolve(null);},timeoutMs);});
    active=operation;render('loading');let entries=null;
-   try{entries=await Promise.race([Promise.resolve().then(()=>disposed||revision!==ticket?null:loadOffers()),deadline]);}catch{}
-   finally{clearTimeout(operation.timer);}
+   try{entries=await Promise.race([Promise.resolve().then(()=>disposed||revision!==ticket?null:loadOffers({signal:operation.controller.signal})),deadline]);}catch{}
+   finally{clearTimeout(operation.timer);operation.controller.abort();}
    if(disposed || revision!==ticket)return;
    active=null;
    if(!Array.isArray(entries) || entries.length>3 || entries.some(e=>typeof e?.company!=='string' || !e.company.trim() || e.company.length>60 || !Number.isSafeInteger(e.price) || e.price<1 || e.price>100000000))return render('unavailable',[],true);
