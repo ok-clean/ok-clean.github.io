@@ -477,6 +477,21 @@ def area_page(c, r, cases):
 def privacy_page(c):
     b = c.get("business") or {}
     who = b.get("company") or c["name"]
+    member_enabled = bool(c.get("member"))
+    firebase = c.get("firebase")
+    firebase_used = member_enabled and isinstance(firebase, dict) and bool(firebase.get("apiKey") and firebase.get("projectId"))
+    backend = c.get("memberBackendUrl")
+    script_used = member_enabled and isinstance(backend, str) and backend.startswith("https://script.google.com/macros/s/")
+    remote_notice = ""
+    if firebase_used:
+        remote_notice += "<p>회원가입 버튼을 누르면 가입 정보를 Google Firebase의 Cloud Firestore로 전송하려고 합니다. 연결 오류 등으로 전송되지 않을 수도 있습니다.</p>\n"
+    if script_used:
+        remote_notice += "<p>설정된 Google Apps Script 연동 주소로도 가입 정보를 전송하려고 합니다. 전송 성공 여부는 카카오톡 상담으로 확인해 주세요.</p>\n"
+    if not firebase_used and not script_used:
+        remote_notice = "<p>회원가입 정보의 자동 전송은 설정되어 있지 않습니다.</p>\n"
+    delete_notice = ""
+    if member_enabled:
+        delete_notice = "<p>회원가입 완료 화면의 '이 기기의 회원정보 지우기'에서 확인을 거쳐 이 브라우저에 저장된 회원정보와 쿠폰번호를 지울 수 있습니다. 다른 열린 탭은 먼저 닫아 주세요. 브라우저 자동완성, 클립보드, 카카오톡 대화와 관리자에게 전송 중이거나 이미 접수된 정보는 이 기능으로 삭제되지 않습니다. 서버에 접수된 정보의 삭제는 아래 연락처로 요청해 주세요.</p>\n"
     return head(c, f"개인정보처리방침 | {c['name']}", "개인정보처리방침", "privacy.html") + f"""
 <main class="wrap page">
 <h1>개인정보처리방침</h1>
@@ -484,11 +499,12 @@ def privacy_page(c):
 <h2>1. 수집하는 항목과 목적</h2>
 <p>{e(who)}(이하 '업체')는 회원가입 시 <b>이름, 연락처, 지역, 선택한 무료 서비스, 추천인 코드(초대 링크로 가입한 경우), 이벤트 수신 동의 여부</b>를 받아요. 회원 관리, 쿠폰·포인트 지급, 예약 상담과 작업 진행에만 써요.</p>
 <h2>2. 수집 방법</h2>
-<p>가입 정보는 이용자 기기에 저장됩니다. 회원 관리 연동을 활성화한 경우 가입 버튼을 누르면 Google 스프레드시트 기반 관리자 대장에도 전송되어 보관되며, 미연동 시 카카오톡으로 직접 전송한 경우에만 업체가 받습니다. 견적 계산기에 입력한 내용은 이용자 기기에 저장되며 상담 전송 시에만 업체가 받습니다.</p>
-<h2>3. 보관 기간과 파기</h2>
+<p>가입 정보와 쿠폰번호는 이 브라우저에 저장될 수 있습니다. 견적 계산기에 입력한 내용도 이 브라우저에 저장될 수 있습니다.</p>
+{remote_notice}<p>카카오톡 가입 버튼을 누르면 가입 내용이 클립보드에 복사될 수 있으며, 이용자가 직접 붙여넣어 전송할 수 있습니다. 견적 내용도 이용자가 상담을 위해 직접 공유할 수 있습니다.</p>
+{delete_notice}<h2>3. 보관 기간과 파기</h2>
 <p>회원 정보는 탈퇴 요청 시 또는 마지막 이용 후 2년이 지나면 지체 없이 파기해요. 관리자 대장에 저장된 회원정보도 동일한 기준으로 삭제합니다. 법령에 따라 보관해야 하는 거래 기록은 정해진 기간 동안 보관해요.</p>
 <h2>4. 제3자 제공</h2>
-<p>이용자의 동의 없이 개인정보를 외부에 판매하거나 제3자에게 제공하지 않아요. 관리자 대장 연동 시 Google 서비스를 저장·처리 수단으로 이용할 수 있습니다.</p>
+<p>이용자의 동의 없이 개인정보를 외부에 판매하거나 제3자에게 제공하지 않아요. 연동 설정에 따라 Google 서비스를 저장·처리 수단으로 이용할 수 있습니다.</p>
 <h2>5. 이용자의 권리</h2>
 <p>언제든지 개인정보 열람·수정·삭제와 이벤트 수신 거부를 요청할 수 있어요. 아래 연락처로 말씀해 주세요.</p>
 <h2>6. 문의</h2>
