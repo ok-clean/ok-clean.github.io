@@ -106,7 +106,9 @@ const home = source.replace(/(<script id="cfg" type="application\/json">)([\s\S]
       await page.locator('[data-share]').first().click();
       await page.waitForTimeout(100);
       const shareCopy = sheet.locator('[data-copy-link]');
+      const shareExec = await page.evaluate(() => window.execCount);
       await shareCopy.focus(); await page.keyboard.press('Enter');
+      await page.waitForFunction(previous => window.execCount > previous, shareExec);
       assert.equal(await page.evaluate(() => document.activeElement.hasAttribute('data-copy-link')), true);
       await page.keyboard.press('Escape');
 
