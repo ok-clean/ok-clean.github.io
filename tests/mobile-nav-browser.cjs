@@ -81,9 +81,19 @@ const base = 'http://127.0.0.1:8765';
         await page.evaluate(() => window.scrollTo(0,0));
         await page.screenshot({path:`/tmp/okclean-mobile-nav-${width}.png`});
       }
+      const anchorBefore = await page.evaluate(() => {
+        const quote = document.querySelector('#quote').getBoundingClientRect(), header = document.querySelector('.top').getBoundingClientRect();
+        return {top:quote.top,bottom:quote.bottom,scrollY:window.scrollY,viewportHeight:innerHeight,headerTop:header.top,headerBottom:header.bottom};
+      });
       await links.first().click();
       assert.equal(new URL(page.url()).hash, '#quote');
-      assert.ok(await page.locator('#quote').evaluate(el => el.getBoundingClientRect().top >= 0));
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      const anchorAfter = await page.evaluate(() => {
+        const quote = document.querySelector('#quote').getBoundingClientRect(), header = document.querySelector('.top').getBoundingClientRect();
+        return {top:quote.top,bottom:quote.bottom,scrollY:window.scrollY,viewportHeight:innerHeight,headerTop:header.top,headerBottom:header.bottom};
+      });
+      if(anchorAfter.top < 0) await page.screenshot({path:`/tmp/okclean-mobile-nav-anchor-failure-${width}.png`});
+      assert.ok(anchorAfter.top >= 0, `quote anchor hidden at ${width}px: before=${JSON.stringify(anchorBefore)}, after=${JSON.stringify(anchorAfter)}`);
       for(const path of ['/services/aircon.html','/area/' + encodeURIComponent('춘천') + '.html','/privacy.html']) {
         await page.goto(base + path, {waitUntil:'domcontentloaded'});
         assert.equal(await page.locator('.top nav').isVisible(), true);
