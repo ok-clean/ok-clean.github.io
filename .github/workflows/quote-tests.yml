@@ -40,6 +40,7 @@ jobs:
         run: python3 -m http.server 8765 --bind 127.0.0.1 > /tmp/okclean-test-server.log 2>&1 &
       - run: node tests/browser-smoke.cjs
       - run: node tests/region-browser.cjs
+      - run: node tests/service-browser.cjs
       - run: node tests/case-loading-browser.cjs
       - run: node tests/offline-browser.cjs
       - name: Save member screen captures
