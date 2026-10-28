@@ -13,10 +13,11 @@ const ref = (db,kind,id) => doc(db,'quote_requests','r',kind,id);
 const rawOffer = price => ({price,note:'시험용',createdAt:serverTimestamp()});
 async function seed(callback) { await env.withSecurityRulesDisabled(async c=>callback(c.firestore())); }
 async function assign() {return (await assignPartnerAsAdmin(admin,'r','p1')).grantId;}
-function rawAssign(db,uid,grantId,extra={},pointerExtra={}) {
+function rawAssign(db,uid,grantId,extra={},pointerExtra={},slotId='0') {
  const batch = writeBatch(db);
- batch.set(ref(db,'grants',grantId),{partnerUid:uid,approvalVersion:1,service:requestData.service,area:requestData.area,size:requestData.size,date:requestData.date,createdAt:serverTimestamp(),...extra});
- batch.set(ref(db,'assignments',uid),{grantId,...pointerExtra});
+ batch.set(ref(db,'grants',grantId),{partnerUid:uid,approvalVersion:1,slotId,service:requestData.service,area:requestData.area,size:requestData.size,date:requestData.date,createdAt:serverTimestamp(),...extra});
+ batch.set(ref(db,'assignments',uid),{grantId,slotId,...pointerExtra});
+ batch.set(ref(db,'slots',slotId),{partnerUid:uid,grantId});
  return batch.commit();
 }
 before(async()=>{
@@ -39,13 +40,71 @@ beforeEach(async()=>{
 });
 after(async()=>{if(env)await env.cleanup();});
 
+test('at most three assigned partners; release and reuse a slot',async()=>{
+ await seed(async db=>{await setDoc(doc(db,'partner_profiles','p3'),profile);await setDoc(doc(db,'partner_profiles','p4'),profile);});
+ const a=await assignPartnerAsAdmin(admin,'r','p1');
+ await assignPartnerAsAdmin(admin,'r','p2');await assignPartnerAsAdmin(admin,'r','p3');
+ assert.equal((await getDocs(collection(admin,'quote_requests','r','slots'))).size,3);
+ await assert.rejects(assignPartnerAsAdmin(admin,'r','p4'));
+ await assertFails(rawAssign(admin,'p4','bypass',{}, {},'3'));
+ await revokeAssignmentAsAdmin(admin,'r','p1');
+ await assertFails(getDocFromServer(ref(p1,'grants',a.grantId)));
+ const d=await assignPartnerAsAdmin(admin,'r','p4');
+ assert.notEqual(d.grantId,a.grantId);
+ assert.equal((await getDocs(collection(admin,'quote_requests','r','slots'))).size,3);
+});
+test('concurrent four-partner assignments cannot exceed three slots',async()=>{
+ await seed(async db=>{await setDoc(doc(db,'partner_profiles','p3'),profile);await setDoc(doc(db,'partner_profiles','p4'),profile);});
+ const results=await Promise.allSettled(['p1','p2','p3','p4'].map(uid=>assignPartnerAsAdmin(admin,'r',uid)));
+ assert.equal(results.filter(x=>x.status==='fulfilled').length,3);
+ assert.equal((await getDocs(collection(admin,'quote_requests','r','slots'))).size,3);
+ assert.equal((await getDocs(collection(admin,'quote_requests','r','assignments'))).size,3);
+});
+test('approval withdrawal blocks access but slot remains occupied until explicitly released',async()=>{
+ await seed(async db=>{await setDoc(doc(db,'partner_profiles','p3'),profile);await setDoc(doc(db,'partner_profiles','p4'),profile);});
+ const old=await assignPartnerAsAdmin(admin,'r','p1');
+ await assignPartnerAsAdmin(admin,'r','p2');await assignPartnerAsAdmin(admin,'r','p3');
+ await reviewPartnerAsAdmin(admin,'p1','반려');
+ await assertFails(getDocFromServer(ref(p1,'grants',old.grantId)));
+ await assert.rejects(assignPartnerAsAdmin(admin,'r','p4'));
+ await revokeAssignmentAsAdmin(admin,'r','p1');
+ const fresh=await assignPartnerAsAdmin(admin,'r','p4');
+ assert.notEqual(fresh.grantId,old.grantId);
+ assert.equal((await getDocs(collection(admin,'quote_requests','r','slots'))).size,3);
+});
+test('concurrent revocations release one matching slot without touching others',async()=>{
+ await assignPartnerAsAdmin(admin,'r','p1');await assignPartnerAsAdmin(admin,'r','p2');
+ const results=await Promise.allSettled([revokeAssignmentAsAdmin(admin,'r','p1'),revokeAssignmentAsAdmin(admin,'r','p1')]);
+ assert.equal(results.filter(x=>x.status==='fulfilled').length,1);
+ assert.equal((await getDocs(collection(admin,'quote_requests','r','slots'))).size,1);
+ assert.equal((await getDocs(collection(admin,'quote_requests','r','assignments'))).size,1);
+ assert.equal((await readAssignedQuote(p2,'r','p2')).area,'춘천');
+});
+test('slot and pointer cannot be detached with direct writes',async()=>{
+ const grantId=await assign();
+ await assertFails(deleteDoc(ref(admin,'assignments','p1')));
+ await assertFails(deleteDoc(ref(admin,'slots','0')));
+ await assertFails(updateDoc(ref(admin,'slots','0'),{partnerUid:'p2'}));
+ await assertFails(getDocFromServer(ref(p1,'slots','0')));
+ await assertSucceeds(getDocFromServer(ref(p1,'grants',grantId)));
+});
+test('slot cannot be forged or created independently',async()=>{
+ await assertFails(setDoc(ref(admin,'slots','0'),{partnerUid:'p1',grantId:'orphan'}));
+ await assertFails(rawAssign(admin,'p1','slot-outside',{}, {},'3'));
+ const batch=writeBatch(admin);
+ batch.set(ref(admin,'slots','0'),{partnerUid:'p2',grantId:'bad-link'});
+ batch.set(ref(admin,'assignments','p1'),{grantId:'bad-link',slotId:'0'});
+ batch.set(ref(admin,'grants','bad-link'),{partnerUid:'p1',approvalVersion:1,slotId:'0',service:requestData.service,area:requestData.area,size:requestData.size,date:requestData.date,createdAt:serverTimestamp()});
+ await assertFails(batch.commit());
+});
 test('approved assignment is atomic and returns no customer PII',async()=>{
  const grantId=await assign();const result=await readAssignedQuote(p1,'r','p1');
  assert.deepEqual(Object.keys(result).sort(),['grantId','service','area','size','date'].sort());
  assert.equal(result.grantId,grantId);assert.equal(result.area,'춘천');
- assert.deepEqual((await getDocFromServer(ref(admin,'assignments','p1'))).data(),{grantId});
+ assert.deepEqual((await getDocFromServer(ref(admin,'assignments','p1'))).data(),{grantId,slotId:'0'});
+ assert.deepEqual((await getDocFromServer(ref(admin,'slots','0'))).data(),{grantId,partnerUid:'p1'});
  const grant=(await getDocFromServer(ref(admin,'grants',grantId))).data();
- assert.deepEqual(Object.keys(grant).sort(),['partnerUid','approvalVersion','service','area','size','date','createdAt'].sort());
+ assert.deepEqual(Object.keys(grant).sort(),['partnerUid','approvalVersion','slotId','service','area','size','date','createdAt'].sort());
  assert.doesNotMatch(JSON.stringify(grant),/PRIVATE|ownerUid|phone|name/);
 });
 test('provider cannot self-assign by service or raw write batch',async()=>{

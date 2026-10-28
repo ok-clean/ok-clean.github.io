@@ -66,40 +66,73 @@ service cloud.firestore {
           || !(request.resource.data.status in ['신규','검토중','상담중']));
       allow delete: if false;
     }
+    // TEST ASSUMPTION: exactly three slot IDs per request; no production policy implied.
+    function validSlot(slotId) { return slotId in ['0','1','2']; }
+    // Slot, pointer, and immutable grant must be created together.
+    match /quote_requests/{requestId}/slots/{slotId} {
+      allow get, list: if admin();
+      allow create: if admin() && validSlot(slotId)
+        && request.resource.data.keys().hasAll(['partnerUid','grantId'])
+        && request.resource.data.keys().hasOnly(['partnerUid','grantId'])
+        && safeId(request.resource.data.partnerUid) && safeId(request.resource.data.grantId)
+        && openRequest(requestId) && profileApproved(request.resource.data.partnerUid)
+        && !exists(/databases/$(database)/documents/quote_requests/$(requestId)/grants/$(request.resource.data.grantId))
+        && getAfter(/databases/$(database)/documents/quote_requests/$(requestId)/assignments/$(request.resource.data.partnerUid)).data.grantId == request.resource.data.grantId
+        && getAfter(/databases/$(database)/documents/quote_requests/$(requestId)/assignments/$(request.resource.data.partnerUid)).data.slotId == slotId
+        && getAfter(/databases/$(database)/documents/quote_requests/$(requestId)/grants/$(request.resource.data.grantId)).data.partnerUid == request.resource.data.partnerUid
+        && getAfter(/databases/$(database)/documents/quote_requests/$(requestId)/grants/$(request.resource.data.grantId)).data.slotId == slotId;
+      allow update: if false;
+      allow delete: if admin()
+        && !existsAfter(/databases/$(database)/documents/quote_requests/$(requestId)/assignments/$(resource.data.partnerUid));
+    }
     // A new pointer and immutable grant must be committed atomically. Old grants cannot be reused.
     match /quote_requests/{requestId}/assignments/{uid} {
       allow create: if admin() && safeId(uid) && openRequest(requestId) && profileApproved(uid)
-        && request.resource.data.keys().hasOnly(['grantId'])
+        && request.resource.data.keys().hasAll(['grantId','slotId'])
+        && request.resource.data.keys().hasOnly(['grantId','slotId'])
+        && validSlot(request.resource.data.slotId)
+        && getAfter(/databases/$(database)/documents/quote_requests/$(requestId)/slots/$(request.resource.data.slotId)).data.partnerUid == uid
+        && getAfter(/databases/$(database)/documents/quote_requests/$(requestId)/slots/$(request.resource.data.slotId)).data.grantId == request.resource.data.grantId
         && safeId(request.resource.data.grantId)
         && !exists(/databases/$(database)/documents/quote_requests/$(requestId)/grants/$(request.resource.data.grantId))
         && getAfter(/databases/$(database)/documents/quote_requests/$(requestId)/grants/$(request.resource.data.grantId)).data.partnerUid == uid
+        && getAfter(/databases/$(database)/documents/quote_requests/$(requestId)/grants/$(request.resource.data.grantId)).data.slotId == request.resource.data.slotId
         && getAfter(/databases/$(database)/documents/quote_requests/$(requestId)/grants/$(request.resource.data.grantId)).data.approvalVersion == get(/databases/$(database)/documents/partner_profiles/$(uid)).data.approvalVersion
         && getAfter(/databases/$(database)/documents/quote_requests/$(requestId)/grants/$(request.resource.data.grantId)).data.createdAt == request.time;
       allow get: if admin() || (verifiedPartner(uid) && activeGrant(requestId, resource.data.grantId));
       allow list: if admin();
       allow update: if false;
-      // Revocation is possible even after booking; immutable grant/offer records are kept.
-      allow delete: if admin();
+      // The slot and pointer are removed together; historical grants/offers remain.
+      allow delete: if admin() && validSlot(resource.data.slotId)
+        && !existsAfter(/databases/$(database)/documents/quote_requests/$(requestId)/slots/$(resource.data.slotId));
     }
     function activeGrant(requestId, grantId) {
       let g = get(/databases/$(database)/documents/quote_requests/$(requestId)/grants/$(grantId)).data;
       return verifiedPartner(g.partnerUid) && openRequest(requestId) && profileApproved(g.partnerUid)
         && g.approvalVersion == get(/databases/$(database)/documents/partner_profiles/$(g.partnerUid)).data.approvalVersion
         && exists(/databases/$(database)/documents/quote_requests/$(requestId)/assignments/$(g.partnerUid))
-        && get(/databases/$(database)/documents/quote_requests/$(requestId)/assignments/$(g.partnerUid)).data.grantId == grantId;
+        && get(/databases/$(database)/documents/quote_requests/$(requestId)/assignments/$(g.partnerUid)).data.grantId == grantId
+        && validSlot(g.slotId)
+        && get(/databases/$(database)/documents/quote_requests/$(requestId)/assignments/$(g.partnerUid)).data.slotId == g.slotId
+        && get(/databases/$(database)/documents/quote_requests/$(requestId)/slots/$(g.slotId)).data.partnerUid == g.partnerUid
+        && get(/databases/$(database)/documents/quote_requests/$(requestId)/slots/$(g.slotId)).data.grantId == grantId;
     }
     match /quote_requests/{requestId}/grants/{grantId} {
       allow create: if admin() && safeId(grantId) && openRequest(requestId)
-        && request.resource.data.keys().hasAll(['partnerUid','approvalVersion','service','area','size','date','createdAt'])
-        && request.resource.data.keys().hasOnly(['partnerUid','approvalVersion','service','area','size','date','createdAt'])
+        && request.resource.data.keys().hasAll(['partnerUid','approvalVersion','slotId','service','area','size','date','createdAt'])
+        && request.resource.data.keys().hasOnly(['partnerUid','approvalVersion','slotId','service','area','size','date','createdAt'])
         && safeId(request.resource.data.partnerUid) && profileApproved(request.resource.data.partnerUid)
+        && validSlot(request.resource.data.slotId)
+        && getAfter(/databases/$(database)/documents/quote_requests/$(requestId)/slots/$(request.resource.data.slotId)).data.partnerUid == request.resource.data.partnerUid
+        && getAfter(/databases/$(database)/documents/quote_requests/$(requestId)/slots/$(request.resource.data.slotId)).data.grantId == grantId
         && request.resource.data.approvalVersion == get(/databases/$(database)/documents/partner_profiles/$(request.resource.data.partnerUid)).data.approvalVersion
         && request.resource.data['service'] == get(/databases/$(database)/documents/quote_requests/$(requestId)).data['service']
         && request.resource.data.area == get(/databases/$(database)/documents/quote_requests/$(requestId)).data.area
         && request.resource.data.size == get(/databases/$(database)/documents/quote_requests/$(requestId)).data.size
         && request.resource.data.date == get(/databases/$(database)/documents/quote_requests/$(requestId)).data.date
         && request.resource.data.createdAt == request.time
-        && getAfter(/databases/$(database)/documents/quote_requests/$(requestId)/assignments/$(request.resource.data.partnerUid)).data.grantId == grantId;
+        && getAfter(/databases/$(database)/documents/quote_requests/$(requestId)/assignments/$(request.resource.data.partnerUid)).data.grantId == grantId
+        && getAfter(/databases/$(database)/documents/quote_requests/$(requestId)/assignments/$(request.resource.data.partnerUid)).data.slotId == request.resource.data.slotId;
       allow get: if admin() || activeGrant(requestId, grantId);
       allow list: if admin();
       allow update, delete: if false;
