@@ -55,7 +55,10 @@ async function done(s){ assert.deepEqual(s.errors, []); await s.context.close();
       {
         const s = await session(browser,viewport);
         await advance(s.page,1000);
-        await s.page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+        // 고정된 스크롤 위치와 이벤트로 조기 팝업 조건을 재현합니다.
+        // 실제 부드러운 스크롤 애니메이션은 뒤늦은 추가 scroll을 발생시켜
+        // 가상 시계의 정확한 무활동 경계 테스트를 흔들 수 있습니다.
+        await s.page.evaluate(() => Object.defineProperty(window, 'scrollY', {configurable:true, value:document.body.scrollHeight}));
         await act(s.page,'scroll','window');
         assert.equal(await visible(s.page),false, 'scroll must not trigger immediate popup');
         await advance(s.page,23000);
