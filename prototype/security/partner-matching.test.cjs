@@ -85,6 +85,16 @@ for(const status of ['예약확정','작업완료','종료'])test(status+' block
  await seed(db=>deleteDoc(ref(db,'offers',grantId)));
  await assertFails(setDoc(ref(p1,'offers',grantId),rawOffer(260000)));
 });
+for(const closed of ['예약확정','작업완료','종료']) {
+ for(const reopened of ['신규','검토중','상담중']) test(closed+' cannot reopen as '+reopened+' or revive old grants',async()=>{
+  const grantId=await assign();
+  await updateDoc(doc(admin,'quote_requests','r'),{status:closed});
+  await assertFails(updateDoc(doc(admin,'quote_requests','r'),{status:reopened}));
+  assert.equal((await getDocFromServer(doc(admin,'quote_requests','r'))).data().status,closed);
+  await assertFails(getDocFromServer(ref(p1,'grants',grantId)));
+  await assertFails(submitAssignedOffer(p1,'r',grantId,{price:100}));
+ });
+}
 test('expired existing grant blocks offer creation',async()=>{
  const grantId=await assign();await seed(db=>updateDoc(doc(db,'quote_requests','r'),{date:Timestamp.fromMillis(Date.now()-1)}));
  await assertFails(setDoc(ref(p1,'offers',grantId),rawOffer(100)));
