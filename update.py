@@ -59,12 +59,12 @@ def svc_by_body(c, desc):
 
 def judge(c, title, cat, desc="", old_svc=""):
     """글을 case·tip·notice로 분류; None은 기존 제외 규칙에 해당한다."""
-    if is_edu(c, title, cat):
-        return None, ""
-    t = norm(title)
     # 공지 표기만 구분합니다. '시공지역'처럼 단어 안의 공지는 제외하지 않습니다.
     if re.search(r"(?<![가-힣A-Za-z0-9])(?:필독\s*)?공지(?:사항)?(?=$|[\s:：|!！\])】\-])", title):
         return "notice", ""
+    if is_edu(c, title, cat):
+        return None, ""
+    t = norm(title)
     svc = svc_by_title(c, title, cat)
     topic = svc or "청소" in t or any(norm(w) in t for w in c.get("tipTopics", []))
     if not topic:
