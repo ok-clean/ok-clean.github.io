@@ -11,6 +11,13 @@ self.addEventListener("fetch", e => {
     fetch(req).then(res => {
       if(res.ok){ const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
       return res;
-    }).catch(() => caches.match(req).then(r => r || caches.match("./index.html")))
+    }).catch(() => caches.match(req).then(r => {
+      if(r) return r;
+      // 홈 문서를 하위 URL에 반환하면 상대 경로가 바뀌어 화면이 깨집니다.
+      const path = new URL(req.url).pathname;
+      const scope = new URL(self.registration.scope);
+      const home = path === scope.pathname || path === new URL("index.html", scope).pathname;
+      return req.mode === "navigate" && home ? caches.match(new URL("index.html", scope).href) : null;
+    }).then(r => r || Response.error()))
   );
 });
