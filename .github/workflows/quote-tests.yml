@@ -49,6 +49,7 @@ jobs:
       - run: node tests/quote-focus-browser.cjs
       - run: node tests/referral-browser.cjs
       - run: node tests/quote-empty-quantity-browser.cjs
+      - run: node tests/kakao-copy-retry-browser.cjs
       - name: Save member screen captures
         if: always()
         uses: actions/upload-artifact@v4

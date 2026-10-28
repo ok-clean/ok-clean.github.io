@@ -27,13 +27,19 @@
     t.textContent = msg; t.classList.add("on");
     clearTimeout(window.toast.tm); window.toast.tm = setTimeout(() => t.classList.remove("on"), 2600);
   };
-  window.copyText = async function(text){
+  window.copyText = async function(text, shouldFallback = () => true){
     try { await navigator.clipboard.writeText(text); return true; }
     catch(e){
+      // 창이 교체되었거나 더 최근 재시도가 끝났다면 오래된 내용을 다시 복사하지 않습니다.
+      if(!shouldFallback()) return false;
+      const previous = document.activeElement;
       const ta = document.createElement("textarea"); ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
       document.body.appendChild(ta); ta.select();
       let ok = false; try { ok = document.execCommand("copy"); } catch(_) {}
-      ta.remove(); return ok;
+      const hadFocus = document.activeElement === ta;
+      ta.remove();
+      if(hadFocus && previous && previous !== document.body && previous.isConnected && !previous.disabled && previous.getClientRects().length && getComputedStyle(previous).visibility !== "hidden" && typeof previous.focus === "function") previous.focus({preventScroll:true});
+      return ok;
     }
   };
 
@@ -62,13 +68,24 @@
     const active = document.activeElement, activeModal = active && active.closest(".modal:not([hidden])");
     const opener = activeModal ? (modalOpeners.get(activeModal) || active) : active;
     const ok = await window.copyText(text);
-    sheet(title, `${notice ? `<p class="err" role="status">${esc(notice)}</p>` : ""}<p class="send-ok">${ok ? "✓ 아래 내용을 복사해 두었어요" : "아래 내용을 길게 눌러 복사해 주세요"}</p>
+    sheet(title, `${notice ? `<p class="err" role="status">${esc(notice)}</p>` : ""}<p class="${ok ? "send-ok" : "err"}" data-copy-status role="status">${ok ? "✓ 아래 내용을 복사해 두었어요" : "자동 복사하지 못했어요. 아래 내용을 선택해 복사해 주세요. 휴대폰에서는 길게 눌러 복사할 수 있어요."}</p>
       <pre class="send-pre">${esc(text)}</pre>
       <ol class="send-steps"><li>아래 <b>카톡 열기</b>를 누르세요.</li><li>대화 입력칸을 <b>길게 눌러 '붙여넣기'</b> 하세요.</li><li><b>전송</b>하면 끝! 현장 사진도 함께 보내주시면 더 정확해요.</li></ol>
       <a class="btn glove" href="${esc(S.kakao)}" target="_blank" rel="noopener" data-close>카톡 열기</a>
       ${ok ? "" : `<button class="btn line small" type="button" data-copy-again style="width:100%;margin-top:8px">다시 복사하기</button>`}`, opener);
-    const again = document.querySelector("[data-copy-again]");
-    if(again) again.onclick = async () => { if(await window.copyText(text)) window.toast("복사했어요."); };
+    const again = $("sheet").querySelector("[data-copy-again]");
+    const status = $("sheet").querySelector("[data-copy-status]");
+    let retry = 0;
+    if(again) again.onclick = async () => {
+      const attempt = ++retry, focused = document.activeElement === again;
+      const copied = await window.copyText(text, () => attempt === retry && again.isConnected && !$("sheet").hidden);
+      // 기다리는 사이 창을 닫거나 새 창을 연 경우, 이전 결과를 표시하지 않습니다.
+      if(attempt !== retry || !again.isConnected || $("sheet").hidden) return;
+      status.className = copied ? "send-ok" : "err";
+      status.textContent = copied ? "✓ 아래 내용을 복사했어요." : "복사하지 못했어요. 아래 내용을 선택해 복사해 주세요. 휴대폰에서는 길게 눌러 복사할 수 있어요.";
+      // 임시 복사 칸이 포커스를 잃게 한 경우에만 기존 버튼으로 되돌립니다.
+      if(focused && document.activeElement === document.body) again.focus({preventScroll:true});
+    };
   };
   document.addEventListener("click", e => {
     if(e.target.closest("[data-close]") || e.target.classList.contains("modal")) window.closeModal(e.target.closest(".modal"));
