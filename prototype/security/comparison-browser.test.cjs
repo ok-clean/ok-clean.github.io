@@ -47,18 +47,18 @@ const account={email_verified:true,firebase:{sign_in_provider:'password'}};
    },
    enforceRateLimit:async()=>rateAllowed,loadOwnedComparison:reader
   });
-  let adapter;const requests=[],responses=[];
+  let adapter;const requests=[];
   server=https.createServer({key:fs.readFileSync(path.join(tmp,'key.pem')),cert:fs.readFileSync(path.join(tmp,'cert.pem'))},(req,res)=>{
    if(req.url==='/api/offer-comparison'){
     const entry={method:req.method,authorization:req.headers.authorization,cookie:req.headers.cookie,body:''};requests.push(entry);
-    req.on('data',b=>{entry.body+=b.toString();});res.on('finish',()=>responses.push({status:res.statusCode,cache:res.getHeader('Cache-Control')}));
+    req.on('data',b=>{entry.body+=b.toString();});
     Promise.resolve(adapter(req,res)).catch(()=>res.destroy());return;
    }
    const url=new URL(req.url,'https://127.0.0.1');
    if(req.method!=='GET'){res.writeHead(404);res.end();return;}
    if(url.pathname==='/prototype/comparison-demo.js'){
     res.writeHead(200,{'Content-Type':'application/javascript','Cache-Control':'no-store'});
-    res.end("window.identity='test-owner';window.testView=OKCleanComparisonView.mount({root:document.getElementById('comparison-root'),timeoutMs:3000,loadOffers:OKCleanComparisonClient.createComparisonClient({endpoint:location.origin+'/api/offer-comparison',getIdToken:async()=>window.identity,getRequestId:async()=> 'r',timeoutMs:2500})});");return;
+    res.end("window.identity='test-owner';window.delayIdentity=false;window.testView=OKCleanComparisonView.mount({root:document.getElementById('comparison-root'),timeoutMs:3000,loadOffers:OKCleanComparisonClient.createComparisonClient({endpoint:location.origin+'/api/offer-comparison',getIdToken:async()=>{const old=window.identity;if(window.delayIdentity)await new Promise(r=>setTimeout(r,400));return old;},getRequestId:async()=> 'r',timeoutMs:2500})});");return;
    }
    const file=files.get(url.pathname);if(!file){res.writeHead(404);res.end();return;}
    let data=fs.readFileSync(path.join(root,file[0]),'utf8');
@@ -81,13 +81,23 @@ const account={email_verified:true,firebase:{sign_in_provider:'password'}};
    try{
     await page.goto(base+'/prototype/comparison.html?endpoint=https://evil.invalid&token=ignored');
     const before=requests.length;assert.equal(await page.locator('.offer').count(),0);
+    const ownerResponse=page.waitForResponse(response=>response.url()===base+'/api/offer-comparison' && response.request().method()==='POST');
     await page.locator('[data-comparison-load]').click();
     await page.waitForFunction(()=>document.querySelector('#comparison-root').dataset.state==='ready');
     assert.equal(requests.length,before+1);assert.equal(requests.at(-1).authorization,'Bearer test-owner');
     assert.deepEqual(JSON.parse(requests.at(-1).body),{requestId:'r'});assert.equal(requests.at(-1).cookie,undefined);
-    assert.equal(responses.at(-1).status,200);assert.match(responses.at(-1).cache,/no-store/);
+    const received=await ownerResponse;assert.equal(received.status(),200);assert.match(received.headers()['cache-control'],/no-store/);
     assert.match(await page.locator('.offer').innerText(),/가상업체/);assert.match(await page.locator('.offer').innerText(),/250,000원/);
     assert.doesNotMatch(await page.locator('body').innerText(),/PRIVATE|test-owner|p1/);
+    const beforeReset=requests.length;
+    await page.evaluate(()=>{window.testView.reset({focus:false});window.delayIdentity=true;});
+    await page.locator('[data-comparison-load]').click();
+    await page.waitForFunction(()=>document.querySelector('#comparison-root').dataset.state==='loading');
+    await page.evaluate(()=>{window.testView.reset({focus:false});window.identity='test-other';});
+    await page.waitForTimeout(550);
+    assert.equal(requests.length,beforeReset);
+    assert.equal(await page.locator('#comparison-root').getAttribute('data-state'),'idle');
+    await page.evaluate(()=>{window.delayIdentity=false;});
     for(const identity of ['test-other','test-invalid','test-anonymous']){
      await page.evaluate(v=>{window.testView.reset({focus:false});window.identity=v;},identity);
      await page.locator('[data-comparison-load]').click();
@@ -95,8 +105,9 @@ const account={email_verified:true,firebase:{sign_in_provider:'password'}};
      assert.equal(await page.locator('.offer').count(),0);
     }
     rateAllowed=false;await page.evaluate(()=>{window.testView.reset({focus:false});window.identity='test-owner';});
+    const rateResponse=page.waitForResponse(response=>response.url()===base+'/api/offer-comparison' && response.request().method()==='POST');
     await page.locator('[data-comparison-load]').click();await page.waitForFunction(()=>document.querySelector('#comparison-root').dataset.state==='unavailable');
-    assert.equal(responses.at(-1).status,429);rateAllowed=true;
+    assert.equal((await rateResponse).status(),429);rateAllowed=true;
     assert.deepEqual(await page.evaluate(()=>({local:localStorage.length,session:sessionStorage.length,cookie:document.cookie})),{local:0,session:0,cookie:''});
     assert.equal(seen.every(x=>x.origin===base),true);assert.deepEqual(errors,[]);
    }finally{rateAllowed=true;await context.close();}
