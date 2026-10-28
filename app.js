@@ -222,6 +222,24 @@ document.querySelectorAll("#services .cats .chip").forEach(b => b.addEventListen
 
 // ── 시공 사례 (블로그 후기 자동 연동: update.py 가 cases.json 으로 정리) ──
 let CASES = [], caseF = "", caseN = 8;
+// 수집된 데이터의 링크는 절대 http(s) 주소만 허용합니다.
+function safeCaseLink(value){
+  if(typeof value !== "string" || !/^https?:\/\//i.test(value) || /[\s\x00-\x1f\x7f\u0085\\]/u.test(value)) return false;
+  const authority = value.match(/^https?:\/\/([^/?#]*)/i)?.[1] || "";
+  if(authority.includes("%") || authority.includes("@")) return false;
+  try {
+    const url = new URL(value);
+    const host = url.hostname;
+    const domain = /^[a-z0-9.-]+$/i.test(host) && !host.replace(/\.$/, "").split(".").some(part => !part || part.length > 63);
+    const ipv6 = /^\[[0-9a-f:.]+\]$/i.test(host);
+    const rawHost = authority.replace(/:\d*$/, "").replace(/\.$/, "");
+    if(/^\d+\.\d+\.\d+\.\d+$/.test(host) && host !== rawHost) return false;
+    if(!rawHost.startsWith("[") && /(?:^|\.)\d+$/.test(rawHost)) {
+      if(!/^\d+\.\d+\.\d+\.\d+$/.test(rawHost) || host !== rawHost) return false;
+    }
+    return (url.protocol === "http:" || url.protocol === "https:") && (domain || ipv6) && !url.username && !url.password;
+  } catch(_) { return false; }
+}
 // 네이버 블로그 사진: 외부 사이트에서도 잘 열리는 서버(mblogthumb-phinf)의 큰 사진을 먼저 쓰고, 안 되면 원래 썸네일로
 function naverImgs(src){
   if(!/pstatic\.net/.test(src)) return [src, src];
@@ -254,7 +272,7 @@ fetch("cases.json?t=" + Date.now(), {cache: "no-store"}).then(r => {
   const fields = ["title", "link", "date", "img", "region", "svc", "kind"];
   if(d.cases.some(x => !x || typeof x !== "object" || Array.isArray(x) || fields.some(k => x[k] != null && typeof x[k] !== "string"))) throw new Error("invalid case item");
   const ex = (C.excludeWords || []).map(w => w.replace(/\s/g, ""));
-  const all = (d.cases || []).filter(x => x.link && x.title && !ex.some(w => x.title.replace(/\s/g, "").includes(w))).sort((p, q) => (q.date || "").localeCompare(p.date || ""));
+  const all = (d.cases || []).filter(x => safeCaseLink(x.link) && x.title && !ex.some(w => x.title.replace(/\s/g, "").includes(w))).sort((p, q) => (q.date || "").localeCompare(p.date || ""));
   CASES = all.filter(x => (x.kind || "case") === "case");
   const tips = all.filter(x => x.kind === "tip").slice(0, 6);
   if(tips.length){
