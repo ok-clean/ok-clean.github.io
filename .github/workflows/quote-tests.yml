@@ -44,6 +44,7 @@ jobs:
       - run: node tests/case-loading-browser.cjs
       - run: node tests/offline-browser.cjs
       - run: node tests/mobile-nav-browser.cjs
+      - run: node tests/member-storage-browser.cjs
       - name: Save member screen captures
         if: always()
         uses: actions/upload-artifact@v4
@@ -53,4 +54,6 @@ jobs:
             /tmp/okclean-member-privacy-*.png
             /tmp/okclean-privacy-notice-*.png
             /tmp/okclean-mobile-nav-*.png
+            /tmp/okclean-member-storage-*.png
+            /tmp/okclean-member-sheet-*.png
           if-no-files-found: ignore
