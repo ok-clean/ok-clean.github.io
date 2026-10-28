@@ -18,9 +18,10 @@ if (host !== '127.0.0.1:8080' && host !== 'localhost:8080') {
   throw new Error('A loopback Firestore emulator on port 8080 is required; cloud execution is forbidden');
 }
 const PINNED = {
-  // #49: 877d02c1500019ae177508763e1f18cf0a8266e6 (member rules + client)
+  // #49: 877d02c1500019ae177508763e1f18cf0a8266e6 (member rules)
   memberRules: '4ffb09ebfb1dd3d89de445ea49faf31e53ba51befa8b846a578dc05404750f02',
-  memberClient: '9b0ffc599a041a87055c0f9fc91f570c9435cdc47fd918983ee245e95071c85d',
+  // Updated alongside the auth initialization fix; the VM runs this exact client.
+  memberClient: '0bd219f10ddd43e5a0a0a0152d805383e0c22023c86f22d26590770c7d2c51a3',
   // #25: dc056ec8e4eea0689cd65fa5aeae6f4947c66d2c (test-only matching policy)
   matchingRules: 'e07de1a8b8073d0130780d2ef5a7e4331355958fde364611c6021ead8fe9d544',
 };
@@ -184,7 +185,7 @@ async function matrix(env,mode) {
 // imports replaced by local test adapters. The Firestore write itself uses the
 // emulator SDK and the chosen synthetic authentication context.
 function memberEntry(db, existing, uid, recordId) {
-  const auth={currentUser:existing ? {uid} : null};
+  const auth={currentUser:existing ? {uid} : null, authStateReady:async()=>{}};
   let signIns=0;
   const imports = memberClient.match(/^import [^\n]+;$/gm) || [];
   assert.equal(imports.length,3,'Unexpected member client imports');
@@ -197,6 +198,7 @@ function memberEntry(db, existing, uid, recordId) {
     // The pinned client runs in a VM realm; Firestore accepts a host-realm
     // plain object. Preserve its exact fields and host SDK timestamp sentinel.
     crypto:{randomUUID:()=>recordId},doc,setDoc:(ref,data)=>setDoc(ref,Object.fromEntries(Object.entries(data))),serverTimestamp,
+    setTimeout,clearTimeout,
   };
   vm.runInNewContext(program+'\nthis.submitMember = submitMember;',context,{filename:'member-sync.js'});
   return {submit:()=>context.submitMember({apiKey:'fake-test-identifier',projectId:'demo-okclean-coexist'},
