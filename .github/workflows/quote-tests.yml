@@ -45,6 +45,7 @@ jobs:
       - run: node tests/offline-browser.cjs
       - run: node tests/mobile-nav-browser.cjs
       - run: node tests/member-storage-browser.cjs
+      - run: node tests/join-prompt-browser.cjs
       - name: Save member screen captures
         if: always()
         uses: actions/upload-artifact@v4
