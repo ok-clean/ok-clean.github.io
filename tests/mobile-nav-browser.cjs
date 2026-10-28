@@ -89,11 +89,21 @@ const base = 'http://127.0.0.1:8765';
       assert.equal(new URL(page.url()).hash, '#quote');
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       const anchorAfter = await page.evaluate(() => {
-        const quote = document.querySelector('#quote').getBoundingClientRect(), header = document.querySelector('.top').getBoundingClientRect();
-        return {top:quote.top,bottom:quote.bottom,scrollY:window.scrollY,viewportHeight:innerHeight,headerTop:header.top,headerBottom:header.bottom};
+        const quote = document.querySelector('#quote').getBoundingClientRect(), headerEl = document.querySelector('.top');
+        const header = headerEl.getBoundingClientRect(), title = document.querySelector('#quote h2').getBoundingClientRect();
+        const headerPosition = getComputedStyle(headerEl).position;
+        return {top:quote.top,bottom:quote.bottom,scrollY:window.scrollY,viewportHeight:innerHeight,viewportWidth:innerWidth,
+          headerTop:header.top,headerBottom:header.bottom,headerLeft:header.left,headerRight:header.right,headerPosition,
+          titleTop:title.top,titleBottom:title.bottom,titleLeft:title.left,titleRight:title.right};
       });
-      if(anchorAfter.top < 0) await page.screenshot({path:`/tmp/okclean-mobile-nav-anchor-failure-${width}.png`});
-      assert.ok(anchorAfter.top >= 0, `quote anchor hidden at ${width}px: before=${JSON.stringify(anchorBefore)}, after=${JSON.stringify(anchorAfter)}`);
+      const fixedHeaderOverlap = ['fixed','sticky'].includes(anchorAfter.headerPosition) &&
+        anchorAfter.headerBottom > anchorAfter.titleTop && anchorAfter.headerTop < anchorAfter.titleBottom &&
+        anchorAfter.headerRight > anchorAfter.titleLeft && anchorAfter.headerLeft < anchorAfter.titleRight;
+      const titleVisible = anchorAfter.titleTop >= 0 && anchorAfter.titleBottom <= anchorAfter.viewportHeight &&
+        anchorAfter.titleLeft >= 0 && anchorAfter.titleRight <= anchorAfter.viewportWidth;
+      if(anchorAfter.top < -1 || !titleVisible || fixedHeaderOverlap) await page.screenshot({path:`/tmp/okclean-mobile-nav-anchor-failure-${width}.png`});
+      assert.ok(anchorAfter.top >= -1 && titleVisible && !fixedHeaderOverlap,
+        `quote anchor hidden at ${width}px: before=${JSON.stringify(anchorBefore)}, after=${JSON.stringify(anchorAfter)}, titleVisible=${titleVisible}, fixedHeaderOverlap=${fixedHeaderOverlap}`);
       for(const path of ['/services/aircon.html','/area/' + encodeURIComponent('춘천') + '.html','/privacy.html']) {
         await page.goto(base + path, {waitUntil:'domcontentloaded'});
         assert.equal(await page.locator('.top nav').isVisible(), true);
