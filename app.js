@@ -253,7 +253,7 @@ function joinDone(){
     <p class="step-k"><b>마지막 단계</b> · 아래 버튼으로 가입 내용을 카톡에 보내 주시면 쿠폰이 등록돼요.</p>
     <button class="btn glove" type="button" id="jKakao">카톡으로 가입 완료하기</button>
     ${M.referral ? `<button class="btn line small" type="button" data-invite>친구 초대하고 ${won(M.referral.point)}P 받기</button>` : ""}
-    <button class="link" type="button" id="jClearDevice">이 기기의 회원정보 지우기</button>
+    <button class="link member-clear" type="button" id="jClearDevice">이 기기의 회원정보 지우기</button>
     <button class="link" type="button" data-close>나중에 보낼게요</button>`;
   $("jKakao").onclick = async () => {
     const text = `[${C.name} 회원가입]\n이름: ${m.name}\n연락처: ${m.phone}\n지역: ${m.area || "-"}\n무료 서비스: ${m.free}\n쿠폰번호: ${m.code}${m.ref ? `\n추천인 코드: ${m.ref}` : ""}\n이벤트 소식: ${m.ad ? "받음" : "안 받음"}`;
