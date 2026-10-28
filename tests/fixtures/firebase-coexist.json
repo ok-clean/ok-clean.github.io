@@ -1,0 +1,8 @@
+{
+  "firestore": { "rules": "deny-test-only.rules" },
+  "emulators": {
+    "firestore": { "host": "127.0.0.1", "port": 8080 },
+    "ui": { "enabled": false },
+    "singleProjectMode": false
+  }
+}
