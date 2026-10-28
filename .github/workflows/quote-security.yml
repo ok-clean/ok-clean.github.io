@@ -32,7 +32,8 @@ jobs:
       - run: node prototype/security/kst-date.test.cjs
       - run: node --test prototype/security/comparison-transport.test.cjs
       - run: node --test prototype/security/request-cancel-handler.test.cjs
+      - run: node --test prototype/security/request-state-handler.test.cjs
       - run: npm install --no-save --no-package-lock firebase@10.14.1 @firebase/rules-unit-testing@3.0.4 firebase-tools@13.35.1 playwright@1.56.1
       - run: npx playwright install --with-deps chromium
       - name: Firestore request regression and partner grant lifecycle
-        run: npx firebase emulators:exec --project demo-okclean-matching --only firestore --config prototype/security/firebase.json 'node prototype/security/rules.test.cjs && node --test prototype/security/partner-matching.test.cjs && node --test prototype/security/comparison.test.cjs && node prototype/security/comparison-browser.test.cjs && node --test prototype/security/request-cancel.test.cjs'
+        run: npx firebase emulators:exec --project demo-okclean-matching --only firestore --config prototype/security/firebase.json 'node prototype/security/rules.test.cjs && node --test prototype/security/partner-matching.test.cjs && node --test prototype/security/comparison.test.cjs && node prototype/security/comparison-browser.test.cjs && node --test prototype/security/request-cancel.test.cjs && node --test prototype/security/request-state.test.cjs'

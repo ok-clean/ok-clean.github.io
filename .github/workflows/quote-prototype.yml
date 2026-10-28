@@ -6,6 +6,7 @@ on:
       - 'tests/quote-prototype.cjs'
       - 'tests/receipt-browser.cjs'
       - 'tests/comparison-preview.cjs'
+      - 'tests/cancellation-preview.cjs'
       - '.github/workflows/quote-prototype.yml'
 permissions:
   contents: read
@@ -28,6 +29,10 @@ jobs:
           EVIDENCE_DIR: ${{ runner.temp }}/receipt-browser-evidence
       - name: Customer comparison preview checks
         run: node tests/comparison-preview.cjs
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/receipt-browser-evidence
+      - name: Customer cancellation status preview checks
+        run: node tests/cancellation-preview.cjs
         env:
           EVIDENCE_DIR: ${{ runner.temp }}/receipt-browser-evidence
       - uses: actions/upload-artifact@v4
