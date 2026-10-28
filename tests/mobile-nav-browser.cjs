@@ -14,13 +14,13 @@ const base = 'http://127.0.0.1:8765';
       page.on('pageerror', error => errors.push(error.message));
       await page.goto(base + '/index.html', {waitUntil:'load'});
       // Test the longest normal header: the install button is conditionally displayed.
-      await page.locator('[data-install]').evaluate(el => { el.hidden = false; });
+      await page.locator('.top [data-install]').evaluate(el => { el.hidden = false; });
       const nav = page.locator('.top nav');
       const links = nav.locator('a');
       assert.equal(await links.count(), 5);
       assert.equal(await nav.isVisible(), true, `menu visible at ${width}px`);
-      assert.equal(await page.locator('[data-share]').first().isVisible(), true);
-      assert.equal(await page.locator('[data-install]').first().isVisible(), true);
+      assert.equal(await page.locator('.top [data-share]').isVisible(), true);
+      assert.equal(await page.locator('.top [data-install]').isVisible(), true);
       assert.equal(await page.locator('.top .call').isVisible(), width > 520);
       const measurements = await page.evaluate(() => ({
         document:document.documentElement.scrollWidth,
