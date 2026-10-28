@@ -89,6 +89,7 @@ const assert = require('node:assert/strict');
       await Promise.race([memberModulePending, new Promise((_, reject) => setTimeout(() => reject(new Error('member test module did not load')), 5000))]);
       assert.match(await page.locator('#joinDone').innerText(), /카톡.*가입.*확인|카톡.*가입.*완료|가입 내용을 카톡/);
       assert.match(await page.locator('#joinDone').innerText(), /1만원/);
+      await page.screenshot({path: `/tmp/okclean-member-privacy-${viewport.width}.png`});
       await page.locator('#join button.x').click();
       await page.evaluate(() => Object.defineProperty(navigator, 'share', {
         configurable: true, value: async ({url}) => { window.fakeSharedUrl = url; }
