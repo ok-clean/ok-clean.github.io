@@ -17,7 +17,7 @@ self.addEventListener("fetch", e => {
       const path = new URL(req.url).pathname;
       const scope = new URL(self.registration.scope);
       const home = path === scope.pathname || path === new URL("index.html", scope).pathname;
-      return req.mode === "navigate" && home ? caches.match("./index.html") : null;
+      return req.mode === "navigate" && home ? caches.match(new URL("index.html", scope).href) : null;
     }).then(r => r || Response.error()))
   );
 });
