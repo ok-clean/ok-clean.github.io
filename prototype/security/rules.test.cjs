@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { initializeTestEnvironment, assertFails, assertSucceeds } = require('@firebase/rules-unit-testing');
 const { doc, collection, setDoc, getDoc, getDocs, updateDoc, deleteDoc, serverTimestamp } = require('firebase/firestore');
 const {createQuote,checkQuoteAsAdmin,listQuotes,setStatus} = require('./quote-service.cjs');
-const {reviewPartnerAsAdmin,assignPartnerAsAdmin,readAssignedQuote,submitAssignedOffer} = require('./partner-matching-service.cjs');
+const {reviewPartnerAsAdmin,assignPartnerAsAdmin,revokeAssignmentAsAdmin,readAssignedQuote,submitAssignedOffer} = require('./partner-matching-service.cjs');
 (async () => {
  const env = await initializeTestEnvironment({projectId:'demo-okclean-matching',firestore:{rules:fs.readFileSync('prototype/security/firestore.rules','utf8')}});
  try {
@@ -97,7 +97,7 @@ const {reviewPartnerAsAdmin,assignPartnerAsAdmin,readAssignedQuote,submitAssigne
   await assertSucceeds(reviewPartnerAsAdmin(admin,'partner-1','반려'));
   await assertFails(getDoc(doc(partner,'quote_requests','ui-example','assignments','partner-1')));
   await assertFails(getDoc(offer1));
-  await assertSucceeds(deleteDoc(assignment1));
+  await assertSucceeds(revokeAssignmentAsAdmin(admin,'ui-example','partner-1'));
   await assertFails(setDoc(offer1,offer));
   await assertFails(listQuotes(anon));
   const requests=await listQuotes(admin);
