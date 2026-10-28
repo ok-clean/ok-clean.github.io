@@ -47,7 +47,7 @@ const base = 'http://127.0.0.1:8765';
       }
       await page.keyboard.press('Tab');
       assert.equal(await page.evaluate(() => document.activeElement.hasAttribute('data-share')), true);
-      if(width === 390 || width === 1440) {
+      if([320,390,1001,1440].includes(width)) {
         await nav.evaluate(el => { el.scrollLeft = 0; });
         await page.locator('.top .brand').focus();
         await page.evaluate(() => window.scrollTo(0,0));
