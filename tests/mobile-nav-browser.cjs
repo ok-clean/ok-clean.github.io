@@ -36,24 +36,45 @@ const base = 'http://127.0.0.1:8765';
       // Keep a first-visit screenshot even if a later keyboard assertion fails.
       if(width === 320) await page.screenshot({path:'/tmp/okclean-mobile-nav-320-initial.png'});
       // The existing DOM order is brand, links, tools. Check real Tab focus and scrolling.
-      await page.locator('.top .brand').focus();
-      for(let index=0; index<5; index++) {
-        await page.keyboard.press('Tab');
+      const checkFocusedLink = async (index, direction) => {
         assert.equal(await page.evaluate(() => document.activeElement.closest('.top nav') !== null), true);
         assert.equal(await page.evaluate(() => [...document.querySelectorAll('.top nav a')].indexOf(document.activeElement)), index);
         await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
         const position = await page.evaluate(() => {
           const menu = document.querySelector('.top nav'), nav = menu.getBoundingClientRect(), link = document.activeElement.getBoundingClientRect();
-          return {left:link.left,right:link.right,navLeft:nav.left,navRight:nav.right,scrollLeft:menu.scrollLeft,scrollWidth:menu.scrollWidth,clientWidth:menu.clientWidth};
+          return {left:link.left,right:link.right,navLeft:nav.left + menu.clientLeft,navRight:nav.left + menu.clientLeft + menu.clientWidth,scrollLeft:menu.scrollLeft,scrollWidth:menu.scrollWidth,clientWidth:menu.clientWidth};
         });
-        if(position.left < position.navLeft - 1 || position.right > position.navRight + 1) {
-          await page.screenshot({path:`/tmp/okclean-mobile-nav-failure-${width}-${index}.png`});
+        // Scrollable menus reserve room for the 3px outline and 2px offset.
+        const inset = position.scrollWidth > position.clientWidth ? 5 : 0;
+        if(position.left < position.navLeft + inset - 1 || position.right > position.navRight - inset + 1) {
+          await page.screenshot({path:`/tmp/okclean-mobile-nav-failure-${width}-${direction}-${index}.png`});
         }
-        assert.ok(position.left >= position.navLeft - 1 && position.right <= position.navRight + 1,
-          `focused item ${index} hidden at ${width}px: ${JSON.stringify(position)}`);
+        assert.ok(position.left >= position.navLeft + inset - 1 && position.right <= position.navRight - inset + 1,
+          `focused item ${direction} ${index} hidden at ${width}px: ${JSON.stringify(position)}`);
+      };
+      await page.locator('.top .brand').focus();
+      for(let index=0; index<5; index++) {
+        await page.keyboard.press('Tab');
+        await checkFocusedLink(index, 'forward');
       }
       await page.keyboard.press('Tab');
       assert.equal(await page.evaluate(() => document.activeElement.hasAttribute('data-share')), true);
+      for(let index=4; index>=0; index--) {
+        await page.keyboard.press('Shift+Tab');
+        await checkFocusedLink(index, 'reverse');
+      }
+      if(width === 320) {
+        const position = await page.evaluate(() => {
+          window.scrollTo(0, 400);
+          const menu = document.querySelector('.top nav');
+          menu.scrollLeft = 0;
+          const beforeY = window.scrollY;
+          menu.querySelector('a:last-child').focus({preventScroll:true});
+          return {beforeY, afterY:window.scrollY, menuScroll:menu.scrollLeft};
+        });
+        assert.equal(position.afterY, position.beforeY, 'menu focus must not move the document vertically');
+        assert.ok(position.menuScroll > 0, 'menu itself scrolls to the focused link');
+      }
       if([320,390,1001,1440].includes(width)) {
         await nav.evaluate(el => { el.scrollLeft = 0; });
         await page.locator('.top .brand').focus();
