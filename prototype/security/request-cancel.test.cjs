@@ -69,6 +69,16 @@ test('verified owner cancels: assigned partner access and new offers stop; recor
  await assert.rejects(assignPartnerAsAdmin(admin,'r','p2'));
  assert.equal(await compare('r','customer'),null);
 });
+test('cancellation committed before an offer denies the offer and retains the assignment record',async()=>{
+ const {grantId}=await assignPartnerAsAdmin(admin,'r','p1');
+ assert.deepEqual(await handler(args),{httpStatus:200,body:{status:'cancelled'}});
+ await assert.rejects(submitAssignedOffer(p1,'r',grantId,{price:250000,note:'가상 견적'}));
+ assert.equal((await getDocFromServer(child(admin,'offers',grantId))).exists(),false);
+ assert.equal((await getDocFromServer(child(admin,'grants',grantId))).exists(),true);
+ assert.equal((await getDocFromServer(child(admin,'assignments','p1'))).exists(),true);
+ await assertFails(getDocFromServer(child(p1,'grants',grantId)));
+ await assertFails(getDocFromServer(child(p1,'assignments','p1')));
+});
 test('repeat cancellation is idempotent for the owner; foreign and missing are indistinguishable',async()=>{
  assert.deepEqual(await handler({idToken:'test-other',requestId:'r'}),unavailable(404));
  assert.deepEqual(await handler({idToken:'test-owner',requestId:'missing'}),unavailable(404));
@@ -109,6 +119,52 @@ test('concurrent assignment cannot leave an active grant after cancellation', {t
  assert.equal((await getDocFromServer(quote(admin))).data().status,'취소');
  if(assignment.status==='fulfilled')await assertFails(getDocFromServer(child(p1,'grants',assignment.value.grantId)));
  await assert.rejects(assignPartnerAsAdmin(admin,'r','p2'));
+});
+test('concurrent offer and cancellation preserve committed history but revoke new partner access', {timeout:60000},async()=>{
+ const one=await assignPartnerAsAdmin(admin,'r','p1');
+ const two=await assignPartnerAsAdmin(admin,'r','p2');
+ const [cancel,offer]=await Promise.allSettled([
+  handler(args),
+  submitAssignedOffer(p1,'r',one.grantId,{price:250000,note:'가상 견적'})
+ ]);
+ assert.equal(cancel.status,'fulfilled');
+ let current=(await getDocFromServer(quote(admin))).data().status;
+ if(cancel.value.httpStatus===503) {
+  // A failed/uncertain response is not success. Read the current snapshot first;
+  // an open snapshot alone does not prove that a delayed write cannot later commit.
+  assert.deepEqual(cancel.value,unavailable(503));
+  assert.ok(['신규','취소'].includes(current));
+  if(current==='신규') {
+   // This explicit test-only retry represents a later deliberate user action,
+   // not an automatic retry by the handler or client.
+   assert.deepEqual(await handler(args),{httpStatus:200,body:{status:'cancelled'}});
+   current=(await getDocFromServer(quote(admin))).data().status;
+  }
+ } else {
+  assert.deepEqual(cancel.value,{httpStatus:200,body:{status:'cancelled'}});
+ }
+ assert.equal(current,'취소');
+ const recorded=await getDocFromServer(child(admin,'offers',one.grantId));
+ if(offer.status==='fulfilled') {
+  // An offer acknowledged before cancellation remains in admin history.
+  assert.equal(recorded.exists(),true);
+  assert.equal(recorded.data().price,250000);
+ } else {
+  // The loser of the race must not have created an offer.
+  assert.equal(offer.status,'rejected');
+  assert.equal(recorded.exists(),false);
+ }
+ assert.equal((await getDocFromServer(child(admin,'grants',one.grantId))).exists(),true);
+ assert.equal((await getDocFromServer(child(admin,'assignments','p1'))).exists(),true);
+ for(const reference of [
+  child(p1,'assignments','p1'),child(p1,'grants',one.grantId),
+  child(p1,'offers',one.grantId),child(p2,'grants',two.grantId)
+ ]) await assertFails(getDocFromServer(reference));
+ // p2 had no offer before cancellation: this proves that new writes are denied,
+ // independently of the create-only rule on p1's possibly existing offer.
+ assert.equal((await getDocFromServer(child(admin,'offers',two.grantId))).exists(),false);
+ await assert.rejects(submitAssignedOffer(p2,'r',two.grantId,{price:270000}));
+ assert.equal((await getDocFromServer(child(admin,'offers',two.grantId))).exists(),false);
 });
 test('concurrent booking and cancellation produce one compatible final state', {timeout:60000},async()=>{
  const [cancel,booking]=await Promise.allSettled([handler(args),updateDoc(quote(admin),{status:'예약확정'})]);
