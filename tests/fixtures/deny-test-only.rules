@@ -1,0 +1,7 @@
+// Test bootstrap only. The unit-testing SDK loads each test policy into the local emulator.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} { allow read, write: if false; }
+  }
+}
