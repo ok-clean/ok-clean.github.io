@@ -74,7 +74,7 @@ if(serviceParams.length){
   else serviceLinkIssue = consumed ? "청소 서비스를 확인하고 선택해 주세요." : "링크의 청소 서비스를 자동 선택하지 못했어요. 원하는 서비스를 확인해 주세요.";
 }
 let cur = { svc: urlSvc && SV.some(s => s.id === urlSvc) ? urlSvc : (Q.svc && SV.some(s => s.id === Q.svc) ? Q.svc : SV[0].id), v: 0, t: null, qty: null, opts: [] };
-if(cur.svc === Q.svc){ cur.v = Q.v || 0; cur.t = Q.t ?? null; cur.qty = Q.qty == null || Q.qty === "" || !Number.isFinite(Number(Q.qty)) ? null : Math.min(999, Math.max(1, Math.trunc(Number(Q.qty)))); cur.opts = Q.opts || []; }
+if(cur.svc === Q.svc){ cur.v = Q.v || 0; cur.t = Q.t ?? null; cur.qty = Q.qty === "" ? "" : Q.qty == null || !Number.isFinite(Number(Q.qty)) ? null : Math.min(999, Math.max(1, Math.trunc(Number(Q.qty)))); cur.opts = Q.opts || []; }
 const svc = () => SV.find(s => s.id === cur.svc);
 
 if(refNotice){
@@ -145,7 +145,7 @@ function drawForm(){
   $("qQtyF").hidden = quote || tiered || !!(v && v.quote);
   $("qOptF").hidden = quote || !(s.options || []).length;
   if(!quote && !tiered){
-    if(!cur.qty) cur.qty = s.qtyDefault || 1;
+    if(cur.qty == null) cur.qty = s.qtyDefault || 1;
     $("qQty").value = cur.qty;
     $("qQtyL").textContent = s.qtyLabel || "수량";
     $("qUnit").textContent = s.unit;
@@ -153,8 +153,14 @@ function drawForm(){
   if(!quote) $("qOpt").innerHTML = (s.options || []).map((o, i) => `<label><input type="checkbox" data-o="${i}"${cur.opts.includes(i) ? " checked" : ""}><span>${esc(o.name)}</span><small>${optText(o, s)}</small></label>`).join("");
   calc();
 }
+// 사용자가 비운 수량은 초기 기본값과 구별합니다. 현장 견적에는 수량이 필요하지 않습니다.
+function missingQty(){
+  const s = svc(), v = (s.variants || [])[cur.v] || {};
+  return !isQuote(s) && !(s.tiers || []).length && !v.quote && cur.qty === "";
+}
 function estimate(){
   const s = svc();
+  if(missingQty()) return null;
   if(isQuote(s)) return null;
   const tiered = !!(s.tiers || []).length;
   const opts = cur.opts.map(i => (s.options || [])[i]).filter(Boolean);
@@ -204,8 +210,23 @@ function weekendNote(){
   return (d === 0 || d === 6) ? " 주말은 할증이 붙을 수 있어요. 평일이면 더 저렴해요." : "";
 }
 function calc(){
-  const s = svc(), r = estimate();
-  if(r){
+  const s = svc(), r = estimate(), needsQty = missingQty();
+  let qtyNote = $("qQtyNote");
+  if(needsQty && !qtyNote){
+    qtyNote = document.createElement("p"); qtyNote.id = "qQtyNote";
+    qtyNote.className = "hint"; qtyNote.setAttribute("role", "status");
+    qtyNote.textContent = "1부터 999까지 수량을 입력해 주세요.";
+    $("qQtyF").appendChild(qtyNote);
+    $("qQty").setAttribute("aria-invalid", "true");
+    $("qQty").setAttribute("aria-describedby", qtyNote.id);
+  } else if(!needsQty && qtyNote){
+    qtyNote.remove(); $("qQty").removeAttribute("aria-invalid"); $("qQty").removeAttribute("aria-describedby");
+  }
+  if(needsQty){
+    $("qK").textContent = "예상 금액";
+    $("qV").textContent = "수량 입력";
+    $("qN").textContent = "수량을 입력하면 예상 금액을 확인할 수 있어요.";
+  } else if(r){
     const p = priceText(r.lo, r.hi);
     $("qK").textContent = r.t ? `예상 금액 · 작업 인원 ${r.t.crew}명` : "예상 금액";
     $("qV").innerHTML = `${esc(p.replace(/원(~?)$/, ""))}<small>원${r.hi == null ? "~" : ""}</small>`;
@@ -216,10 +237,10 @@ function calc(){
     $("qV").innerHTML = `사진 보고<small> 안내</small>`;
     $("qN").textContent = "작업량 차이가 커서 현장 사진을 보고 금액을 알려드려요." + weekendNote();
   }
-  $("qKakao").textContent = r ? "이 견적으로 카톡 문의" : "카톡으로 사진 보내고 견적 받기";
+  $("qKakao").textContent = r || needsQty ? "이 견적으로 카톡 문의" : "카톡으로 사진 보내고 견적 받기";
   if(M){
     const box = $("qMem"); box.hidden = false;
-    if(MEMBER) box.innerHTML = r ? `🎟 회원 쿠폰 적용 시 <b>${priceText(Math.max(0, r.lo - M.coupon), r.hi == null ? null : Math.max(0, r.hi - M.coupon))}</b> + ${esc(MEMBER.free)} 무료` : `🎟 회원 쿠폰 ${won(M.coupon)}원 할인 + ${esc(MEMBER.free)} 무료가 적용돼요`;
+    if(MEMBER) box.innerHTML = needsQty ? `🎟 수량을 입력하면 회원 쿠폰 적용 금액을 확인할 수 있어요.` : r ? `🎟 회원 쿠폰 적용 시 <b>${priceText(Math.max(0, r.lo - M.coupon), r.hi == null ? null : Math.max(0, r.hi - M.coupon))}</b> + ${esc(MEMBER.free)} 무료` : `🎟 회원 쿠폰 ${won(M.coupon)}원 할인 + ${esc(MEMBER.free)} 무료가 적용돼요`;
     else box.innerHTML = `<button type="button" class="mem-join" data-join>🎟 회원가입하면 여기서 <b>${won(M.coupon)}원 더 할인</b> + 무료 서비스 →</button>`;
   }
   const saved = store.set("quote", {svc: cur.svc, v: cur.v, t: cur.t, qty: cur.qty, opts: cur.opts, area: $("qArea").value, date: $("qDate").value});
@@ -253,7 +274,7 @@ function selectChoice(b, attr){
 }
 $("qTier").addEventListener("click", e => { const b = e.target.closest("[data-t]"); if(!b) return; selectChoice(b, "t"); });
 $("qVar").addEventListener("click", e => { const b = e.target.closest("[data-v]"); if(!b) return; selectChoice(b, "v"); });
-$("qQty").addEventListener("input", e => { cur.qty = Math.min(999, Math.max(1, parseInt(e.target.value, 10) || 1)); if(e.target.value !== "") e.target.value = cur.qty; calc(); });
+$("qQty").addEventListener("input", e => { cur.qty = e.target.value === "" ? "" : Math.min(999, Math.max(1, parseInt(e.target.value, 10) || 1)); if(e.target.value !== "") e.target.value = cur.qty; calc(); });
 $("qQty").addEventListener("change", e => { e.target.value = cur.qty; });
 $("qMinus").onclick = () => { cur.qty = Math.max(1, (+cur.qty || 1) - 1); $("qQty").value = cur.qty; calc(); };
 $("qPlus").onclick = () => { cur.qty = Math.min(999, (+cur.qty || 0) + 1); $("qQty").value = cur.qty; calc(); };
@@ -266,6 +287,9 @@ $("qDate").addEventListener("change", () => {
   calc();
 });
 function validateQuoteDateBeforeSend(){
+  if(missingQty()){
+    toast("수량을 입력한 뒤 문의해 주세요."); $("qQty").focus(); return false;
+  }
   const input = $("qDate");
   input.min = new Date(Date.now() + 9*3600e3).toISOString().slice(0, 10);
   if(input.value && input.value < input.min){
