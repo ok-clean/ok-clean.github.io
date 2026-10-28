@@ -21,6 +21,10 @@ function withBlogs(blogs) {
 
 async function visit(browser, viewport, payload, blogs = ['safe_blog', 'safe-blog2']) {
   const context = await browser.newContext({viewport, serviceWorkers:'block'});
+  // 사례 스크롤 검사는 기존 회원가입 팝업과 독립적으로 실행합니다.
+  await context.addInitScript(() => {
+    if(location.hostname === '127.0.0.1') localStorage.setItem('joinLater', JSON.stringify(Date.now()));
+  });
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
