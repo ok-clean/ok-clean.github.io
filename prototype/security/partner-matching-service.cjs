@@ -1,7 +1,7 @@
 'use strict';
 // EMULATOR PROTOTYPE. Web SDK clients with verified auth; NOT Firebase Admin SDK.
 // Rules remain the authority even when callers bypass this module. No UI/production wiring.
-const {doc, collection, getDocFromServer, runTransaction, serverTimestamp, setDoc, deleteDoc} = require('firebase/firestore');
+const {doc, collection, getDocFromServer, runTransaction, serverTimestamp, setDoc} = require('firebase/firestore');
 const idOK = id => typeof id === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(id);
 function ids(...values) { if (!values.every(idOK)) throw new TypeError('Invalid identifier'); }
 function requestOpen(data) {
@@ -27,18 +27,33 @@ async function assignPartnerAsAdmin(db, requestId, partnerUid) {
   const grantRef = doc(collection(requestRef,'grants'));
   await runTransaction(db,async tx => {
     const request = await tx.get(requestRef), profile = await tx.get(profileRef), pointer = await tx.get(pointerRef);
+    const slots = ['0','1','2'].map(slotId => doc(requestRef,'slots',slotId));
+    const slotSnapshots = await Promise.all(slots.map(ref => tx.get(ref)));
     const r = request.data(), p = profile.data();
-    if (!requestOpen(r) || p?.status !== '승인' || !Number.isSafeInteger(p.approvalVersion) || pointer.exists()) throw new Error('Assignment unavailable');
-    const projection = {partnerUid,approvalVersion:p.approvalVersion,service:r.service,area:r.area,size:r.size,date:r.date,createdAt:serverTimestamp()};
+    const index = slotSnapshots.findIndex(s => !s.exists());
+    if (!requestOpen(r) || p?.status !== '승인' || !Number.isSafeInteger(p.approvalVersion) || pointer.exists() || index < 0) throw new Error('Assignment unavailable');
+    const slotId = String(index);
+    const projection = {partnerUid,approvalVersion:p.approvalVersion,slotId,service:r.service,area:r.area,size:r.size,date:r.date,createdAt:serverTimestamp()};
     tx.set(grantRef,projection);
-    tx.set(pointerRef,{grantId:grantRef.id});
+    tx.set(pointerRef,{grantId:grantRef.id,slotId});
+    tx.set(slots[index],{partnerUid,grantId:grantRef.id});
   });
   return {grantId:grantRef.id};
 }
 async function revokeAssignmentAsAdmin(db, requestId, partnerUid) {
   ids(requestId,partnerUid);
-  // Deleting only the pointer revokes access without destroying the historical grant/offer.
-  await deleteDoc(doc(db,'quote_requests',requestId,'assignments',partnerUid));
+  // Removing the pointer and its slot together revokes access and frees capacity.
+  const requestRef = doc(db,'quote_requests',requestId);
+  const pointerRef = doc(requestRef,'assignments',partnerUid);
+  await runTransaction(db,async tx => {
+    const pointer = await tx.get(pointerRef);
+    if (!pointer.exists()) throw new Error('Assignment unavailable');
+    const {slotId,grantId} = pointer.data();
+    if (!['0','1','2'].includes(slotId) || !idOK(grantId)) throw new Error('Invalid assignment');
+    const slotRef = doc(requestRef,'slots',slotId), slot = await tx.get(slotRef);
+    if (!slot.exists() || slot.data().partnerUid !== partnerUid || slot.data().grantId !== grantId) throw new Error('Assignment inconsistent');
+    tx.delete(pointerRef); tx.delete(slotRef);
+  });
 }
 async function readAssignedQuote(db, requestId, partnerUid) {
   ids(requestId,partnerUid);
