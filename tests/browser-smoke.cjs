@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
   const browser = await chromium.launch({headless: true});
   try {
     for (const viewport of [{width: 390, height: 844}, {width: 1440, height: 900}]) {
-      const context = await browser.newContext({viewport});
+      const context = await browser.newContext({viewport, serviceWorkers: 'block'});
       await context.route('**/*', async route => {
         const url = new URL(route.request().url());
         if (url.hostname !== '127.0.0.1') return route.abort();
