@@ -94,7 +94,7 @@ async function clickKakao(page) {
         const code = await submit(page);
         await page.evaluate(() => {window.blockMemberStorage = false;});
         await clickKakao(page);
-        assert.equal(await page.locator('#sheet .err').count(), 0);
+        assert.equal(await page.locator('#sheet .err').filter({hasText:'최근 회원정보'}).count(), 0);
         assert.match(await page.evaluate(() => window.fakeCopy), new RegExp('쿠폰번호: ' + code));
         assert.doesNotMatch(await page.evaluate(() => window.fakeCopy), /저장하지 못했어요/);
         assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('member')).code), code);
@@ -114,7 +114,7 @@ async function clickKakao(page) {
         assert.equal(await page.locator('#jStorageNote').isVisible(), false);
         await page.evaluate(() => {window.blockMemberStorage = true;});
         await clickKakao(page);
-        const warning = page.locator('#sheet .err');
+        const warning = page.locator('#sheet .err').filter({hasText:'최근 회원정보'});
         await warning.waitFor({state:'visible'});
         assert.match(await warning.innerText(), /최근 회원정보.*저장하지 못했어요.*사라질 수/s);
         await page.screenshot({path:`/tmp/okclean-member-sheet-${viewport.width}.png`});
@@ -149,12 +149,14 @@ async function clickKakao(page) {
           document.execCommand = () => false;
         });
         await clickKakao(page);
-        assert.equal(await page.locator('#sheet .err').isVisible(), true);
+        const warning = page.locator('#sheet .err').filter({hasText:'최근 회원정보'});
+        assert.equal(await warning.isVisible(), true);
+        assert.match(await page.locator('#sheet [data-copy-status]').innerText(), /자동 복사하지 못했어요/);
         assert.match(await page.locator('#sheetB').innerText(), /길게 눌러 복사/);
         assert.equal(await page.locator('#sheet [data-copy-again]').isVisible(), true);
         await page.evaluate(() => window.fakeSubmitFail());
         await page.waitForFunction(() => document.querySelector('.toast')?.textContent.includes('자동 접수가 되지 않았어요'));
-        assert.equal(await page.locator('#sheet .err').isVisible(), true);
+        assert.equal(await warning.isVisible(), true);
         assert.deepEqual(errors, []);
         await context.close();
       }
