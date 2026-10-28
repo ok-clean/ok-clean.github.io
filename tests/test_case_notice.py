@@ -18,7 +18,7 @@ class NoticeClassificationTest(unittest.TestCase):
         self.config = {
             'blog': ['blog_a', 'blog_b'],
             'services': [{'id': 'washer', 'name': '세탁기 청소', 'keywords': ['세탁기청소']}],
-            'excludeWords': [], 'tipWords': ['방법'], 'tipTopics': [], 'regions': [],
+            'excludeWords': ['창업', '교육'], 'tipWords': ['방법'], 'tipTopics': [], 'regions': [],
         }
         self.entries = [
             {'title': '오케이청소 필독 공지 | 서비스 안내·시공 사례', 'link': 'https://example.test/notice', 'kind': 'case', 'svc': '', 'blog': 'blog_a'},
@@ -41,7 +41,7 @@ class NoticeClassificationTest(unittest.TestCase):
     def test_same_link_becomes_notice_without_collecting_new_notice(self):
         rss = '''<rss><channel>
         <item><title>[공지] unrelated personal news</title><link>https://example.test/new-notice</link></item>
-        <item><title>[공지] service notice</title><link>https://example.test/steps</link></item>
+        <item><title>[공지] 청소 창업 교육 안내</title><link>https://example.test/steps</link></item>
         <item><title>춘천 세탁기 청소 후기</title><link>https://example.test/new-report</link></item>
         </channel></rss>'''.encode('utf8')
         with tempfile.TemporaryDirectory() as temp:
