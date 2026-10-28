@@ -1,6 +1,6 @@
 const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
-const base = 'http://127.0.0.1:8765';
+const base = process.env.OKCLEAN_TEST_BASE || 'http://127.0.0.1:8765';
 (async () => {
   const browser = await chromium.launch({headless: true});
   try {
