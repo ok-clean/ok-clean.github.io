@@ -6,10 +6,14 @@ self.addEventListener("activate", e => e.waitUntil(
 ));
 self.addEventListener("fetch", e => {
   const req = e.request;
-  if(req.method !== "GET" || new URL(req.url).origin !== location.origin) return;
+  const url = new URL(req.url);
+  if(req.method !== "GET" || url.origin !== location.origin) return;
+  // 사례 목록은 요청마다 시각이 달라 매번 새로운 캐시 항목이 생깁니다.
+  const timestampedCases = req.mode !== "navigate" &&
+    url.pathname === new URL("cases.json", self.registration.scope).pathname && /^\?t=[0-9]+$/.test(url.search);
   e.respondWith(
     fetch(req).then(res => {
-      if(res.ok){ const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
+      if(res.ok && !timestampedCases){ const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
       return res;
     }).catch(() => caches.match(req).then(r => {
       if(r) return r;
