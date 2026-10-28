@@ -3,7 +3,7 @@ const { koreanDayEnd } = require('./kst-date.cjs');
 const { doc, collection, setDoc, getDoc, getDocs, updateDoc, serverTimestamp } = require('firebase/firestore');
 const SERVICES = ['입주·이사 청소','거주·정기 청소','사무실·상가 청소','에어컨 청소','후드·주방 청소','그 외 청소'];
 const AREAS = ['춘천','화천','양구','인제','철원','홍천','횡성','가평','그 외 지역'];
-const STATUSES = ['신규','검토중','상담중','예약확정','작업완료','종료'];
+const STATUSES = ['신규','검토중','상담중','예약확정','작업완료','종료','취소'];
 const safeId = id => typeof id === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(id);
 function validateRequest(form) {
  if (!form || !SERVICES.includes(form.service) || !AREAS.includes(form.area)) throw new Error('서비스 또는 지역을 확인해 주세요.');

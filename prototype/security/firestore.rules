@@ -60,10 +60,13 @@ service cloud.firestore {
       allow create: if newRequest();
       allow get, list: if admin();
       allow update: if admin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
-        && (request.resource.data.status in ['신규','검토중','상담중','예약확정','작업완료','종료'])
+        && (request.resource.data.status in ['신규','검토중','상담중','예약확정','작업완료','종료','취소'])
         // A closed request cannot become open again: that would revive old partner grants.
-        && (!(resource.data.status in ['예약확정','작업완료','종료'])
-          || !(request.resource.data.status in ['신규','검토중','상담중']));
+        && (!(resource.data.status in ['예약확정','작업완료','종료','취소'])
+          || !(request.resource.data.status in ['신규','검토중','상담중']))
+        // Cancellation is terminal and only available before a booking is confirmed.
+        && (resource.data.status != '취소' || request.resource.data.status == '취소')
+        && (request.resource.data.status != '취소' || resource.data.status in ['신규','검토중','상담중','취소']);
       allow delete: if false;
     }
     // TEST ASSUMPTION: exactly three slot IDs per request; no production policy implied.
