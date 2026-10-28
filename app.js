@@ -393,8 +393,10 @@ async function invite(){
   }
   if(await copy(text + "\n" + url)) toast("초대 링크를 복사했어요. 친구에게 카톡으로 붙여넣어 보내세요.");
 }
+let joinOpened = false;
 function openJoin(){
   if(!M) return;
+  joinOpened = true;
   if(MEMBER) joinDone(); else { $("joinForm").hidden = false; $("joinDone").hidden = true; const rb = $("jRef"); if(rb && REF){ rb.hidden = false; rb.textContent = `친구 초대로 오셨네요! 추천인 코드 ${REF}가 함께 등록돼요.`; } }
   openModal("join");
 }
@@ -451,14 +453,38 @@ if(M){
   // 처음 방문한 사람에게 한 번 띄우기 (가입했거나 '다음에'를 누른 뒤 7일 동안은 안 띄움)
   const later = store.get("joinLater", 0);
   if(!MEMBER && Date.now() - later > 7 * 864e5 && !/src=app/.test(location.search)){
-    let shown = false;
-    const pop = () => { if(shown || document.querySelector(".modal:not([hidden])")) return; shown = true; store.set("joinLater", Date.now()); openJoin(); };
-    // 견적 계산기를 만지는 중에는 방해하지 않음
-    let busy = 0;
-    ["input", "change", "click", "focusin"].forEach(t => $("quote").addEventListener(t, () => busy = Date.now()));
-    const tryPop = () => { if(Date.now() - busy < 15000) return setTimeout(tryPop, 5000); pop(); };
+    // 최초 대기 시간은 유지하고, 둘러보거나 입력하는 동안에는 방해하지 않습니다.
+    let busy = 0, waitingForVisibility = false;
+    const markBusy = () => { busy = Date.now(); };
+    const activityEvents = ["pointerdown", "keydown", "click", "input", "change", "focusin", "wheel", "touchmove"];
+    activityEvents.forEach(type => document.addEventListener(type, markBusy, {passive: true}));
+    window.addEventListener("scroll", markBusy, {passive: true});
+    const cleanup = () => {
+      activityEvents.forEach(type => document.removeEventListener(type, markBusy));
+      window.removeEventListener("scroll", markBusy);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+    const onVisibility = () => {
+      if(!document.hidden){
+        markBusy();
+        if(waitingForVisibility){
+          waitingForVisibility = false;
+          setTimeout(tryPop, 15000);
+        }
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    const tryPop = () => {
+      if(joinOpened || MEMBER || store.get("member", null) || Date.now() - store.get("joinLater", 0) <= 7 * 864e5){ cleanup(); return; }
+      if(document.hidden){ waitingForVisibility = true; return; }
+      const remaining = 15000 - (Date.now() - busy);
+      if(remaining > 0){ setTimeout(tryPop, remaining); return; }
+      cleanup();
+      if(document.querySelector(".modal:not([hidden])")) return;
+      store.set("joinLater", Date.now());
+      openJoin();
+    };
     setTimeout(tryPop, REF ? 4000 : 25000);   // 초대 링크로 온 사람에게는 빨리 보여줌
-    window.addEventListener("scroll", function onS(){ if(window.scrollY > document.body.scrollHeight * 0.45){ tryPop(); window.removeEventListener("scroll", onS); } }, {passive: true});
   }
   calc();
 }
