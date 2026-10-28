@@ -6,10 +6,15 @@
   if(url.protocol!=='https:' || url.username || url.password || url.search || url.hash || url.pathname!=='/api/offer-comparison' ||
      typeof getIdToken!=='function' || typeof getRequestId!=='function' || typeof fetchImpl!=='function' ||
      !Number.isSafeInteger(timeoutMs) || timeoutMs<10 || timeoutMs>30000)throw TypeError('Invalid comparison client configuration');
-  return async function loadOffers(){
+  return async function loadOffers({signal}={}){
+   if(signal && (typeof signal.addEventListener!=='function' || typeof signal.removeEventListener!=='function'))throw TypeError('Invalid abort signal');
    const controller=new AbortController();let timer;
+   const relay=()=>controller.abort();
+   if(signal?.aborted)relay();else signal?.addEventListener('abort',relay,{once:true});
    const deadline=new Promise(resolve=>{timer=setTimeout(()=>{controller.abort();resolve(null);},timeoutMs);});
+   const cancelled=new Promise(resolve=>{if(controller.signal.aborted)resolve(null);else controller.signal.addEventListener('abort',()=>resolve(null),{once:true});});
    const task=(async()=>{
+    if(controller.signal.aborted)return null;
     const requestId=await getRequestId();
     if(controller.signal.aborted || typeof requestId!=='string' || !/^[A-Za-z0-9_-]{1,80}$/.test(requestId))return null;
     const token=await getIdToken();
@@ -34,9 +39,9 @@
      return data.offers.map(o=>({company:o.company.trim(),price:o.price}));
     }finally{await stream.cancel().catch(()=>{});stream.releaseLock();}
    })();
-   try{const result=await Promise.race([task,deadline]);if(!result)throw Error('unavailable');return result;}
+   try{const result=await Promise.race([task,deadline,cancelled]);if(!result)throw Error('unavailable');return result;}
    catch{throw Error('비교 결과를 불러오지 못했습니다.');}
-   finally{clearTimeout(timer);controller.abort();}
+   finally{clearTimeout(timer);controller.abort();signal?.removeEventListener('abort',relay);}
   };
  }
  const api=Object.freeze({createComparisonClient});
