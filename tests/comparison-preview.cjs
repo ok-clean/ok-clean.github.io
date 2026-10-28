@@ -52,6 +52,14 @@ const path=require('node:path');
    assert.match(await page.locator('.offer h3').innerText(),/<img src=x/);
    assert.equal(await page.locator('.offer img').count(),0);
    assert.equal(await page.evaluate(()=>window.attack),undefined);
+   await page.evaluate(()=>{
+    const old=document.querySelector('#comparison-root'),root=old.cloneNode(true);old.replaceWith(root);
+    globalThis.OKCleanComparisonView.mount({root,loadOffers:async()=>[{company:'가'.repeat(60),price:100}]});
+   });
+   await page.locator('[data-comparison-load]').click();
+   await page.waitForFunction(()=>document.querySelector('#comparison-root').dataset.state==='ready');
+   assert.equal((await page.locator('.offer h3').innerText()).length,60);
+   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'long company overflow');
    assert.deepEqual(errors,[]);
    assert.equal(requests.every(x=>x.origin==='http://127.0.0.1:8765' && x.method==='GET'),true);
    console.log('PASS comparison preview '+width+'px');await context.close();
