@@ -203,8 +203,25 @@ function calc(){
   } else if(saved && warning) warning.remove();
 }
 $("qSvc").addEventListener("change", e => { cur = {svc: e.target.value, v: 0, t: null, qty: null, opts: []}; drawForm(); });
-$("qTier").addEventListener("click", e => { const b = e.target.closest("[data-t]"); if(!b) return; cur.t = +b.dataset.t; drawForm(); });
-$("qVar").addEventListener("click", e => { const b = e.target.closest("[data-v]"); if(!b) return; cur.v = +b.dataset.v; drawForm(); });
+function selectChoice(b, attr){
+  const active = document.activeElement;
+  const focusChoice = [["qVar", "v"], ["qTier", "t"], ["qOpt", "o"], ["qMem", "join"]]
+    .find(([id, key]) => $(id).contains(active) && active.matches(`[data-${key}]`));
+  const focusGroup = focusChoice ? $(focusChoice[0]) : null;
+  const focusAttr = focusChoice ? focusChoice[1] : null;
+  const focusIndex = focusChoice ? active.dataset[focusAttr] : null;
+  const index = +b.dataset[attr];
+  cur[attr] = index;
+  drawForm();
+  // 다시 그려진 기존 선택 요소로 포커스를 돌려 키보드 탐색 위치를 유지합니다.
+  // 선택 그룹 밖에 포커스가 있었다면 다른 요소에서 포커스를 빼앗지 않습니다.
+  if(focusIndex !== null){
+    const replacement = focusGroup.querySelector(`[data-${focusAttr}="${focusIndex}"]`);
+    if(replacement && !replacement.disabled && replacement.getClientRects().length) replacement.focus({preventScroll:true});
+  }
+}
+$("qTier").addEventListener("click", e => { const b = e.target.closest("[data-t]"); if(!b) return; selectChoice(b, "t"); });
+$("qVar").addEventListener("click", e => { const b = e.target.closest("[data-v]"); if(!b) return; selectChoice(b, "v"); });
 $("qQty").addEventListener("input", e => { cur.qty = Math.min(999, Math.max(1, parseInt(e.target.value, 10) || 1)); if(e.target.value !== "") e.target.value = cur.qty; calc(); });
 $("qQty").addEventListener("change", e => { e.target.value = cur.qty; });
 $("qMinus").onclick = () => { cur.qty = Math.max(1, (+cur.qty || 1) - 1); $("qQty").value = cur.qty; calc(); };
