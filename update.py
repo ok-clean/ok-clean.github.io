@@ -163,7 +163,7 @@ def main():
                         continue
                     box[x["link"]] = x
                 ok += 1
-                print(f"블로그 {b}: 시공 사례 {len(got)}건 확인")
+                print(f"블로그 {b}: 분류한 글 {len(got)}건 확인")
             except Exception as err:
                 print(f"블로그 {b} 읽기 실패(기존 사례 유지):", repr(err))
         # 설정에서 뺀 블로그의 글은 정리
