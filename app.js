@@ -40,7 +40,32 @@ if(cur.svc === Q.svc){ cur.v = Q.v || 0; cur.t = Q.t ?? null; cur.qty = Q.qty ==
 const svc = () => SV.find(s => s.id === cur.svc);
 
 $("qSvc").innerHTML = C.categories.map(cat => `<optgroup label="${esc(cat.name)}">${SV.filter(s => s.cat === cat.id).map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("")}</optgroup>`).join("");
-if(Q.area) $("qArea").value = Q.area;
+// 지역 페이지의 선택은 최초 진입에만 적용하고 사용자가 이후 변경한 값을 존중합니다.
+const areaParams = new URLSearchParams(location.search).getAll("area");
+if(areaParams.length){
+  let consumed = false;
+  try {
+    const cleanURL = new URL(location.href);
+    cleanURL.searchParams.delete("area");
+    history.replaceState(history.state, "", cleanURL.href);
+    consumed = true;
+  } catch(_) {} // 주소를 정리할 수 없을 때에는 자동 선택하지 않습니다.
+  const region = areaParams.length === 1 ? areaParams[0] : "";
+  const isKnownRegion = (C.regions || []).includes(region);
+  const isSelectable = Array.from($("qArea").options).some(option => option.value === region && region !== "");
+  if(consumed && isKnownRegion && isSelectable) $("qArea").value = region;
+  else {
+    $("qArea").value = "";
+    const note = document.createElement("p");
+    note.id = "qAreaLinkNote";
+    note.className = "hint";
+    note.setAttribute("role", "status");
+    note.textContent = consumed && isKnownRegion ? "세부 지역을 선택해 주세요." : "지역을 선택해 주세요.";
+    $("qArea").insertAdjacentElement("afterend", note);
+    $("qArea").setAttribute("aria-describedby", note.id);
+    $("qArea").addEventListener("change", () => { note.remove(); $("qArea").removeAttribute("aria-describedby"); }, {once:true});
+  }
+} else if(Q.area) $("qArea").value = Q.area;
 const today = new Date(); $("qDate").min = new Date(today.getTime() + 9*3600e3).toISOString().slice(0, 10);
 if(Q.date && Q.date >= $("qDate").min) $("qDate").value = Q.date;
 

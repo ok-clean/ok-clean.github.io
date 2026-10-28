@@ -464,7 +464,7 @@ def area_page(c, r, cases):
 <h1>{e(r)} 청소, {e(c['name'])}이 맡아요</h1>
 <p class="lead" style="color:var(--muted);font-size:17px;margin:0">{e(r)} 어디든 방문해요. 서비스를 고르면 작업 범위와 가격 기준을 볼 수 있어요.</p>
 <div class="box">{services_html(c, 1)}</div>
-<a class="btn glove" href="../index.html#quote">{e(r)} 견적 계산하기</a>
+<a class="btn glove" href="../index.html?area={e(urllib.parse.quote(r, safe=''))}#quote">{e(r)} 견적 계산하기</a>
 {f'<div class="box"><h2>{e(r)} 시공 사례</h2><div class="cases">{case_html}</div></div>' if case_html else ''}
 <div class="box"><h2>다른 지역</h2><div class="links">{''.join(f'<a href="{urllib.parse.quote(x)}.html">{e(x)}</a>' for x in c.get('regions', []) if x != r)}</div></div>
 </main>
