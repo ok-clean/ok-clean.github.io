@@ -29,10 +29,33 @@ let MEMBER = store.get("member", null);
 // 메모리에만 있는 회원정보와 마지막 기기 저장 결과를 구분합니다.
 let memberSaved = !!MEMBER;
 const memberStorageWarning = "최근 회원정보를 이 기기에 저장하지 못했어요. 새로고침하거나 창을 닫으면 쿠폰 정보가 사라질 수 있어요. 쿠폰번호를 확인한 뒤 카톡으로 가입을 완료해 주세요.";
-// 친구 초대 링크(?ref=OK-XXXXXX)로 들어온 경우 추천인 코드를 기억
-const refQ = (new URLSearchParams(location.search).get("ref") || "").toUpperCase();
-if(/^OK-[A-Z0-9]{6}$/.test(refQ) && (!MEMBER || MEMBER.code !== refQ)) store.set("ref", refQ);
-const REF = store.get("ref", "");
+// 명시된 추천 링크는 현재 방문에서 우선하며, 잘못된 링크에 이전 코드를 대체하지 않습니다.
+const refParams = new URLSearchParams(location.search).getAll("ref");
+const validRef = code => typeof code === "string" && /^OK-[A-Z0-9]{6}$/.test(code);
+const ownRef = code => !!MEMBER && typeof MEMBER.code === "string" && MEMBER.code.toUpperCase() === code;
+const refQ = refParams.length === 1 ? refParams[0].toUpperCase() : "";
+const storedRef = store.get("ref", "");
+let REF = "", refNotice = "";
+// 오래된 코드가 다음 화면에 잘못 복원되지 않도록 최선을 다해 지웁니다.
+const clearStoredRef = () => { try { localStorage.removeItem("ref"); return localStorage.getItem("ref") === null; } catch(_) { return false; } };
+if(refParams.length){
+  if(validRef(refQ) && !ownRef(refQ)){
+    REF = refQ;
+    const saved = store.set("ref", REF);
+    const readable = store.get("ref", "") === REF;
+    if(!readable){
+      // 저장에 실패한 경우에만 옛 값을 지웁니다. 읽기만 실패했다면 방금 쓴 값을 보존합니다.
+      const cleared = !saved && clearStoredRef();
+      refNotice = "추천인 코드를 이 기기에 저장했는지 확인하지 못했어요. 다른 페이지로 이동하면 코드가 사라질 수 있어요. 초대 링크를 다시 열어 주세요.";
+      if((!saved && !cleared) || saved) refNotice += " 다른 페이지에서 이전 코드나 다른 코드가 나타날 수도 있어요.";
+    }
+  } else {
+    refNotice = refParams.length === 1 && validRef(refQ) && ownRef(refQ)
+      ? "본인의 추천인 코드는 적용할 수 없어요."
+      : "추천인 코드를 확인할 수 없어요. 초대 링크를 다시 확인해 주세요.";
+    refNotice += " 다른 페이지에서는 기기에 저장된 이전 코드가 다시 나타날 수 있어요.";
+  }
+} else if(validRef(storedRef) && !ownRef(storedRef)) REF = storedRef;
 
 // ── 견적 계산기 ──
 const SV = C.services;
@@ -54,6 +77,14 @@ let cur = { svc: urlSvc && SV.some(s => s.id === urlSvc) ? urlSvc : (Q.svc && SV
 if(cur.svc === Q.svc){ cur.v = Q.v || 0; cur.t = Q.t ?? null; cur.qty = Q.qty == null || Q.qty === "" || !Number.isFinite(Number(Q.qty)) ? null : Math.min(999, Math.max(1, Math.trunc(Number(Q.qty)))); cur.opts = Q.opts || []; }
 const svc = () => SV.find(s => s.id === cur.svc);
 
+if(refNotice){
+  const note = document.createElement("p");
+  note.id = "qRefNote";
+  note.className = "hint";
+  note.setAttribute("role", "status");
+  note.textContent = refNotice;
+  $("qSvc").insertAdjacentElement("afterend", note);
+}
 $("qSvc").innerHTML = C.categories.map(cat => `<optgroup label="${esc(cat.name)}">${SV.filter(s => s.cat === cat.id).map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("")}</optgroup>`).join("");
 if(serviceLinkIssue){
   const note = document.createElement("p");
@@ -414,7 +445,14 @@ let joinOpened = false;
 function openJoin(){
   if(!M) return;
   joinOpened = true;
-  if(MEMBER) joinDone(); else { $("joinForm").hidden = false; $("joinDone").hidden = true; const rb = $("jRef"); if(rb && REF){ rb.hidden = false; rb.textContent = `친구 초대로 오셨네요! 추천인 코드 ${REF}가 함께 등록돼요.`; } }
+  if(MEMBER) joinDone(); else {
+    $("joinForm").hidden = false; $("joinDone").hidden = true;
+    const rb = $("jRef");
+    if(rb){
+      rb.hidden = !REF && !refNotice;
+      rb.textContent = [REF ? `친구 초대로 오셨네요! 추천인 코드 ${REF}가 가입 요청에 함께 담겨요.` : "", refNotice].filter(Boolean).join(" ");
+    }
+  }
   openModal("join");
 }
 if(M){
