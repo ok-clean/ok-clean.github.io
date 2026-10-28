@@ -275,7 +275,7 @@ def promises_section(c, cases):
     ps = c.get("promises") or []
     if not ps:
         return ""
-    n = sum(1 for x in cases if x.get("kind", "case") == "case")
+    n = sum(1 for x in cases if x.get("kind", "case") == "case" and safe_case_link(x.get("link")))
     stat = f'<div class="stat"><b>{n}건</b><span>블로그에 공개한 시공 기록</span></div>' if n else ""
     items = "".join(f'<li><b>{e(x["t"])}</b><span>{e(x["d"])}</span></li>' for x in ps)
     return f"""<section class="s trust" id="promise"><div class="wrap">
@@ -395,6 +395,40 @@ def index_page(c, cases=()):
 """
 
 
+def safe_case_link(value):
+    """수집한 사례 링크는 사용자 정보가 없는 절대 http(s) URL만 허용한다."""
+    import re
+    if not isinstance(value, str) or not re.match(r"^https?://", value, re.I):
+        return False
+    if any(ch.isspace() or ord(ch) < 32 or ord(ch) in (127, 0xFEFF) or ch == "\\" for ch in value):
+        return False
+    authority = re.match(r"^https?://([^/?#]*)", value, re.I).group(1)
+    if "%" in authority:
+        return False
+    try:
+        parts = urllib.parse.urlsplit(value)
+        if parts.scheme.lower() not in ("http", "https") or not parts.hostname or parts.username is not None or parts.password is not None:
+            return False
+        _ = parts.port  # 잘못된 포트는 ValueError
+        if ":" in parts.hostname:
+            import ipaddress
+            ipaddress.IPv6Address(parts.hostname)
+        else:
+            ascii_host = parts.hostname.encode("idna").decode("ascii")
+            if not re.fullmatch(r"[a-z0-9.-]+", ascii_host, re.I):
+                return False
+            if re.fullmatch(r"(?:0x[0-9a-f]+|\d+)(?:\.(?:0x[0-9a-f]+|\d+))*", ascii_host.rstrip("."), re.I) and "x" in ascii_host.lower():
+                return False
+            if re.search(r"(?:^|\.)\d+$", ascii_host.rstrip(".")):
+                import ipaddress
+                if parts.hostname.rstrip(".").lower() != ascii_host.rstrip(".").lower():
+                    return False
+                ipaddress.IPv4Address(ascii_host.rstrip("."))
+        return True
+    except (ValueError, UnicodeError):
+        return False
+
+
 def service_page(c, s, cases=()):
     a, b = price_from(s)
     regions = c.get("regions", [])
@@ -405,7 +439,7 @@ def service_page(c, s, cases=()):
     same = [x for x in c["services"] if x["cat"] == s["cat"] and x["id"] != s["id"]]
     rooms = "".join(f'<div class="room"><b>{e(r["name"])}</b><ul>{"".join(f"<li>{e(i)}</li>" for i in r["items"])}</ul></div>' for r in s.get("rooms", []))
     excl = "".join(f"<li>{e(x)}</li>" for x in s.get("excludes", []))
-    mine = [x for x in cases if x.get("svc") == s["id"] and x.get("kind", "case") == "case"][:4]
+    mine = [x for x in cases if x.get("svc") == s["id"] and x.get("kind", "case") == "case" and safe_case_link(x.get("link"))][:4]
     kakao = c.get("kakao", "")
     base = c.get("siteUrl", "").rstrip("/")
     ld = {"@context": "https://schema.org", "@type": "Service", "name": s["name"], "description": s["summary"], "serviceType": s["name"],
@@ -456,7 +490,7 @@ def case_card(x):
 def area_page(c, r, cases):
     title = f"{r} 입주청소·에어컨 청소 | {c['name']}"
     desc = f"{r} 지역 입주청소, 거주청소, 사무실·준공 청소, 에어컨·세탁기 분해세척을 {c['name']}에서 맡아요. 평수만 넣으면 예상 견적을 볼 수 있어요."
-    mine = [x for x in cases if x.get("region") == r and x.get("kind", "case") == "case"][:8]
+    mine = [x for x in cases if x.get("region") == r and x.get("kind", "case") == "case" and safe_case_link(x.get("link"))][:8]
     case_html = "".join(case_card(x) for x in mine)
     return head(c, title, desc, area_file(r), 1) + f"""
 <main class="wrap page">

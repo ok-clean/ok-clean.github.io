@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
 const home = fs.readFileSync('index.html', 'utf8');
+const linkFixtures = JSON.parse(fs.readFileSync('tests/case-link-fixtures.json', 'utf8'));
 const url = 'http://127.0.0.1:8765/';
 const fakeCases = Array.from({length: 10}, (_, i) => ({
   title: `가상 청소 사례 ${i + 1}`, link: `https://example.test/${i}`, date: `2026-01-${String(i + 1).padStart(2,'0')}`,
@@ -78,7 +79,12 @@ async function visit(browser, viewport, payload, blogs = ['safe_blog', 'safe-blo
         await context.close();
       }
       {
-        const {context, page, errors} = await visit(browser, viewport, {cases:fakeCases});
+        const unsafe = linkFixtures.filter(x => !x.valid && typeof x.url === 'string')
+          .flatMap((x, i) => ['case','tip'].map(kind => ({title:'위험한 링크 ' + i, link:x.url, kind, svc:'aircon', region:'춘천'})));
+        const {context, page, errors} = await visit(browser, viewport, {cases:[...fakeCases, ...unsafe]});
+        for(const item of linkFixtures) {
+          assert.equal(await page.evaluate(url => safeCaseLink(url), item.url), item.valid, String(item.url));
+        }
         await page.locator('#caseMore').waitFor({state:'visible'});
         assert.equal(await page.locator('#caseList a.case').count(), 8);
         await page.locator('#caseMore').click();
@@ -86,6 +92,8 @@ async function visit(browser, viewport, payload, blogs = ['safe_blog', 'safe-blo
         await page.locator('#caseChips [data-f="washer"]').click();
         assert.equal(await page.locator('#caseList a.case').count(), 1);
         assert.match(await page.locator('#tipList').innerText(), /가상 청소 팁/);
+        assert.doesNotMatch(await page.locator('#cases').innerText(), /위험한 링크/);
+        assert.doesNotMatch(await page.locator('#tips').innerText(), /위험한 링크/);
         assert.deepEqual(errors, []);
         await context.close();
       }
