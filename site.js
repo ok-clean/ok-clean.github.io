@@ -8,6 +8,18 @@
   const IN_APP = /KAKAOTALK|NAVER|Instagram|FBAN|FBAV|Line\//i.test(UA);
   const STANDALONE = matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 
+  // 좁은 화면에서 키보드 초점이 메뉴 밖에 걸리면 메뉴만 수평으로 움직입니다.
+  const mainNav = document.querySelector('.top nav');
+  if(mainNav) mainNav.addEventListener('focusin', e => {
+    const link = e.target.closest('a');
+    if(!link || !mainNav.contains(link) || mainNav.scrollWidth <= mainNav.clientWidth) return;
+    const navRect = mainNav.getBoundingClientRect(), linkRect = link.getBoundingClientRect();
+    const left = navRect.left + mainNav.clientLeft + 6;
+    const right = navRect.left + mainNav.clientLeft + mainNav.clientWidth - 6;
+    if(linkRect.left < left) mainNav.scrollLeft += linkRect.left - left;
+    else if(linkRect.right > right) mainNav.scrollLeft += linkRect.right - right;
+  });
+
   // ── 토스트·복사 ──
   window.toast = function(msg){
     let t = document.querySelector(".toast");
