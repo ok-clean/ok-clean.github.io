@@ -76,25 +76,28 @@
   });
 
   // ── 공유하기 ──
-  let myCode = ""; try { myCode = (JSON.parse(localStorage.getItem("member") || "null") || {}).code || ""; } catch(e){}
-  const shareUrl = (S.url || location.origin).replace(/\/$/, "") + (myCode ? "/?ref=" + myCode : "/?src=share");   // 회원이면 내 초대 링크로 공유
+  const shareUrl = () => {
+    let myCode = ""; try { myCode = (JSON.parse(localStorage.getItem("member") || "null") || {}).code || ""; } catch(e){}
+    return (S.url || location.origin).replace(/\/$/, "") + (myCode ? "/?ref=" + myCode : "/?src=share");
+  };
   const shareText = `${S.name} · ${S.tagline}\n평수만 넣으면 청소 견적이 바로 나와요.`;
   async function share(){
+    const url = shareUrl();
     if(navigator.share && !IN_APP){
-      try { await navigator.share({title: S.name, text: shareText, url: shareUrl}); return; }
+      try { await navigator.share({title: S.name, text: shareText, url}); return; }
       catch(e){ if(e && e.name === "AbortError") return; }
     }
-    const u = encodeURIComponent(shareUrl), t = encodeURIComponent(shareText);
+    const u = encodeURIComponent(url), t = encodeURIComponent(shareText);
     sheet("친구에게 공유하기", `<div class="share-grid">
       <button type="button" data-copy-link><span class="ic">🔗</span>링크 복사</button>
-      <a href="https://band.us/plugin/share?body=${encodeURIComponent(shareText + "\n" + shareUrl)}&route=${encodeURIComponent(location.host)}" target="_blank" rel="noopener"><span class="ic">B</span>밴드</a>
+      <a href="https://band.us/plugin/share?body=${encodeURIComponent(shareText + "\n" + url)}&route=${encodeURIComponent(location.host)}" target="_blank" rel="noopener"><span class="ic">B</span>밴드</a>
       <a href="https://www.facebook.com/sharer/sharer.php?u=${u}" target="_blank" rel="noopener"><span class="ic">f</span>페이스북</a>
       <a href="https://twitter.com/intent/tweet?text=${t}&url=${u}" target="_blank" rel="noopener"><span class="ic">X</span>X</a>
     </div><p class="hint">카카오톡은 링크를 복사한 뒤 대화방에 붙여넣으면 로고와 함께 미리보기가 떠요.</p>`);
   }
   document.addEventListener("click", async e => {
     if(e.target.closest("[data-share]")) share();
-    if(e.target.closest("[data-copy-link]")){ if(await window.copyText(shareText + "\n" + shareUrl)){ window.closeModal($("sheet")); window.toast("링크를 복사했어요. 카톡이나 문자에 붙여넣어 주세요."); } }
+    if(e.target.closest("[data-copy-link]")){ if(await window.copyText(shareText + "\n" + shareUrl())){ window.closeModal($("sheet")); window.toast("링크를 복사했어요. 카톡이나 문자에 붙여넣어 주세요."); } }
   });
 
   // ── 휴대폰 앱(홈 화면) 설치 ──
