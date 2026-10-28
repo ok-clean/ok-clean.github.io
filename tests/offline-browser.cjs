@@ -15,11 +15,13 @@ home = home.replace(/(<script id="cfg" type="application\/json">)([\s\S]*?)(<\/s
 });
 const scripts = Object.fromEntries(['sw.js', 'app.js', 'site.js', 'style.css'].map(name => [name, fs.readFileSync(name, 'utf8')]));
 let networkDown = false;
+let caseVersion = 1;
 const server = http.createServer((req, res) => {
   // Playwright's page offline emulation may not apply to the service worker's
   // own network fetch. Force an actual connection failure for both contexts.
   if(networkDown) { req.socket.destroy(); return; }
-  let path = new URL(req.url, 'http://127.0.0.1').pathname;
+  const requestURL = new URL(req.url, 'http://127.0.0.1');
+  let path = requestURL.pathname;
   if(path.startsWith('/subpath/')) path = path.slice('/subpath'.length);
   if(path === '/' || path === '/index.html') { res.writeHead(200, {'Content-Type':'text/html; charset=utf-8'}); return res.end(home); }
   if(path === '/bootstrap') { res.writeHead(200, {'Content-Type':'text/html; charset=utf-8'}); return res.end('<!doctype html><title>시험 준비</title>'); }
@@ -27,7 +29,11 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, {'Content-Type':'text/html; charset=utf-8'});
     return res.end('<!doctype html><title>저장된 상세페이지</title><p>가상 상세 내용</p>');
   }
-  if(path === '/cases.json') { res.writeHead(200, {'Content-Type':'application/json'}); return res.end('{"cases":[]}'); }
+  if(path === '/cases.json' || path === '/nested/cases.json') {
+    const t = requestURL.searchParams.get('t');
+    if(t === '404' || t === '500') { res.writeHead(Number(t)); return res.end('error'); }
+    res.writeHead(200, {'Content-Type':'application/json'}); return res.end(JSON.stringify({cases:[], version:caseVersion}));
+  }
   if(path === '/fixture-data.json') { res.writeHead(200, {'Content-Type':'application/json'}); return res.end('{"example":true}'); }
   const file = path.slice(1);
   if(Object.hasOwn(scripts, file)) { res.writeHead(200, {'Content-Type':file.endsWith('.css') ? 'text/css' : 'application/javascript'}); return res.end(scripts[file]); }
@@ -45,10 +51,19 @@ const server = http.createServer((req, res) => {
       await context.route('**/*', route => new URL(route.request().url()).origin === base ? route.continue() : route.abort());
       await context.addInitScript(() => { if(location.hostname === '127.0.0.1') localStorage.setItem('joinLater', JSON.stringify(Date.now())); });
       const page = await context.newPage();
+      const appCaseRequests = [];
+      page.on('request', request => {
+        const url = new URL(request.url());
+        if(url.origin === base && url.pathname === '/cases.json' && /^\?t=[0-9]{10,}$/.test(url.search)) appCaseRequests.push(url.pathname + url.search);
+      });
       await page.goto(base + '/index.html', {waitUntil:'load'});
       await page.evaluate(() => navigator.serviceWorker.ready);
+      await page.waitForFunction(() => !document.getElementById('caseList'));
+      const beforeReloadCount = appCaseRequests.length;
       await page.reload({waitUntil:'load'});
       await page.waitForFunction(() => !!navigator.serviceWorker.controller);
+      await page.waitForFunction(() => !document.getElementById('caseList'));
+      assert.ok(appCaseRequests.length > beforeReloadCount, 'controlled app requested the timestamped case list');
       for(const path of ['/area/cached.html', '/services/cached.html']) {
         await page.goto(base + path, {waitUntil:'load'});
         assert.equal(await page.title(), '저장된 상세페이지');
@@ -62,6 +77,41 @@ const server = http.createServer((req, res) => {
         const c = await caches.open('okclean-v1');
         return (await Promise.all(['/index.html','/site.js','/app.js','/style.css','/fixture-data.json','/area/cached.html','/services/cached.html'].map(x => c.match(x)))).every(Boolean);
       });
+      // A legacy timestamped entry is deliberately kept and must not be overwritten.
+      await page.evaluate(async () => {
+        const cache = await caches.open('okclean-v1');
+        await cache.put('/cases.json?t=777', new Response(JSON.stringify({cases:[],version:0}), {headers:{'Content-Type':'application/json'}}));
+      });
+      caseVersion = 1;
+      assert.deepEqual(await page.evaluate(async () => {
+        const urls = ['/cases.json?t=101','/cases.json?t=102','/cases.json?t=777'];
+        return Promise.all(urls.map(async url => (await (await fetch(url)).json()).version));
+      }), [1, 1, 1]);
+      caseVersion = 2;
+      assert.equal(await page.evaluate(async () => (await (await fetch('/cases.json?t=103')).json()).version), 2);
+      assert.deepEqual(await page.evaluate(async () => {
+        const urls = ['/cases.json?t=404','/cases.json?t=500'];
+        return Promise.all(urls.map(async url => (await fetch(url)).status));
+      }), [404, 500]);
+      // Other queries and paths retain the previous cache policy.
+      await page.evaluate(async () => Promise.all(['/cases.json?other=1','/cases.json?t=1&x=2','/cases.json?t=1&t=2','/nested/cases.json?t=101'].map(url => fetch(url))));
+      await page.waitForFunction(async () => {
+        const c = await caches.open('okclean-v1');
+        return (await Promise.all(['/cases.json?other=1','/cases.json?t=1&x=2','/cases.json?t=1&t=2','/nested/cases.json?t=101'].map(url => c.match(url)))).every(Boolean);
+      });
+      // The cache write in the worker is asynchronous; inspect after it had time to run.
+      await page.waitForTimeout(300);
+      assert.deepEqual(await page.evaluate(async () => {
+        const cache = await caches.open('okclean-v1');
+        const urls = ['/cases.json?t=101','/cases.json?t=102','/cases.json?t=103','/cases.json?t=404','/cases.json?t=500'];
+        return [await (await cache.match('/cases.json?t=777')).json(), ...await Promise.all(urls.map(async url => !!(await cache.match(url))))];
+      }), [{cases:[],version:0}, false, false, false, false, false]);
+      assert.deepEqual(await page.evaluate(async urls => Promise.all(urls.map(async url => !!(await caches.match(url)))), appCaseRequests), appCaseRequests.map(() => false));
+      // A direct document navigation with the same query keeps its old policy.
+      const direct = await context.newPage();
+      assert.equal((await direct.goto(base + '/cases.json?t=99991')).status(), 200);
+      await page.waitForFunction(async () => !!(await caches.match('/cases.json?t=99991')));
+      await direct.close();
       assert.equal(await page.evaluate(async () => !!(await caches.match('/index.html?area=%EC%B6%98%EC%B2%9C'))), false);
       assert.deepEqual(await page.evaluate(async () => Promise.all(
         ['/uncached.js','/uncached.css','/uncached.json','/uncached-script.js','/area/uncached.html','/services/uncached.html','/?area=%EC%B6%98%EC%B2%9C'].map(async path => !!(await caches.match(path)))
@@ -75,6 +125,14 @@ const server = http.createServer((req, res) => {
       const root = await page.goto(base + '/?area=' + encodeURIComponent('춘천') + '#quote', {waitUntil:'domcontentloaded'});
       assert.equal(root.status(), 200);
       assert.equal(await page.locator('#qArea').inputValue(), '춘천');
+      await page.locator('#caseList [role="status"]').waitFor({state:'visible'});
+      assert.match(await page.locator('#caseList [role="status"]').innerText(), /불러오지 못했어요/);
+      assert.deepEqual(await page.evaluate(async () => {
+        const old = await (await fetch('/cases.json?t=777')).json();
+        let uncachedFailed = false;
+        try { await fetch('/cases.json?t=999'); } catch(_) { uncachedFailed = true; }
+        return [old.version, uncachedFailed];
+      }), [0, true]);
       assert.deepEqual(await page.evaluate(async () => {
         const js = await fetch('/app.js');
         const data = await fetch('/fixture-data.json');
@@ -130,6 +188,13 @@ const server = http.createServer((req, res) => {
         const c = await caches.open('okclean-v1');
         return (await Promise.all(['/subpath/index.html','/subpath/app.js','/subpath/site.js','/subpath/style.css','/subpath/services/cached.html'].map(x => c.match(x)))).every(Boolean);
       });
+      await subPage.evaluate(async () => {
+        await fetch('/subpath/cases.json?t=101');
+        await fetch('/cases.json?t=202');
+      });
+      await subPage.waitForFunction(async () => !!(await caches.match('/cases.json?t=202')));
+      await subPage.waitForTimeout(300);
+      assert.equal(await subPage.evaluate(async () => !!(await caches.match('/subpath/cases.json?t=101'))), false);
       assert.equal(await subPage.evaluate(async () => !!(await caches.match('/subpath/?area=%EC%B6%98%EC%B2%9C'))), false);
       networkDown = true;
       await sub.setOffline(true);
