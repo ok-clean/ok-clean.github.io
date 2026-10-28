@@ -25,6 +25,7 @@ async function session(browser, viewport, options={}) {
     if(location.hostname !== '127.0.0.1') return;
     if(opts.member) localStorage.setItem('member', JSON.stringify({name:'가상고객',phone:'01000000000',code:'OK-ABC234',free:'가상'}));
     if(opts.later) localStorage.setItem('joinLater', JSON.stringify(Date.now()));
+    if(opts.laterAge) localStorage.setItem('joinLater', JSON.stringify(Date.now() - opts.laterAge));
     if(opts.blockLater){
       const set = Storage.prototype.setItem;
       Storage.prototype.setItem = function(key,value){ if(key === 'joinLater') throw Error('synthetic blocked storage'); return set.call(this,key,value); };
@@ -102,6 +103,12 @@ async function done(s){ assert.deepEqual(s.errors, []); await s.context.close();
         const s = await session(browser,viewport,option);
         await advance(s.page,45000);
         assert.equal(await visible(s.page),false, 'member/later/app suppression');
+        await done(s);
+      }
+      {
+        const s = await session(browser,viewport,{laterAge:8*864e5});
+        await advance(s.page,25000);
+        assert.equal(await visible(s.page),true, 'popup returns after the seven-day postponement');
         await done(s);
       }
       for(const close of ['close','later']) {
