@@ -33,17 +33,24 @@ const base = 'http://127.0.0.1:8765';
       assert.deepEqual(measurements.links.map(x => x.href), ['index.html#quote','index.html#services','index.html#cases','index.html#member','index.html#faq']);
       assert.ok(measurements.links.every(x => x.width >= 44 && x.height >= 44), `touch target at ${width}px`);
       if(width === 320) assert.ok(measurements.navScroll > measurements.navWidth, 'narrow menu scrolls within its own row');
+      // Keep a first-visit screenshot even if a later keyboard assertion fails.
+      if(width === 320) await page.screenshot({path:'/tmp/okclean-mobile-nav-320-initial.png'});
       // The existing DOM order is brand, links, tools. Check real Tab focus and scrolling.
       await page.locator('.top .brand').focus();
       for(let index=0; index<5; index++) {
         await page.keyboard.press('Tab');
         assert.equal(await page.evaluate(() => document.activeElement.closest('.top nav') !== null), true);
         assert.equal(await page.evaluate(() => [...document.querySelectorAll('.top nav a')].indexOf(document.activeElement)), index);
-        const visible = await page.evaluate(() => {
-          const nav = document.querySelector('.top nav').getBoundingClientRect(), link = document.activeElement.getBoundingClientRect();
-          return link.left >= nav.left - 1 && link.right <= nav.right + 1;
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        const position = await page.evaluate(() => {
+          const menu = document.querySelector('.top nav'), nav = menu.getBoundingClientRect(), link = document.activeElement.getBoundingClientRect();
+          return {left:link.left,right:link.right,navLeft:nav.left,navRight:nav.right,scrollLeft:menu.scrollLeft,scrollWidth:menu.scrollWidth,clientWidth:menu.clientWidth};
         });
-        assert.equal(visible, true, `focused menu item visible at ${width}px`);
+        if(position.left < position.navLeft - 1 || position.right > position.navRight + 1) {
+          await page.screenshot({path:`/tmp/okclean-mobile-nav-failure-${width}-${index}.png`});
+        }
+        assert.ok(position.left >= position.navLeft - 1 && position.right <= position.navRight + 1,
+          `focused item ${index} hidden at ${width}px: ${JSON.stringify(position)}`);
       }
       await page.keyboard.press('Tab');
       assert.equal(await page.evaluate(() => document.activeElement.hasAttribute('data-share')), true);
