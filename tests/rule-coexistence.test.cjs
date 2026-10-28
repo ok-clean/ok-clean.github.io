@@ -11,7 +11,7 @@ const {readFileSync} = require('node:fs');
 const {createHash} = require('node:crypto');
 const vm = require('node:vm');
 const {initializeTestEnvironment} = require('@firebase/rules-unit-testing');
-const {doc, collection, getDoc, getDocs, setDoc, updateDoc, serverTimestamp, Timestamp} = require('firebase/firestore');
+const {doc, collection, getDoc, getDocs, setDoc, updateDoc, writeBatch, serverTimestamp, Timestamp} = require('firebase/firestore');
 
 const host = process.env.FIRESTORE_EMULATOR_HOST;
 if (host !== '127.0.0.1:8080' && host !== 'localhost:8080') {
@@ -75,6 +75,10 @@ async function seed(env) {
       setDoc(doc(db,'quote_requests','sample'),fakeQuote),
       setDoc(doc(db,'quote_requests','new-offer'),fakeQuote),
       setDoc(doc(db,'quote_requests','pending-offer'),fakeQuote),
+      setDoc(doc(db,'quote_requests','batch-good'),fakeQuote),
+      setDoc(doc(db,'quote_requests','batch-dual'),fakeQuote),
+      setDoc(doc(db,'quote_requests','batch-invalid'),fakeQuote),
+      setDoc(doc(db,'quote_requests','batch-forbidden'),fakeQuote),
       setDoc(doc(db,'partner_profiles','fake-partner-a'),{company:'가상업체',areas:['춘천'],specialties:['입주·이사 청소'],status:'승인',approvalVersion:1}),
       setDoc(doc(db,'partner_profiles','fake-partner-b'),{company:'가상업체2',areas:['춘천'],specialties:['입주·이사 청소'],status:'승인',approvalVersion:1}),
       setDoc(doc(db,'partner_profiles','fake-partner-c'),{company:'가상업체3',areas:['춘천'],specialties:['입주·이사 청소'],status:'검토중',approvalVersion:0}),
@@ -100,6 +104,17 @@ function contexts(env){
 // their composition. A policy must never gain the other domain's permission.
 const cases = [];
 const add = (name,family,role,allowed,run) => cases.push({name,family,role,allowed,run});
+function assignBatch(db,requestId,includePrivate=false) {
+  const uid='fake-partner-a', grantId='batch-grant', slotId='1';
+  const batch=writeBatch(db);
+  batch.set(doc(db,'quote_requests',requestId,'slots',slotId),{partnerUid:uid,grantId});
+  batch.set(doc(db,'quote_requests',requestId,'assignments',uid),{grantId,slotId});
+  const grant={partnerUid:uid,approvalVersion:1,slotId,service:fakeQuote.service,area:fakeQuote.area,
+    size:fakeQuote.size,date,createdAt:serverTimestamp()};
+  if(includePrivate) grant.phone='01000000000';
+  batch.set(doc(db,'quote_requests',requestId,'grants',grantId),grant);
+  return batch.commit();
+}
 for(const [role,ok] of [['visitor',false],['anon',false],['other',false],['partner',false],['google',false],['claim',false],['memberAdmin',true],['dual',true]]) {
   add('member read '+role,'member',role,ok,db=>getDoc(doc(db,'member_requests','sample')));
   add('member list '+role,'member',role,ok,db=>getDocs(collection(db,'member_requests')));
@@ -126,6 +141,14 @@ add('unverified partner own profile','matching','unverified',false,db=>getDoc(do
 add('partner profile list','matching','partner',false,db=>getDocs(collection(db,'partner_profiles')));
 add('claim admin profile list','matching','claim',true,db=>getDocs(collection(db,'partner_profiles')));
 add('uid admin profile list','matching','memberAdmin',false,db=>getDocs(collection(db,'partner_profiles')));
+// Unlike bypass-seeded records, these three related documents are actually
+// created together under the tested rules, including their getAfter checks.
+add('uid-only admin cannot create assignment batch','matching','memberAdmin',false,db=>assignBatch(db,'batch-forbidden'));
+add('claim admin can create same previously denied assignment','matching','claim',true,db=>assignBatch(db,'batch-forbidden'));
+add('claim admin cannot include customer phone in grant','matching','claim',false,db=>assignBatch(db,'batch-invalid',true));
+add('claim admin can create same assignment without phone','matching','claim',true,db=>assignBatch(db,'batch-invalid'));
+add('claim admin creates valid assignment batch','matching','claim',true,db=>assignBatch(db,'batch-good'));
+add('dual admin creates valid assignment batch','matching','dual',true,db=>assignBatch(db,'batch-dual'));
 add('assigned partner grant','matching','partner',true,db=>getDoc(doc(db,'quote_requests','sample','grants','sample-grant')));
 add('other partner grant','matching','partnerOther',false,db=>getDoc(doc(db,'quote_requests','sample','grants','sample-grant')));
 add('unverified partner grant','matching','unverified',false,db=>getDoc(doc(db,'quote_requests','sample','grants','sample-grant')));
@@ -171,7 +194,9 @@ function memberEntry(db, existing, uid, recordId) {
   const context={
     initializeApp:()=>({}),getApps:()=>[],getApp:()=>({}),getAuth:()=>auth,getFirestore:()=>db,
     signInAnonymously:async()=>{signIns++;auth.currentUser={uid};},
-    crypto:{randomUUID:()=>recordId},doc,setDoc,serverTimestamp,
+    // The pinned client runs in a VM realm; Firestore accepts a host-realm
+    // plain object. Preserve its exact fields and host SDK timestamp sentinel.
+    crypto:{randomUUID:()=>recordId},doc,setDoc:(ref,data)=>setDoc(ref,Object.fromEntries(Object.entries(data))),serverTimestamp,
   };
   vm.runInNewContext(program+'\nthis.submitMember = submitMember;',context,{filename:'member-sync.js'});
   return {submit:()=>context.submitMember({apiKey:'fake-test-identifier',projectId:'demo-okclean-coexist'},
@@ -191,6 +216,11 @@ test('pinned member and matching policies remain isolated under composition', {t
         assert.deepEqual(Object.keys(grant.data()).sort(),['approvalVersion','area','createdAt','date','partnerUid','service','size','slotId'].sort());
         assert.equal(Object.hasOwn(grant.data(),'name'),false,'grant must not expose customer name');
         assert.equal(Object.hasOwn(grant.data(),'phone'),false,'grant must not expose customer phone');
+        const writtenGrant=await getDoc(doc(contexts(env).partner,'quote_requests','batch-good','grants','batch-grant'));
+        assert.equal(writtenGrant.exists(),true,'rules-tested assignment batch must create a readable grant');
+        assert.deepEqual(Object.keys(writtenGrant.data()).sort(),['approvalVersion','area','createdAt','date','partnerUid','service','size','slotId'].sort());
+        assert.equal(Object.hasOwn(writtenGrant.data(),'name'),false);
+        assert.equal(Object.hasOwn(writtenGrant.data(),'phone'),false);
       }
       if(mode === 'member' || mode === 'combined') {
         const db=contexts(env);
@@ -218,6 +248,8 @@ test('the same matrix detects an intentionally broad overlapping allow', {timeou
     const mismatches=await matrix(env,'combined');
     assert.ok(mismatches.some(x=>x.startsWith('member read visitor:')),'broad wildcard must break the member deny check');
     assert.ok(mismatches.some(x=>x.startsWith('quote read visitor:')),'broad wildcard must break the quote deny check');
+    assert.ok(mismatches.some(x=>x.startsWith('uid-only admin cannot create assignment batch:')),'broad wildcard must break administrator separation');
+    assert.ok(mismatches.some(x=>x.startsWith('claim admin cannot include customer phone in grant:')),'broad wildcard must break grant data minimization');
     assert.ok(mismatches.some(x=>x.startsWith('other partner grant:')),'broad wildcard must break partner isolation');
     assert.ok(mismatches.some(x=>x.startsWith('other partner cannot create offer:')),'broad wildcard must break offer creation isolation');
     assert.ok(mismatches.some(x=>x.startsWith('unapproved partner cannot create offer:')),'broad wildcard must break approval isolation');
