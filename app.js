@@ -35,7 +35,7 @@ const REF = store.get("ref", "");
 const SV = C.services;
 const Q = store.get("quote", {}) || {};
 const serviceParams = new URLSearchParams(location.search).getAll("svc");
-let urlSvc = null, serviceLinkIssue = false;
+let urlSvc = null, serviceLinkIssue = "";
 if(serviceParams.length){
   let consumed = false;
   try {
@@ -45,7 +45,7 @@ if(serviceParams.length){
     consumed = true;
   } catch(_) {} // 주소를 정리할 수 없으면 링크로 자동 선택하지 않습니다.
   if(consumed && serviceParams.length === 1 && SV.some(s => s.id === serviceParams[0])) urlSvc = serviceParams[0];
-  else serviceLinkIssue = true;
+  else serviceLinkIssue = consumed ? "청소 서비스를 확인하고 선택해 주세요." : "링크의 청소 서비스를 자동 선택하지 못했어요. 원하는 서비스를 확인해 주세요.";
 }
 let cur = { svc: urlSvc && SV.some(s => s.id === urlSvc) ? urlSvc : (Q.svc && SV.some(s => s.id === Q.svc) ? Q.svc : SV[0].id), v: 0, t: null, qty: null, opts: [] };
 if(cur.svc === Q.svc){ cur.v = Q.v || 0; cur.t = Q.t ?? null; cur.qty = Q.qty == null || Q.qty === "" || !Number.isFinite(Number(Q.qty)) ? null : Math.min(999, Math.max(1, Math.trunc(Number(Q.qty)))); cur.opts = Q.opts || []; }
@@ -57,7 +57,7 @@ if(serviceLinkIssue){
   note.id = "qSvcLinkNote";
   note.className = "hint";
   note.setAttribute("role", "status");
-  note.textContent = "청소 서비스를 확인하고 선택해 주세요.";
+  note.textContent = serviceLinkIssue;
   $("qSvc").insertAdjacentElement("afterend", note);
   $("qSvc").setAttribute("aria-describedby", note.id);
   $("qSvc").addEventListener("change", () => { note.remove(); $("qSvc").removeAttribute("aria-describedby"); }, {once:true});
