@@ -93,6 +93,7 @@ async function cleanState(page){
      await page.locator('#demo-case').selectOption('confirmed');await page.locator('#receipt-id').fill('demo-receipt');
      await page.locator('#receipt-id').press('Enter');await state(page,'confirmed');
      assert.match(await page.locator('#receipt-status').innerText(),/예약 확정이나 작업 완료를 뜻하지/);
+     assert.match(await page.locator('#receipt-status').innerText(),/취소 여부도 별도로 확인/);
      assert.equal(await page.evaluate(()=>document.activeElement.id),'receipt-status');
      assert.equal(await page.locator('#receipt-status').getAttribute('role'),'status');
      if(process.env.EVIDENCE_DIR&&width>=390){fs.mkdirSync(process.env.EVIDENCE_DIR,{recursive:true});await page.screenshot({path:path.join(process.env.EVIDENCE_DIR,'receipt-'+width+'.png'),fullPage:true});}
