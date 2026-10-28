@@ -53,6 +53,7 @@ jobs:
       - run: node tests/quote-focus-browser.cjs
       - run: node tests/referral-browser.cjs
       - run: node tests/quote-empty-quantity-browser.cjs
+      - run: node tests/quote-storage-recovery-browser.cjs
       - run: node tests/kakao-copy-retry-browser.cjs
       - run: node tests/member-delete-async-browser.cjs
       - run: node tests/admin-session-browser.cjs
