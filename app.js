@@ -456,12 +456,12 @@ if(M){
     // 최초 대기 시간은 유지하고, 둘러보거나 입력하는 동안에는 방해하지 않습니다.
     let busy = 0, waitingForVisibility = false;
     const markBusy = () => { busy = Date.now(); };
-    const activityEvents = ["pointerdown", "keydown", "click", "input", "change", "focusin"];
+    const activityEvents = ["pointerdown", "keydown", "click", "input", "change", "focusin", "wheel", "touchmove"];
     activityEvents.forEach(type => document.addEventListener(type, markBusy, {passive: true}));
-    window.addEventListener("scroll", markBusy, {passive: true, capture: true});
+    window.addEventListener("scroll", markBusy, {passive: true});
     const cleanup = () => {
       activityEvents.forEach(type => document.removeEventListener(type, markBusy));
-      window.removeEventListener("scroll", markBusy, true);
+      window.removeEventListener("scroll", markBusy);
       document.removeEventListener("visibilitychange", onVisibility);
     };
     const onVisibility = () => {
