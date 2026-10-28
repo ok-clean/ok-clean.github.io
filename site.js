@@ -58,11 +58,11 @@
   function sheet(title, html, opener){ document.querySelectorAll(".modal:not([hidden])").forEach(window.closeModal); $("sheetT").textContent = title; $("sheetB").innerHTML = html; window.openModal("sheet", opener || document.activeElement); }
 
   // ── 카톡으로 보내기: 오픈채팅은 글을 미리 넣어 열 수 없어서(카카오 정책), 자동 복사 + 붙여넣기 안내 ──
-  window.kakaoSend = async function(title, text){
+  window.kakaoSend = async function(title, text, notice = ""){
     const active = document.activeElement, activeModal = active && active.closest(".modal:not([hidden])");
     const opener = activeModal ? (modalOpeners.get(activeModal) || active) : active;
     const ok = await window.copyText(text);
-    sheet(title, `<p class="send-ok">${ok ? "✓ 아래 내용을 복사해 두었어요" : "아래 내용을 길게 눌러 복사해 주세요"}</p>
+    sheet(title, `${notice ? `<p class="err" role="status">${esc(notice)}</p>` : ""}<p class="send-ok">${ok ? "✓ 아래 내용을 복사해 두었어요" : "아래 내용을 길게 눌러 복사해 주세요"}</p>
       <pre class="send-pre">${esc(text)}</pre>
       <ol class="send-steps"><li>아래 <b>카톡 열기</b>를 누르세요.</li><li>대화 입력칸을 <b>길게 눌러 '붙여넣기'</b> 하세요.</li><li><b>전송</b>하면 끝! 현장 사진도 함께 보내주시면 더 정확해요.</li></ol>
       <a class="btn glove" href="${esc(S.kakao)}" target="_blank" rel="noopener" data-close>카톡 열기</a>
