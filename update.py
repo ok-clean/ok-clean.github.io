@@ -58,7 +58,10 @@ def svc_by_body(c, desc):
 
 
 def judge(c, title, cat, desc="", old_svc=""):
-    """글 하나를 (종류, 서비스)로 판정. 종류: 'case'(시공 사례) / 'tip'(청소 꿀팁) / None(안 보여줌)"""
+    """글을 case·tip·notice로 분류; None은 기존 제외 규칙에 해당한다."""
+    # 공지 표기만 구분합니다. '시공지역'처럼 단어 안의 공지는 제외하지 않습니다.
+    if re.search(r"(?<![가-힣A-Za-z0-9])(?:필독\s*)?공지(?:사항)?(?=$|[\s:：|!！\])】\-])", title):
+        return "notice", ""
     if is_edu(c, title, cat):
         return None, ""
     t = norm(title)
@@ -132,22 +135,35 @@ def main():
     blogs = blogs_of(c)
     if blogs:
         old = json.loads(OUT.read_text("utf-8")).get("cases", []) if OUT.exists() else []
+        previously_saved = {x['link']: x for x in old if x.get('link')}
         # 블로그 RSS 는 최근 글만 주므로, 예전에 모은 사례는 지우지 않고 계속 쌓아 둠
         box = {}
         for x in old:                          # 예전에 모은 글도 지금 규칙으로 다시 판정
             if not x.get("link"):
                 continue
+            # 기존 공지는 RSS가 실패하더라도 그대로 보존합니다.
+            if x.get("kind") == "notice":
+                box[x["link"]] = x
+                continue
             kind, svc = judge(c, x.get("title", ""), "", "", x.get("svc", ""))
-            if kind:
+            if kind == "notice":
+                box[x["link"]] = {**x, "kind": "notice"}
+            elif kind:
                 box[x["link"]] = {**x, "title": clean_title(c, x["title"]), "kind": kind, "svc": svc}
         ok = 0
         for b in blogs:
             try:
                 got = read_blog(c, b)
                 for x in got:
+                    if x["kind"] == "notice":
+                        # 공지로 바뀐 기존 링크만 보존하고, 새 공지는 수집하지 않습니다.
+                        previous = previously_saved.get(x["link"])
+                        if previous:
+                            box[x["link"]] = {**previous, "kind": "notice"}
+                        continue
                     box[x["link"]] = x
                 ok += 1
-                print(f"블로그 {b}: 시공 사례 {len(got)}건 확인")
+                print(f"블로그 {b}: 분류한 글 {len(got)}건 확인")
             except Exception as err:
                 print(f"블로그 {b} 읽기 실패(기존 사례 유지):", repr(err))
         # 설정에서 뺀 블로그의 글은 정리
@@ -166,3 +182,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
