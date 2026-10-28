@@ -52,6 +52,14 @@ jobs:
       - run: node tests/kakao-copy-retry-browser.cjs
       - run: node tests/member-delete-async-browser.cjs
       - run: node tests/minimum-notice-browser.cjs
+      - name: Generate an isolated site with fake settings and RSS
+        run: python3 tests/build-generated-fixture.py
+      - name: Start generated fixture server
+        run: python3 -m http.server 8766 --bind 127.0.0.1 --directory "$(cat /tmp/okclean-generated-root.txt)" > /tmp/okclean-generated-server.log 2>&1 &
+      - run: node tests/generated-pages-browser.cjs
+      - run: OKCLEAN_TEST_BASE=http://127.0.0.1:8766 node tests/region-browser.cjs
+      - run: OKCLEAN_TEST_BASE=http://127.0.0.1:8766 node tests/service-browser.cjs
+      - run: OKCLEAN_TEST_BASE=http://127.0.0.1:8766 node tests/quote-focus-browser.cjs
       - name: Save member screen captures
         if: always()
         uses: actions/upload-artifact@v4

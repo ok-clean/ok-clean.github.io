@@ -13,7 +13,7 @@ const assert = require('node:assert/strict');
       const page = await context.newPage();
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
-      await page.goto('http://127.0.0.1:8765/', {waitUntil:'load'});
+      await page.goto((process.env.OKCLEAN_TEST_BASE || 'http://127.0.0.1:8765') + '/', {waitUntil:'load'});
 
       // 종류는 Tab으로 이동하여 Space로 선택하고 다음 선택지로 계속 이동할 수 있습니다.
       await page.locator('#qSvc').selectOption('move-in');
