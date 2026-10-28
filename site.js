@@ -45,9 +45,13 @@
 
   // ── 팝업 창 열고 닫기 ──
   const modalOpeners = new WeakMap();
+  const modalSessions = new WeakMap();
+  window.modalSession = m => modalSessions.get(m);
+  let sheetHasMemberData = false;
   window.openModal = function(id, opener = document.activeElement){
     const m = $(id); if(!m || !m.hidden) return;
     modalOpeners.set(m, opener);
+    modalSessions.set(m, {});
     m.hidden = false; document.body.classList.add("modal-open");
     const candidates = m.querySelectorAll('input:not([type="hidden"]), select, textarea, button:not(.x), a[href]');
     const first = [...candidates].find(el => !el.disabled && el.getClientRects().length) || m.querySelector("button.x");
@@ -59,20 +63,35 @@
     if(!document.querySelector(".modal:not([hidden])")) document.body.classList.remove("modal-open");
     const opener = modalOpeners.get(m);
     modalOpeners.delete(m);
+    modalSessions.delete(m);
     if(opener && opener.isConnected && opener.getClientRects().length && typeof opener.focus === "function") opener.focus();
   };
-  function sheet(title, html, opener){ document.querySelectorAll(".modal:not([hidden])").forEach(window.closeModal); $("sheetT").textContent = title; $("sheetB").innerHTML = html; window.openModal("sheet", opener || document.activeElement); }
+  function sheet(title, html, opener){ document.querySelectorAll(".modal:not([hidden])").forEach(window.closeModal); sheetHasMemberData = false; $("sheetT").textContent = title; $("sheetB").innerHTML = html; window.openModal("sheet", opener || document.activeElement); }
+  // 로컬 회원 삭제 시 닫힌 회원 안내의 본문만 제거합니다. 다른 안내창은 보존합니다.
+  window.clearHiddenMemberSheet = () => {
+    if(sheetHasMemberData && $("sheet").hidden){
+      $("sheetB").replaceChildren(); $("sheetT").textContent = ""; sheetHasMemberData = false;
+    }
+  };
 
   // ── 카톡으로 보내기: 오픈채팅은 글을 미리 넣어 열 수 없어서(카카오 정책), 자동 복사 + 붙여넣기 안내 ──
-  window.kakaoSend = async function(title, text, notice = ""){
+  window.kakaoSend = async function(title, text, notice = "", options = {}){
+    // 이전 회원 스크립트와 혼합되면 삭제 후 늦게 복사된 안내가 다시 열릴 수 있습니다.
+    if(title === "카톡으로 가입 완료하기" && options.memberData !== true){
+      window.toast("회원정보와 쿠폰번호를 먼저 확인한 뒤 페이지를 새로고침해 주세요."); return;
+    }
+    const isCurrent = options.isCurrent || (() => true);
     const active = document.activeElement, activeModal = active && active.closest(".modal:not([hidden])");
     const opener = activeModal ? (modalOpeners.get(activeModal) || active) : active;
-    const ok = await window.copyText(text);
+    const ok = await window.copyText(text, isCurrent);
+    // 회원정보가 삭제되었거나 가입창이 바뀌었으면 이전 안내를 열지 않습니다.
+    if(!isCurrent()) return;
     sheet(title, `${notice ? `<p class="err" role="status">${esc(notice)}</p>` : ""}<p class="${ok ? "send-ok" : "err"}" data-copy-status role="status">${ok ? "✓ 아래 내용을 복사해 두었어요" : "자동 복사하지 못했어요. 아래 내용을 선택해 복사해 주세요. 휴대폰에서는 길게 눌러 복사할 수 있어요."}</p>
       <pre class="send-pre">${esc(text)}</pre>
       <ol class="send-steps"><li>아래 <b>카톡 열기</b>를 누르세요.</li><li>대화 입력칸을 <b>길게 눌러 '붙여넣기'</b> 하세요.</li><li><b>전송</b>하면 끝! 현장 사진도 함께 보내주시면 더 정확해요.</li></ol>
       <a class="btn glove" href="${esc(S.kakao)}" target="_blank" rel="noopener" data-close>카톡 열기</a>
       ${ok ? "" : `<button class="btn line small" type="button" data-copy-again style="width:100%;margin-top:8px">다시 복사하기</button>`}`, opener);
+    sheetHasMemberData = options.memberData === true;
     const again = $("sheet").querySelector("[data-copy-again]");
     const status = $("sheet").querySelector("[data-copy-status]");
     let retry = 0;
