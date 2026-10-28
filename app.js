@@ -190,6 +190,9 @@ function summary(){
     lines.push(r.t ? `내용: ${r.v.name || ""} / ${r.t.name} (${r.t.size}, ${r.t.crew}명)` : `내용: ${s.variants.length > 1 ? r.v.name + " / " : ""}${r.q}${s.unit}`);
     if(os.length) lines.push(`추가: ${os.join(", ")}`);
     lines.push(`예상 금액: ${priceText(r.lo, r.hi)} (사이트 계산${r.onSite.length ? ", " + r.onSite.join("·") + " 별도" : ""})`);
+    if(s.min && r.lo === s.min && cur.opts.some(i => (s.options || [])[i] && !(s.options || [])[i].quote)){
+      lines.push(`계산 안내: 할인 전 기본 금액과 금액이 표시된 옵션을 합산한 뒤 최소 금액 ${won(s.min)}원을 적용해요.`);
+    }
   } else {
     const t = (s.tiers || [])[cur.t], v = ((s.tiers || []).length ? s.kinds : s.variants || [])[cur.v];
     if(!isQuote(s)) lines.push(`내용: ${[v && v.name, t && t.name].filter(Boolean).join(" / ")}`);
@@ -231,7 +234,11 @@ function calc(){
     $("qK").textContent = r.t ? `예상 금액 · 작업 인원 ${r.t.crew}명` : "예상 금액";
     $("qV").innerHTML = `${esc(p.replace(/원(~?)$/, ""))}<small>원${r.hi == null ? "~" : ""}</small>`;
     const base = r.v && r.v.note ? r.v.note : s.priceNote || "오염 정도와 구조에 따라 현장에서 달라질 수 있어요.";
-    $("qN").textContent = base + (r.onSite.length ? ` ${r.onSite.join("·")}은 별도 현장 견적이에요.` : "") + (s.min && r.lo === s.min ? ` 최소 금액 ${won(s.min)}원${s.minNote ? "(" + s.minNote + ")" : ""}이 적용됐어요.` : "") + weekendNote();
+    const hasPricedOptions = (s.options || []).some(o => !o.quote);
+    const minNote = s.min && r.lo === s.min
+      ? ` 할인 전 예상 금액은 기본 금액${hasPricedOptions ? "과 금액이 표시된 추가 옵션을 합산한 뒤" : "에"} 최소 금액 ${won(s.min)}원${s.minNote ? "(" + s.minNote + ")" : ""}을 적용해 계산해요.${hasPricedOptions ? " 합산 결과에 따라 옵션을 선택해도 표시 금액이 그대로일 수 있어요." : ""}`
+      : "";
+    $("qN").textContent = base + (r.onSite.length ? ` ${r.onSite.join("·")}은 별도 현장 견적이에요.` : "") + minNote + weekendNote();
   } else {
     $("qK").textContent = "현장 견적";
     $("qV").innerHTML = `사진 보고<small> 안내</small>`;
