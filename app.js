@@ -26,6 +26,9 @@ const BLOGS = [].concat(C.blog || []).filter(Boolean);
 const phoneDigits = (C.phone || "").replace(/[^0-9+]/g, "");
 const M = C.member || null;
 let MEMBER = store.get("member", null);
+// 메모리에만 있는 회원정보와 마지막 기기 저장 결과를 구분합니다.
+let memberSaved = !!MEMBER;
+const memberStorageWarning = "최근 회원정보를 이 기기에 저장하지 못했어요. 새로고침하거나 창을 닫으면 쿠폰 정보가 사라질 수 있어요. 쿠폰번호를 확인한 뒤 카톡으로 가입을 완료해 주세요.";
 // 친구 초대 링크(?ref=OK-XXXXXX)로 들어온 경우 추천인 코드를 기억
 const refQ = (new URLSearchParams(location.search).get("ref") || "").toUpperCase();
 if(/^OK-[A-Z0-9]{6}$/.test(refQ) && (!MEMBER || MEMBER.code !== refQ)) store.set("ref", refQ);
@@ -352,6 +355,7 @@ function joinDone(){
   d.innerHTML = `<p class="done-k">가입을 환영해요, ${esc(m.name)}님</p>
     <div class="coupon"><span>회원 쿠폰</span><b>${won(M.coupon)}원 할인</b><em>+ ${esc(m.free)} 무료</em><code>${esc(m.code)}</code></div>
     <p class="note">${esc(M.couponTerms)}</p>
+    <p class="err" role="status" id="jStorageNote"${memberSaved ? " hidden" : ""}>${esc(memberStorageWarning)}</p>
     <p class="step-k"><b>마지막 단계</b> · 아래 버튼으로 가입 내용을 카톡에 보내 주시면 쿠폰이 등록돼요.</p>
     <button class="btn glove" type="button" id="jKakao">카톡으로 가입 완료하기</button>
     ${M.referral ? `<button class="btn line small" type="button" data-invite>친구 초대하고 ${won(M.referral.point)}P 받기</button>` : ""}
@@ -359,8 +363,9 @@ function joinDone(){
     <button class="link" type="button" data-close>나중에 보낼게요</button>`;
   $("jKakao").onclick = async () => {
     const text = `[${C.name} 회원가입]\n이름: ${m.name}\n연락처: ${m.phone}\n지역: ${m.area || "-"}\n무료 서비스: ${m.free}\n쿠폰번호: ${m.code}${m.ref ? `\n추천인 코드: ${m.ref}` : ""}\n이벤트 소식: ${m.ad ? "받음" : "안 받음"}`;
-    MEMBER.sent = true; store.set("member", MEMBER);
-    kakaoSend("카톡으로 가입 완료하기", text);
+    MEMBER.sent = true; memberSaved = store.set("member", MEMBER);
+    $("jStorageNote").hidden = memberSaved;
+    kakaoSend("카톡으로 가입 완료하기", text, memberSaved ? "" : memberStorageWarning);
   };
   $("jClearDevice").onclick = () => {
     const msg = "이 사이트가 이 브라우저에 저장한 회원정보와 쿠폰번호가 지워져요. 다른 탭은 먼저 닫아 주세요. 관리자에게 전송 중이거나 접수된 정보와 카톡 대화는 지워지지 않아요. 계속할까요?";
@@ -369,7 +374,7 @@ function joinDone(){
       localStorage.removeItem("member");
       if(localStorage.getItem("member") !== null) throw new Error("Member data remains");
     } catch(e) { toast("기기 정보 삭제에 실패했어요. 브라우저 설정을 확인해 주세요."); return; }
-    MEMBER = null;
+    MEMBER = null; memberSaved = false;
     d.replaceChildren(); d.hidden = true;
     $("jName").value = ""; $("jPhone").value = ""; $("jArea").value = "";
     $("jAgree").checked = false; $("jAd").checked = false; $("jErr").textContent = "";
@@ -413,7 +418,7 @@ if(M){
     const code = "OK-" + Array.from({length: 6}, () => abc[Math.floor(Math.random() * abc.length)]).join("");
     MEMBER = {name, phone, area: $("jArea").value, free: (document.querySelector('input[name="jFree"]:checked') || {}).value || M.freeServices[0],
               ad: $("jAgree").checked && $("jAd").checked, code, ref: REF && REF !== code ? REF : "", joined: new Date().toISOString().slice(0, 10)};
-    store.set("member", MEMBER);
+    memberSaved = store.set("member", MEMBER);
     // Firebase가 설정되어 있으면 회원 가입 요청을 비공개 Firestore에 전송합니다.
     // 실패 시 카카오톡 가입 확인 절차를 그대로 안내합니다.
     if(C.firebase && C.firebase.apiKey && C.firebase.projectId){
