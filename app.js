@@ -433,20 +433,25 @@ function joinDone(){
     ${M.referral ? `<button class="btn line small" type="button" data-invite>친구 초대하고 ${won(M.referral.point)}P 받기</button>` : ""}
     <button class="link member-clear" type="button" id="jClearDevice">이 기기의 회원정보 지우기</button>
     <button class="link" type="button" data-close>나중에 보낼게요</button>`;
+  let memberKakaoAttempt = 0;
   $("jKakao").onclick = async () => {
     const text = `[${C.name} 회원가입]\n이름: ${m.name}\n연락처: ${m.phone}\n지역: ${m.area || "-"}\n무료 서비스: ${m.free}\n쿠폰번호: ${m.code}${m.ref ? `\n추천인 코드: ${m.ref}` : ""}\n이벤트 소식: ${m.ad ? "받음" : "안 받음"}`;
     MEMBER.sent = true; memberSaved = store.set("member", MEMBER);
     $("jStorageNote").hidden = memberSaved;
-    kakaoSend("카톡으로 가입 완료하기", text, memberSaved ? "" : memberStorageWarning);
+    const button = $("jKakao"), join = $("join"), session = window.modalSession(join);
+    const attempt = ++memberKakaoAttempt;
+    const isCurrent = () => MEMBER === m && button.isConnected && !join.hidden && window.modalSession(join) === session && attempt === memberKakaoAttempt;
+    kakaoSend("카톡으로 가입 완료하기", text, memberSaved ? "" : memberStorageWarning, {isCurrent, memberData:true});
   };
   $("jClearDevice").onclick = () => {
-    const msg = "이 사이트가 이 브라우저에 저장한 회원정보와 쿠폰번호가 지워져요. 다른 탭은 먼저 닫아 주세요. 관리자에게 전송 중이거나 접수된 정보와 카톡 대화는 지워지지 않아요. 계속할까요?";
+    const msg = "이 사이트가 이 브라우저에 저장한 회원정보와 쿠폰번호가 지워져요. 다른 탭은 먼저 닫아 주세요. 클립보드에 복사된 내용, 관리자에게 전송 중이거나 접수된 정보와 카톡 대화는 지워지지 않아요. 계속할까요?";
     if(!window.confirm(msg)) return;
     try {
       localStorage.removeItem("member");
       if(localStorage.getItem("member") !== null) throw new Error("Member data remains");
     } catch(e) { toast("기기 정보 삭제에 실패했어요. 브라우저 설정을 확인해 주세요."); return; }
     MEMBER = null; memberSaved = false;
+    window.clearHiddenMemberSheet?.();
     d.replaceChildren(); d.hidden = true;
     $("jName").value = ""; $("jPhone").value = ""; $("jArea").value = "";
     $("jAgree").checked = false; $("jAd").checked = false; $("jErr").textContent = "";
