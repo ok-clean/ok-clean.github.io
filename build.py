@@ -275,7 +275,7 @@ def promises_section(c, cases):
     ps = c.get("promises") or []
     if not ps:
         return ""
-    n = sum(1 for x in cases if x.get("kind", "case") == "case")
+    n = sum(1 for x in cases if x.get("kind", "case") == "case" and safe_case_link(x.get("link")))
     stat = f'<div class="stat"><b>{n}건</b><span>블로그에 공개한 시공 기록</span></div>' if n else ""
     items = "".join(f'<li><b>{e(x["t"])}</b><span>{e(x["d"])}</span></li>' for x in ps)
     return f"""<section class="s trust" id="promise"><div class="wrap">
@@ -335,7 +335,41 @@ def index_page(c, cases=()):
       <button class="btn glove" id="qKakao" type="button">이 견적으로 카톡 문의</button>
       {'<button class="btn line" id="qSms" type="button">문자로 견적 보내기</button>' if c.get("sms") else ''}
       <button class="link" id="qCopy" type="button">문의 내용만 복사하기</button>
+      <button class="btn line" id="qReserve" type="button" hidden>예약 신청</button>
     </div>
+    <form id="reservationForm" hidden>
+      <p id="reserveIntro">예약 접수 시험입니다. 가상 정보만 입력해 주세요.</p>
+      <div id="reserveVerified" hidden>
+        <label><span id="reserveEmailLabel">시험 계정 이메일</span> <input id="reserveEmail" type="email" autocomplete="off"></label>
+        <label><span id="reservePasswordLabel">시험 계정 비밀번호</span> <input id="reservePassword" type="password" autocomplete="off"></label>
+        <button class="btn line" id="reserveLogin" type="button">시험 계정 로그인</button>
+        <label>기존 접수번호 <input id="reserveReceipt" autocomplete="off" maxlength="80"></label>
+        <button class="btn line" id="reserveRecover" type="button">접수 확인</button>
+        <button class="btn line" id="reserveListMine" type="button" hidden>내 예약 목록</button>
+        <div id="reserveOwnList" aria-live="polite"></div>
+        <div id="reserveMemberLink" hidden>
+          <p>이 화면에서 방금 접수한 회원가입 요청을 예약 계정에 연결합니다. 기존 가입 기록이나 다른 기기 자료는 상담으로 확인해 주세요.</p>
+          <label><input id="reserveMemberLinkConsent" type="checkbox"> 회원가입 요청과 예약 계정을 연결하는 데 동의합니다.</label>
+          <button class="btn line" id="reserveMemberLinkSubmit" type="button">회원 계정 연결</button>
+          <p id="reserveMemberLinkStatus" role="status" aria-live="polite"></p>
+        </div>
+        <div id="reserveWithdrawal" hidden>
+          <p>예약 계정 탈퇴를 요청합니다. 확인 후 처리되며 계정과 개인정보가 즉시 삭제되지는 않습니다. 기존 회원 혜택 데이터는 별도로 처리됩니다.</p>
+          <label>재인증 비밀번호 <input id="withdrawPassword" type="password" autocomplete="off"></label>
+          <button class="btn line" id="withdrawRequest" type="button">예약 계정 탈퇴 요청</button>
+        </div>
+      </div>
+      <div class="field"><label for="reserveName">이름</label><input id="reserveName" maxlength="30" required autocomplete="off"></div>
+      <div class="field"><label for="reservePhone">휴대폰 번호</label><input id="reservePhone" type="tel" required autocomplete="off"></div>
+      <div class="field"><label for="reserveSize">규모</label><input id="reserveSize" type="number" min="1" max="999" step="1" required></div>
+      <div class="field"><label for="reserveNotes">요청사항</label><textarea id="reserveNotes" maxlength="500" autocomplete="off"></textarea></div>
+      <p id="reserveConsentDetails" hidden></p>
+      <a id="reservePolicyLink" target="_blank" rel="noopener noreferrer" hidden>개인정보 처리방침 보기</a>
+      <label><input id="reserveConsent" type="checkbox" required> <span id="reserveConsentText">예약 접수 시험에 동의합니다.</span></label>
+      <button class="btn glove" id="reserveSubmit" type="submit">예약 접수</button>
+      <button class="btn line" id="reserveNew" type="button" hidden>새 예약 작성</button>
+      <p id="reserveStatus" role="status" aria-live="polite"></p>
+    </form>
   </div>
 </div></section>
 
@@ -395,6 +429,40 @@ def index_page(c, cases=()):
 """
 
 
+def safe_case_link(value):
+    """수집한 사례 링크는 사용자 정보가 없는 절대 http(s) URL만 허용한다."""
+    import re
+    if not isinstance(value, str) or not re.match(r"^https?://", value, re.I):
+        return False
+    if any(ch.isspace() or ord(ch) < 32 or ord(ch) in (127, 0xFEFF) or ch == "\\" for ch in value):
+        return False
+    authority = re.match(r"^https?://([^/?#]*)", value, re.I).group(1)
+    if "%" in authority:
+        return False
+    try:
+        parts = urllib.parse.urlsplit(value)
+        if parts.scheme.lower() not in ("http", "https") or not parts.hostname or parts.username is not None or parts.password is not None:
+            return False
+        _ = parts.port  # 잘못된 포트는 ValueError
+        if ":" in parts.hostname:
+            import ipaddress
+            ipaddress.IPv6Address(parts.hostname)
+        else:
+            ascii_host = parts.hostname.encode("idna").decode("ascii")
+            if not re.fullmatch(r"[a-z0-9.-]+", ascii_host, re.I):
+                return False
+            if re.fullmatch(r"(?:0x[0-9a-f]+|\d+)(?:\.(?:0x[0-9a-f]+|\d+))*", ascii_host.rstrip("."), re.I) and "x" in ascii_host.lower():
+                return False
+            if re.search(r"(?:^|\.)\d+$", ascii_host.rstrip(".")):
+                import ipaddress
+                if parts.hostname.rstrip(".").lower() != ascii_host.rstrip(".").lower():
+                    return False
+                ipaddress.IPv4Address(ascii_host.rstrip("."))
+        return True
+    except (ValueError, UnicodeError):
+        return False
+
+
 def service_page(c, s, cases=()):
     a, b = price_from(s)
     regions = c.get("regions", [])
@@ -405,7 +473,7 @@ def service_page(c, s, cases=()):
     same = [x for x in c["services"] if x["cat"] == s["cat"] and x["id"] != s["id"]]
     rooms = "".join(f'<div class="room"><b>{e(r["name"])}</b><ul>{"".join(f"<li>{e(i)}</li>" for i in r["items"])}</ul></div>' for r in s.get("rooms", []))
     excl = "".join(f"<li>{e(x)}</li>" for x in s.get("excludes", []))
-    mine = [x for x in cases if x.get("svc") == s["id"] and x.get("kind", "case") == "case"][:4]
+    mine = [x for x in cases if x.get("svc") == s["id"] and x.get("kind", "case") == "case" and safe_case_link(x.get("link"))][:4]
     kakao = c.get("kakao", "")
     base = c.get("siteUrl", "").rstrip("/")
     ld = {"@context": "https://schema.org", "@type": "Service", "name": s["name"], "description": s["summary"], "serviceType": s["name"],
@@ -456,7 +524,7 @@ def case_card(x):
 def area_page(c, r, cases):
     title = f"{r} 입주청소·에어컨 청소 | {c['name']}"
     desc = f"{r} 지역 입주청소, 거주청소, 사무실·준공 청소, 에어컨·세탁기 분해세척을 {c['name']}에서 맡아요. 평수만 넣으면 예상 견적을 볼 수 있어요."
-    mine = [x for x in cases if x.get("region") == r and x.get("kind", "case") == "case"][:8]
+    mine = [x for x in cases if x.get("region") == r and x.get("kind", "case") == "case" and safe_case_link(x.get("link"))][:8]
     case_html = "".join(case_card(x) for x in mine)
     return head(c, title, desc, area_file(r), 1) + f"""
 <main class="wrap page">
@@ -464,7 +532,7 @@ def area_page(c, r, cases):
 <h1>{e(r)} 청소, {e(c['name'])}이 맡아요</h1>
 <p class="lead" style="color:var(--muted);font-size:17px;margin:0">{e(r)} 어디든 방문해요. 서비스를 고르면 작업 범위와 가격 기준을 볼 수 있어요.</p>
 <div class="box">{services_html(c, 1)}</div>
-<a class="btn glove" href="../index.html#quote">{e(r)} 견적 계산하기</a>
+<a class="btn glove" href="../index.html?area={e(urllib.parse.quote(r, safe=''))}#quote">{e(r)} 견적 계산하기</a>
 {f'<div class="box"><h2>{e(r)} 시공 사례</h2><div class="cases">{case_html}</div></div>' if case_html else ''}
 <div class="box"><h2>다른 지역</h2><div class="links">{''.join(f'<a href="{urllib.parse.quote(x)}.html">{e(x)}</a>' for x in c.get('regions', []) if x != r)}</div></div>
 </main>
@@ -477,6 +545,21 @@ def area_page(c, r, cases):
 def privacy_page(c):
     b = c.get("business") or {}
     who = b.get("company") or c["name"]
+    member_enabled = bool(c.get("member"))
+    firebase = c.get("firebase")
+    firebase_used = member_enabled and isinstance(firebase, dict) and bool(firebase.get("apiKey") and firebase.get("projectId"))
+    backend = c.get("memberBackendUrl")
+    script_used = member_enabled and isinstance(backend, str) and backend.startswith("https://script.google.com/macros/s/")
+    remote_notice = ""
+    if firebase_used:
+        remote_notice += "<p>회원가입 버튼을 누르면 가입 정보를 Google Firebase의 Cloud Firestore로 전송하려고 합니다. 연결 오류 등으로 전송되지 않을 수도 있습니다.</p>\n"
+    if script_used:
+        remote_notice += "<p>설정된 Google Apps Script 연동 주소로도 가입 정보를 전송하려고 합니다. 전송 성공 여부는 카카오톡 상담으로 확인해 주세요.</p>\n"
+    if not firebase_used and not script_used:
+        remote_notice = "<p>회원가입 정보의 자동 전송은 설정되어 있지 않습니다.</p>\n"
+    delete_notice = ""
+    if member_enabled:
+        delete_notice = "<p>회원가입 완료 화면의 '이 기기의 회원정보 지우기'에서 확인을 거쳐 이 브라우저에 저장된 회원정보와 쿠폰번호를 지울 수 있습니다. 다른 열린 탭은 먼저 닫아 주세요. 브라우저 자동완성, 클립보드, 카카오톡 대화와 관리자에게 전송 중이거나 이미 접수된 정보는 이 기능으로 삭제되지 않습니다. 서버에 접수된 정보의 삭제는 아래 연락처로 요청해 주세요.</p>\n"
     return head(c, f"개인정보처리방침 | {c['name']}", "개인정보처리방침", "privacy.html") + f"""
 <main class="wrap page">
 <h1>개인정보처리방침</h1>
@@ -484,11 +567,12 @@ def privacy_page(c):
 <h2>1. 수집하는 항목과 목적</h2>
 <p>{e(who)}(이하 '업체')는 회원가입 시 <b>이름, 연락처, 지역, 선택한 무료 서비스, 추천인 코드(초대 링크로 가입한 경우), 이벤트 수신 동의 여부</b>를 받아요. 회원 관리, 쿠폰·포인트 지급, 예약 상담과 작업 진행에만 써요.</p>
 <h2>2. 수집 방법</h2>
-<p>가입 정보는 이용자 기기에 저장됩니다. 회원 관리 연동을 활성화한 경우 가입 버튼을 누르면 Google 스프레드시트 기반 관리자 대장에도 전송되어 보관되며, 미연동 시 카카오톡으로 직접 전송한 경우에만 업체가 받습니다. 견적 계산기에 입력한 내용은 이용자 기기에 저장되며 상담 전송 시에만 업체가 받습니다.</p>
-<h2>3. 보관 기간과 파기</h2>
+<p>가입 정보와 쿠폰번호는 이 브라우저에 저장될 수 있습니다. 견적 계산기에 입력한 내용도 이 브라우저에 저장될 수 있습니다.</p>
+{remote_notice}<p>카카오톡 가입 버튼을 누르면 가입 내용이 클립보드에 복사될 수 있으며, 이용자가 직접 붙여넣어 전송할 수 있습니다. 견적 내용도 이용자가 상담을 위해 직접 공유할 수 있습니다.</p>
+{delete_notice}<h2>3. 보관 기간과 파기</h2>
 <p>회원 정보는 탈퇴 요청 시 또는 마지막 이용 후 2년이 지나면 지체 없이 파기해요. 관리자 대장에 저장된 회원정보도 동일한 기준으로 삭제합니다. 법령에 따라 보관해야 하는 거래 기록은 정해진 기간 동안 보관해요.</p>
 <h2>4. 제3자 제공</h2>
-<p>이용자의 동의 없이 개인정보를 외부에 판매하거나 제3자에게 제공하지 않아요. 관리자 대장 연동 시 Google 서비스를 저장·처리 수단으로 이용할 수 있습니다.</p>
+<p>이용자의 동의 없이 개인정보를 외부에 판매하거나 제3자에게 제공하지 않아요. 연동 설정에 따라 Google 서비스를 저장·처리 수단으로 이용할 수 있습니다.</p>
 <h2>5. 이용자의 권리</h2>
 <p>언제든지 개인정보 열람·수정·삭제와 이벤트 수신 거부를 요청할 수 있어요. 아래 연락처로 말씀해 주세요.</p>
 <h2>6. 문의</h2>
@@ -530,10 +614,9 @@ def run():
         "icons": [{"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
                   {"src": "logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}]}, ensure_ascii=False, indent=1)
     base = c.get("siteUrl", "").rstrip("/") + "/"
-    today = datetime.now(KST).strftime("%Y-%m-%d")
     urls = [""] + [f"services/{s['id']}.html" for s in c["services"]] + [area_file(r) for r in c.get("regions", [])]
     files["sitemap.xml"] = ('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-                            + "".join(f"<url><loc>{e(base + u)}</loc><lastmod>{today}</lastmod></url>\n" for u in urls) + "</urlset>\n")
+                            + "".join(f"<url><loc>{e(base + u)}</loc></url>\n" for u in urls) + "</urlset>\n")
     files["robots.txt"] = f"User-agent: *\nAllow: /\nSitemap: {base}sitemap.xml\n"
     for path, text in files.items():
         if write(path, text):

@@ -1,0 +1,33 @@
+name: 회원 및 매칭 규칙 공존 시험
+on:
+  pull_request:
+    paths:
+      - 'firestore.rules'
+      - 'member-sync.js'
+      - 'tests/member-auth-ready.test.cjs'
+      - 'tests/rule-coexistence.test.cjs'
+      - 'tests/fixtures/matching-test-only.rules'
+      - 'prototype/security/firestore.rules'
+      - 'tests/fixtures/deny-test-only.rules'
+      - 'tests/fixtures/firebase-coexist.json'
+      - '.github/workflows/rule-coexistence.yml'
+permissions:
+  contents: read
+jobs:
+  local-emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Member authentication restoration tests
+        run: node --test tests/member-auth-ready.test.cjs
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm install --no-save --no-package-lock firebase@10.14.1 @firebase/rules-unit-testing@3.0.4 firebase-tools@13.35.1
+      - name: Local Firestore emulator only
+        run: npx firebase emulators:exec --project demo-okclean-coexist --only firestore --config tests/fixtures/firebase-coexist.json 'node --test tests/rule-coexistence.test.cjs'

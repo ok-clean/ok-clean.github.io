@@ -1,0 +1,135 @@
+name: 예약 실제 화면 에뮬레이터 통합
+on:
+  pull_request:
+    paths:
+      - 'app.js'
+      - 'build.py'
+      - 'reservation-emulator.js'
+      - 'admin/**'
+      - 'server/**'
+      - 'reservation-api.js'
+      - 'member-sync.js'
+      - 'config.json'
+      - 'tests/*container*'
+      - 'tests/pricing.test.cjs'
+      - 'tests/retention*.cjs'
+      - 'tests/customer-reservations.test.cjs'
+      - 'tests/account-withdrawal*.cjs'
+      - 'tests/demo-retention-route*.cjs'
+      - 'tests/deletion-ledger*.cjs'
+      - 'tests/member-account-link*.cjs'
+      - 'tests/member-link-client.test.cjs'
+      - 'tests/restore-gate*.cjs'
+      - 'tests/firestore-identity.test.cjs'
+      - 'tests/restore-issuer*.cjs'
+      - 'tests/restore-renewal*.cjs'
+      - 'tests/withdrawal-recovery*.cjs'
+      - 'tests/server-index-gate.test.cjs'
+      - 'tests/app-check*.cjs'
+      - 'tests/admin-app-check-debug.test.cjs'
+      - 'tests/preflight.test.cjs'
+      - 'tests/reservation-consent.test.cjs'
+      - 'tests/reservation-api.test.cjs'
+      - 'tests/admin-reservation-config.test.cjs'
+      - 'prototype/security/*handler.cjs'
+      - 'tests/server-handler.test.cjs'
+      - 'tests/server-emulator.test.cjs'
+      - 'firestore.rules'
+      - 'prototype/security/firestore.rules'
+      - 'tests/build-generated-fixture.py'
+      - 'tests/reservation-browser-emulator.cjs'
+      - 'tests/prepare-reservation-emulator.cjs'
+      - 'tests/firebase-browser-entry.js'
+      - '.github/workflows/reservation-browser-emulator.yml'
+permissions:
+  contents: read
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node --test tests/server-handler.test.cjs tests/verified-reservation-handler.test.cjs tests/pricing.test.cjs tests/reservation-api.test.cjs tests/admin-reservation-config.test.cjs tests/preflight.test.cjs tests/reservation-consent.test.cjs tests/retention.test.cjs tests/customer-reservations.test.cjs tests/account-withdrawal.test.cjs tests/account-withdrawal-processor.test.cjs tests/withdrawal-recovery.test.cjs tests/retention-scheduler.test.cjs tests/retention-preview.test.cjs tests/demo-retention-route.test.cjs tests/deletion-ledger.test.cjs tests/restore-gate.test.cjs tests/restore-issuer.test.cjs tests/restore-renewal.test.cjs tests/member-account-link.test.cjs tests/member-link-client.test.cjs tests/server-index-gate.test.cjs tests/app-check-policy.test.cjs tests/app-check-handler.test.cjs tests/admin-app-check-debug.test.cjs tests/firestore-identity.test.cjs
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm install --no-save --no-package-lock firebase@10.14.1 firebase-admin@12.7.0 firebase-tools@13.35.1 playwright@1.56.1 esbuild@0.25.12
+      - run: npx playwright install --with-deps chromium
+      - run: npx esbuild tests/firebase-browser-entry.js --bundle --format=esm --platform=browser --outfile=/tmp/okclean-firebase-bundle.js
+      - run: node tests/prepare-reservation-emulator.cjs
+      - name: Browser with loopback emulators and synthetic data
+        run: npx firebase emulators:exec --project demo-okclean-integration --only auth,firestore --config tests/fixtures/.reservation-e2e.json 'node tests/reservation-browser-emulator.cjs'
+        env:
+          FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085
+          GCLOUD_PROJECT: demo-okclean-integration
+      - name: Server adapter with real Auth and Firestore emulators
+        run: npx firebase emulators:exec --project demo-okclean-integration --only auth,firestore --config tests/fixtures/.reservation-e2e.json 'node tests/server-emulator.test.cjs'
+        env:
+          FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085
+          GCLOUD_PROJECT: demo-okclean-integration
+      - name: Retention isolation with synthetic Firestore emulator data
+        run: npx firebase emulators:exec --project demo-okclean-integration --only auth,firestore --config tests/fixtures/.reservation-e2e.json 'node tests/retention-emulator.cjs'
+        env:
+          FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085
+          GCLOUD_PROJECT: demo-okclean-integration
+      - name: Withdrawal against synthetic Auth and Firestore emulators
+        run: npx firebase emulators:exec --project demo-okclean-integration --only auth,firestore --config tests/fixtures/.reservation-e2e.json 'node tests/account-withdrawal-emulator.cjs'
+        env:
+          FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085
+          GCLOUD_PROJECT: demo-okclean-integration
+      - name: Deletion ledger against synthetic Firestore emulator
+        run: npx firebase emulators:exec --project demo-okclean-integration --only auth,firestore --config tests/fixtures/.reservation-e2e.json 'node tests/deletion-ledger-emulator.cjs'
+        env:
+          FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085
+          GCLOUD_PROJECT: demo-okclean-integration
+      - name: Demo scheduler loopback HTTP with Firestore emulator
+        run: npx firebase emulators:exec --project demo-okclean-integration --only auth,firestore --config tests/fixtures/.reservation-e2e.json 'node tests/demo-retention-route-emulator.cjs'
+        env:
+          FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085
+          GCLOUD_PROJECT: demo-okclean-integration
+      - name: Restore gate with independent synthetic ledger emulator
+        run: npx firebase emulators:exec --project demo-okclean-integration --only auth,firestore --config tests/fixtures/.reservation-e2e.json 'node tests/restore-gate-emulator.cjs'
+        env:
+          FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085
+          GCLOUD_PROJECT: demo-okclean-integration
+      - name: Member linking with synthetic Auth and Firestore emulators
+        run: npx firebase emulators:exec --project demo-okclean-integration --only auth,firestore --config tests/fixtures/.reservation-e2e.json 'node tests/member-account-link-emulator.cjs'
+        env:
+          FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085
+          GCLOUD_PROJECT: demo-okclean-integration
+      - name: Read-only retention preview with synthetic Firestore
+        run: npx firebase emulators:exec --project demo-okclean-integration --only auth,firestore --config tests/fixtures/.reservation-e2e.json 'node tests/retention-preview-emulator.cjs'
+        env:
+          FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085
+          GCLOUD_PROJECT: demo-okclean-integration
+      - name: Restore issuer with synthetic Firestore
+        run: npx firebase emulators:exec --project demo-okclean-integration --only auth,firestore --config tests/fixtures/.reservation-e2e.json 'node tests/restore-issuer-emulator.cjs'
+        env:
+          FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085
+          GCLOUD_PROJECT: demo-okclean-integration
+      - name: Withdrawal recovery with synthetic Auth and Firestore
+        run: npx firebase emulators:exec --project demo-okclean-integration --only auth,firestore --config tests/fixtures/.reservation-e2e.json 'node tests/withdrawal-recovery-emulator.cjs'
+        env:
+          FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085
+          GCLOUD_PROJECT: demo-okclean-integration
+      - name: Production client and container with loopback emulators
+        run: npx firebase emulators:exec --project demo-okclean-integration --only auth,firestore --config tests/fixtures/.reservation-e2e.json 'bash tests/server-container-integration.sh'
+        env:
+          FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085
+          GCLOUD_PROJECT: demo-okclean-integration

@@ -3,12 +3,23 @@ service cloud.firestore {
   match /databases/{database}/documents {
     function isAdmin() {
       // 관리자 Firebase Auth UID를 직접 입력하세요. 이메일 문자열만으로 권한을 부여하지 않습니다.
-      return request.auth != null && request.auth.uid == 'REPLACE_WITH_ADMIN_UID';
+      return request.auth != null && (request.auth.uid == 'REPLACE_WITH_ADMIN_UID'
+        || request.auth.token.get('member_admin', false) == true
+        || request.auth.token.get('super_admin', false) == true);
     }
     match /member_requests/{id} {
-      allow read, update, delete: if isAdmin();
+      allow read: if isAdmin();
+      // A linked member request cannot be removed and recreated by a client:
+      // coordinated unlink/retention handling is not available yet.
+      allow delete: if isAdmin() && !exists(/databases/$(database)/documents/member_account_links/$(id));
+      // Existing and legacy records remain editable, but the Firebase client
+      // cannot reassign the anonymous owner used as a linking proof.
+      // Admin SDK bypasses rules and still requires tightly scoped IAM.
+      allow update: if isAdmin() &&
+        request.resource.data.get('ownerUid', null) == resource.data.get('ownerUid', null);
       // 익명 사용자는 회원가입 요청 생성만 가능. 기존 데이터 읽기/수정은 불가.
       allow create: if request.auth != null &&
+        !exists(/databases/$(database)/documents/member_account_links/$(id)) &&
         request.auth.token.firebase.sign_in_provider == 'anonymous' &&
         request.resource.data.keys().hasOnly(['name','phone','area','free','ad','code','ref','joined','status','couponStatus','freeStatus','memo','points','grade','ownerUid']) &&
         request.resource.data.keys().hasAll(['name','phone','area','free','ad','code','ref','joined','status','couponStatus','freeStatus','memo','points','grade','ownerUid']) &&

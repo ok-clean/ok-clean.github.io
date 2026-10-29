@@ -1,0 +1,39 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict');
+const {createDeletionLedger,processWithLedger}=require('../server/deletion-ledger.cjs');
+function dbMock(projectId='demo-ledger'){
+ const rows=new Map(),headRows=new Map();let failQuery=false;
+ const makeRef=id=>({id,map:rows});
+ const collection={doc:makeRef,where(field,operator,value){assert.equal(field,'state');assert.equal(operator,'==');assert.equal(value,'pending');return {limit(n){assert.equal(n,1);return this;},async get(){if(failQuery)throw Error('QUERY_FAILED');return {empty:![...rows.values()].some(row=>row.state==='pending')};}};},orderBy(){let after='';let max=100;return {startAfter(a){after=a;return this;},limit(n){max=n;return this;},async get(){let ids=[...rows.keys()].sort().filter(id=>id>after).slice(0,max);return {docs:ids.map(id=>({id,data:()=>structuredClone(rows.get(id))}))};}};}};
+ return {projectId,rows,headRows,setFailQuery(value){failQuery=value;},collection(name){return name==='deletion_ledger_meta'?{doc:id=>({id,map:headRows})}:collection;},async runTransaction(fn){const writes=[];const tx={async get(ref){const val=ref.map.get(ref.id);return {exists:val!==undefined,data:()=>structuredClone(val)};},create(ref,v){writes.push(()=>{if(ref.map.has(ref.id))throw Error('conflict');ref.map.set(ref.id,structuredClone(v));});},update(ref,v){writes.push(()=>ref.map.set(ref.id,{...ref.map.get(ref.id),...structuredClone(v)}));},set(ref,v){writes.push(()=>ref.map.set(ref.id,structuredClone(v)));}};const result=await fn(tx);writes.forEach(w=>w());return result;}};
+}
+function setup(){const db=dbMock();return {db,ledger:createDeletionLedger({ledgerDb:db,primaryProjectId:'demo-primary',ledgerProjectId:'demo-ledger',clock:()=>new Date('2030-01-01T00:00:00Z')})};}
+const one={id:'request-1',action:'redacted',expectedVersion:'123:1',expectedHistoryVersion:'a'.repeat(64)};const transactionFence=async()=>true;
+// Trusted fixture worker represents an already executed synthetic deletion.
+async function commitFixture(ledger,input){return processWithLedger({ledger,...input,transactionFence,service:{async process(){return {result:input.action};}}});}
+test('requires an independently configured project',()=>{const db=dbMock();assert.throws(()=>createDeletionLedger({ledgerDb:db,primaryProjectId:'demo-ledger',ledgerProjectId:'demo-ledger'}),/INDEPENDENT/);assert.throws(()=>createDeletionLedger({ledgerDb:db,primaryProjectId:'demo-primary',ledgerProjectId:'another'}),/INDEPENDENT/);});
+test('records intention before guarded completion; stable retries and conflicts',async()=>{const {ledger,db}=setup();assert.equal(await ledger.recordIntent(one),'pending');assert.equal(await ledger.recordIntent(one),'pending');await assert.rejects(ledger.recordIntent({...one,expectedVersion:'456:1'}),/LEDGER_CONFLICT/);await assert.rejects(ledger.markCommitted(one),/COMPLETION_PROOF_REQUIRED/);assert.equal((await ledger.page()).records[0].state,'pending');assert.deepEqual(await commitFixture(ledger,one),{result:'redacted'});await assert.rejects(ledger.markCommitted(one),/COMPLETION_PROOF_REQUIRED/);assert.equal(db.rows.size,1);const row=[...db.rows.values()][0];assert.deepEqual(Object.keys(row).sort(),['action','committedAt','expectedHistoryVersion','expectedVersion','id','recordedAt','sourceProject','state']);});
+test('fails closed on pending, lost fence, failed replay and missing proof',async()=>{const {ledger}=setup();await ledger.recordIntent(one);await assert.rejects(ledger.replay({verifyLedgerSnapshot:async()=>true,isRestoreFenced:async()=>true,reapply:async()=>true}),/RECONCILIATION/);await commitFixture(ledger,one);await assert.rejects(ledger.replay({verifyLedgerSnapshot:async()=>true,isRestoreFenced:async()=>false,reapply:async()=>true}),/FENCE/);await assert.rejects(ledger.replay({verifyLedgerSnapshot:async()=>true,isRestoreFenced:async()=>true,reapply:async()=>false}),/REAPPLY/);await assert.rejects(ledger.markCommitted({...one,id:'missing'}),/COMPLETION_PROOF_REQUIRED/);});
+test('replays every committed record with paging under external fence',async()=>{const {ledger}=setup();const ids=['r1','r2','r3'];for(const id of ids){const record={...one,id};await commitFixture(ledger,record);}const visited=[];assert.deepEqual(await ledger.replay({pageSize:1,verifyLedgerSnapshot:async()=>true,isRestoreFenced:async()=>true,reapply:async row=>{visited.push(row.id);return true;}}),{processed:3});assert.deepEqual(visited.sort(),ids);});
+test('guard writes intent before worker, propagates version, keeps uncertain result pending',async()=>{
+ const {processWithLedger}=require('../server/deletion-ledger.cjs');const {ledger}=setup();
+ let captured;
+ const service={async process(id,options){assert.equal(id,one.id);const {ledgerPermit,...rest}=options;captured=ledgerPermit;assert.ok(ledgerPermit);assert.deepEqual(rest,{apply:true,expectedAction:one.action,expectedVersion:one.expectedVersion,expectedHistoryVersion:one.expectedHistoryVersion,transactionFence});assert.equal((await ledger.page()).records[0].state,'pending');await assert.rejects(ledger.markCommitted(one,ledgerPermit),/COMPLETION_PROOF_REQUIRED/);return {result:'retry_needed'};}};
+ assert.deepEqual(await processWithLedger({ledger,service,transactionFence,...one}),{result:'retry_needed'});await assert.rejects(ledger.replay({verifyLedgerSnapshot:async()=>true,isRestoreFenced:async()=>true,reapply:async()=>true}),/RECONCILIATION/);
+ await assert.rejects(ledger.markCommitted(one,captured),/COMPLETION_PROOF_REQUIRED/);
+ const successful={async process(){return {result:'redacted'};}};assert.deepEqual(await processWithLedger({ledger,service:successful,transactionFence,...one}),{result:'redacted'});assert.equal((await ledger.page()).records[0].state,'committed');
+ await assert.rejects(processWithLedger({ledger,service:successful,transactionFence,...one}),/ALREADY_COMMITTED/);
+});
+test('requires independent snapshot verification before and after replay',async()=>{
+ const {ledger}=setup();await assert.rejects(ledger.replay({isRestoreFenced:async()=>true,reapply:async()=>true}),/GUARD_REQUIRED/);
+ await assert.rejects(ledger.replay({isRestoreFenced:async()=>true,verifyLedgerSnapshot:async()=>false,reapply:async()=>true}),/SNAPSHOT_UNVERIFIED/);
+ let checks=0;await assert.rejects(ledger.replay({isRestoreFenced:async()=>true,verifyLedgerSnapshot:async()=>++checks===1,reapply:async()=>true}),/SNAPSHOT_UNVERIFIED/);
+});
+test('replays parent redaction before history purge regardless of key order',async()=>{
+ const {ledger}=setup();for(const action of ['history_purged','redacted']){const row={...one,action};await commitFixture(ledger,row);}
+ const seen=[];await ledger.replay({isRestoreFenced:async()=>true,verifyLedgerSnapshot:async()=>true,reapply:async row=>{seen.push(row.action);return true;}});assert.deepEqual(seen,['redacted','history_purged']);
+});
+
+test('pending intent or ledger query failure blocks scheduling',async()=>{const {ledger,db}=setup();await ledger.assertNoPending();await ledger.recordIntent(one);await assert.rejects(ledger.assertNoPending(),/RECONCILIATION/);await commitFixture(ledger,one);await ledger.assertNoPending();db.setFailQuery(true);await assert.rejects(ledger.assertNoPending(),/QUERY_FAILED/);});
+
+test('new intent and guarded completion increment ledger revision atomically; retries do not',async()=>{const {ledger,db}=setup();await ledger.recordIntent(one);assert.equal(db.headRows.get('demo-primary').revision,1);await ledger.recordIntent(one);assert.equal(db.headRows.get('demo-primary').revision,1);await commitFixture(ledger,one);assert.equal(db.headRows.get('demo-primary').revision,2);assert.equal(await ledger.recordIntent(one),'committed');assert.equal(db.headRows.get('demo-primary').revision,2);});
