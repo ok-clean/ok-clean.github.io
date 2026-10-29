@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<title>견적 비교 연습 화면 | 오케이청소</title>
+<link rel="stylesheet" href="comparison.css">
+<script src="security/comparison-view.js" defer></script>
+<script src="comparison-demo.js" defer></script>
+</head>
+<body>
+<main>
+ <header><span class="brand">오케이청소</span><span class="badge">시제품 · 운영 미연결</span></header>
+ <h1>견적 비교</h1>
+ <p class="lead">같은 청소 요청에 도착한 업체별 견적을 살펴보는 연습 화면입니다.</p>
+ <aside class="notice"><strong>실제 견적이나 예약이 아닙니다.</strong><p>아래 내용은 모두 가상 정보입니다. 화면은 조회 내용을 저장하거나 전송하지 않습니다.</p></aside>
+ <section class="card" aria-labelledby="request-heading">
+  <h2 id="request-heading">가상 청소 요청</h2>
+  <dl class="request"><div><dt>청소</dt><dd>입주·이사 청소</dd></div><div><dt>지역</dt><dd>춘천</dd></div><div><dt>면적</dt><dd>25평</dd></div><div><dt>희망 일정</dt><dd>가상 일정</dd></div></dl>
+ </section>
+ <section class="card" id="comparison-root" aria-labelledby="offers-heading" data-state="idle">
+  <h2 id="offers-heading">업체별 견적</h2>
+  <p class="hint">가격과 작업 범위를 함께 확인한 후 상담해 주세요. 표시 금액은 시험용입니다.</p>
+  <div class="actions"><button type="button" data-comparison-load disabled>가상 견적 보기</button><button type="button" class="secondary" data-comparison-clear disabled>결과 지우기</button></div>
+  <p class="status" data-comparison-status role="status" aria-live="polite" aria-atomic="true" tabindex="-1">시험 화면을 준비하고 있습니다.</p>
+  <ul data-comparison-list class="offers" aria-label="가상 업체 견적" hidden></ul>
+ </section>
+ <section class="card demo-controls" aria-labelledby="demo-heading">
+  <h2 id="demo-heading">시험할 상황</h2>
+  <label for="demo-case">가상 응답 선택</label>
+  <select id="demo-case"><option value="offers">견적 2건 도착</option><option value="empty">아직 도착한 견적 없음</option><option value="error">조회 오류</option><option value="delayed">늦게 도착하는 응답</option><option value="timeout">응답 없음</option></select>
+  <p class="hint">상황을 바꾸면 이전 비교 결과는 지워집니다.</p>
+ </section>
+ <footer><p>이 화면에서는 실제 견적 조회, 업체 선택, 예약, 결제가 이루어지지 않습니다.</p></footer>
+ <noscript><p class="notice">자바스크립트가 꺼져 있어 비교 연습을 사용할 수 없습니다. 입력이나 정보 전송은 없습니다.</p></noscript>
+</main>
+</body>
+</html>

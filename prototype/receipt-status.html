@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<title>접수 확인 시험 화면 | 오케이청소</title>
+<link rel="stylesheet" href="receipt-status.css">
+<script src="security/receipt-client.js" defer></script>
+<script src="security/receipt-view.js" defer></script>
+<script src="receipt-demo.js" defer></script>
+</head>
+<body>
+<main>
+ <header><span class="brand">오케이청소</span><span class="badge">시제품 · 운영 미연결</span></header>
+ <h1>접수 확인</h1>
+ <p class="lead">접수 여부가 불확실할 때, 새 요청을 만들지 않고 확인하는 화면입니다.</p>
+ <aside class="notice" aria-label="시험 화면 안내"><strong>실제 접수 조회가 아닙니다.</strong><p>가상 응답으로 화면을 시험합니다. 이름·전화번호·실제 접수번호·인증정보를 입력하지 마세요. 운영 서버에 연결하거나 정보를 저장하지 않습니다.</p></aside>
+ <section class="card" id="receipt-root" aria-label="접수 확인 시험" data-state="idle">
+  <form data-receipt-form novalidate autocomplete="off">
+   <label for="receipt-id">시험용 접수번호</label>
+   <input id="receipt-id" data-receipt-id type="text" maxlength="80" pattern="[A-Za-z0-9_-]{1,80}" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="receipt-help receipt-status" aria-invalid="false">
+   <p id="receipt-help" class="hint">예: demo-receipt · 영문, 숫자, 밑줄, 하이픈만 사용합니다.</p>
+   <div class="actions"><button type="submit" data-receipt-submit disabled>접수 여부 확인</button><button type="button" class="secondary" data-receipt-clear disabled>입력 초기화</button></div>
+  </form>
+  <p id="receipt-status" data-receipt-status role="status" aria-live="polite" aria-atomic="true" tabindex="-1">시험 화면을 준비하고 있습니다.</p>
+ </section>
+ <section class="card demo-controls" aria-labelledby="demo-heading">
+  <h2 id="demo-heading">가상 응답 선택</h2>
+  <label for="demo-case">시험할 상황</label>
+  <select id="demo-case"><option value="unavailable">접수 여부 확인 불가</option><option value="confirmed">접수 확인 응답</option><option value="delayed">늦게 도착하는 확인 응답</option><option value="error">일시적인 통신 오류</option><option value="timeout">응답 없음</option></select>
+  <p class="hint">변경하면 이전 조회 결과를 지웁니다. 성공 응답도 실제 접수·예약이 아닙니다.</p>
+ </section>
+ <footer><p>조회 실패는 미접수의 증거가 아닙니다. 실제 서비스에서는 기존 상담 채널로 확인한 뒤 처리해야 합니다.</p><p>이 시제품에는 접수·예약·결제·사진 업로드 기능이 없습니다.</p></footer>
+ <noscript><p class="notice">자바스크립트가 꺼져 있어 시험 기능을 사용할 수 없습니다. 입력값은 전송되지 않습니다.</p></noscript>
+</main>
+</body>
+</html>
