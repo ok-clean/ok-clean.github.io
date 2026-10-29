@@ -23,3 +23,40 @@ function createWithdrawalHandler({db,auth,rateLimit,protectedMemberAdminUid,with
  };
 }
 module.exports={createWithdrawalHandler,privileged};
+
+// Deliberately restricted to an isolated demo project. This worker removes ONLY
+// a Firebase Auth account; it never asserts that membership, external stores,
+// reservations or legal-retention obligations have been handled. A production
+// worker needs independently enforced inventory, identity and restore controls.
+function createDemoWithdrawalProcessor({db,auth,policy,protectedMemberAdminUid,now=()=>Date.now(),randomId=()=>require('node:crypto').randomBytes(16).toString('hex')}){
+ const project='demo-okclean-integration';
+ if(process.env.GCLOUD_PROJECT!==project || db?.projectId!==project || process.env.FIRESTORE_EMULATOR_HOST!=='127.0.0.1:8085' || process.env.FIREBASE_AUTH_EMULATOR_HOST!=='127.0.0.1:9099') throw Error('DEMO_EMULATOR_REQUIRED');
+ if(!db?.runTransaction || !db?.collection || !auth?.getUser || !auth?.deleteUser) throw Error('Trusted dependencies required');
+ return async function process(uid){
+  if(policy?.reviewed!==true || policy?.allowDemoAuthDeletion!==true || !protectedMemberAdminUid || protectedMemberAdminUid==='REPLACE_WITH_ADMIN_UID')return {result:'policy_unconfirmed'};
+  if(typeof uid!=='string'||!uid||uid.length>128||uid.includes('/')||uid===protectedMemberAdminUid)return {result:'blocked'};
+  const ref=db.collection('account_lifecycle').doc(uid), token=randomId(), start=now();
+  let claim;
+  try{
+   claim=await db.runTransaction(async tx=>{const snap=await tx.get(ref), v=snap.data();if(!snap.exists||v?.status!=='withdrawal_requested')return 'blocked';if(v.demoAuthState==='absent')return 'verify_absent';if(v.demoLeaseExpiresAt && new Date(v.demoLeaseExpiresAt.toDate?v.demoLeaseExpiresAt.toDate():v.demoLeaseExpiresAt).getTime()>start)return 'busy';tx.update(ref,{demoLeaseToken:token,demoLeaseExpiresAt:new Date(start+60000)});return 'claimed';});
+   if(claim==='verify_absent'){try{await auth.getUser(uid);return {result:'uid_reused_blocked'};}catch(e){return {result:e?.code==='auth/user-not-found'?'absent':'retry_needed'};}}
+   if(claim!=='claimed')return {result:claim};
+   const reservations=await db.collection('quote_requests').where('ownerUid','==',uid).limit(1).get();
+   if(!reservations.empty)return {result:'reservations_pending'};
+   let account;
+   try{account=await auth.getUser(uid);}catch(e){if(e?.code!=='auth/user-not-found')throw e;}
+   if(account && (account.disabled || privileged(account.customClaims)))return {result:'blocked'};
+   // A Firestore lease cannot fence Firebase Auth itself: production needs an
+   // external account-provisioning freeze and conditional identity controls.
+   const ownsLease=await db.runTransaction(async tx=>{const snap=await tx.get(ref), v=snap.data();const expiry=v?.demoLeaseExpiresAt;return snap.exists && v?.demoLeaseToken===token && new Date(expiry?.toDate?expiry.toDate():expiry).getTime()>now();});
+   if(!ownsLease)return {result:'retry_needed'};
+   if(account){try{await auth.deleteUser(uid);}catch(e){if(e?.code!=='auth/user-not-found')throw e;}}
+   const finalized=await db.runTransaction(async tx=>{const snap=await tx.get(ref);if(!snap.exists||snap.data()?.demoLeaseToken!==token)return false;tx.update(ref,{demoAuthState:'absent',demoAuthCheckedAt:new Date(now())});return true;});
+   return {result:finalized?'auth_absent_pending_other_data':'retry_needed'};
+  }catch{return {result:'retry_needed'};}
+  finally{
+   if(claim==='claimed')try{await db.runTransaction(async tx=>{const snap=await tx.get(ref);if(snap.exists&&snap.data()?.demoLeaseToken===token)tx.update(ref,{demoLeaseExpiresAt:new Date(0),demoLeaseToken:''});});}catch{}
+  }
+ };
+}
+module.exports.createDemoWithdrawalProcessor=createDemoWithdrawalProcessor;

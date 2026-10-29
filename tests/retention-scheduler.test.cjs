@@ -1,0 +1,33 @@
+'use strict';
+const {test}=require('node:test');const assert=require('node:assert/strict');
+process.env.FIRESTORE_EMULATOR_HOST='127.0.0.1:8085';process.env.GCLOUD_PROJECT='demo-okclean';
+const {createScheduledRetentionHandler}=require('../server/retention-scheduler.cjs');
+const config={enabled:true,reviewed:true,projectId:'demo-okclean',audience:'https://service.example.test/internal/retention',serviceAccount:'scheduler@demo-ok.iam.gserviceaccount.com',policyVersion:'reviewed-v1',reservationDays:30,historyDays:90};
+const valid={aud:config.audience,iss:'https://accounts.google.com',email:config.serviceAccount,email_verified:true};
+function fixture({conf={},verify=async()=>valid,process,scan,clock=()=>new Date('2030-01-01T00:00:00Z')}={}){
+  const rows=new Map();let chain=Promise.resolve(),counter=0;
+  const doc=key=>({key});
+  const db={projectId:'demo-okclean',collection:name=>({doc:id=>doc(name+'/'+id)}),runTransaction:fn=>{const action=chain.then(()=>fn({get:async ref=>({exists:rows.has(ref.key),data:()=>rows.get(ref.key)}),set:(ref,value)=>rows.set(ref.key,value),create:(ref,value)=>{if(rows.has(ref.key))throw Error('EXISTS');rows.set(ref.key,value)}}));chain=action.catch(()=>{});return action;}};
+  const service={schedulerSafety:{projectId:'demo-okclean',firestoreHost:'127.0.0.1:8085',reservationDays:30,historyDays:90},scan:scan|| (async()=>({ids:['synthetic'],next:null})),process:process|| (async(id,{transactionFence})=>{assert.equal(await db.runTransaction(transactionFence),true);return {result:'redacted'};})};
+  const handler=createScheduledRetentionHandler({db,service,verifyOidc:verify,config:{...config,...conf},clock,newId:()=>`run-${++counter}`});
+  async function call(auth='Bearer valid',method='POST'){const res={code:null,data:null,set(){return this},status(code){this.code=code;return this},json(data){this.data=data;return this;}};await handler({method,headers:{authorization:auth}},res);return res;}
+  return {call,rows};
+}
+test('requires reviewed policy, explicit days and demo project; no data access when unavailable',async()=>{
+  for(const conf of [{enabled:false},{reviewed:false},{reservationDays:0},{historyDays:0},{reservationDays:31},{historyDays:91},{policyVersion:''},{projectId:'production'}]){const x=fixture({conf,scan:async()=>{throw Error('must not scan')}});assert.equal((await x.call()).code,503);}
+});
+test('OIDC verification and exact verified scheduler identity are mandatory',async()=>{
+  for(const verify of [async()=>{throw Error('invalid signature')},async()=>({...valid,aud:'wrong'}),async()=>({...valid,iss:'wrong'}),async()=>({...valid,email_verified:false}),async()=>({...valid,email:'other@demo-ok.iam.gserviceaccount.com'})])assert.equal((await fixture({verify}).call()).code,401);
+  assert.equal((await fixture().call('','POST')).code,401);assert.equal((await fixture().call('Bearer valid','GET')).code,405);
+});
+test('uses fenced transactions, count-only audit and a durable pagination cursor',async()=>{
+  const x=fixture({scan:async()=>({ids:['synthetic'],next:'synthetic'})});const res=await x.call();assert.equal(res.code,200);assert.deepEqual(res.data,{status:'completed',hasMore:true,counts:{redacted:1}});
+  assert.equal(x.rows.get('retention_scheduler/control').cursor,'synthetic');const audit=x.rows.get('retention_scheduler_runs/run-1');assert.deepEqual(Object.keys(audit).sort(),['at','counts','outcome','policyVersion']);assert.doesNotMatch(JSON.stringify(audit),/synthetic|valid/);
+});
+test('concurrent invocations return busy and do not start a second page',async()=>{
+  let release,entered;const started=new Promise(r=>entered=r),wait=new Promise(r=>release=r);let calls=0;
+  const x=fixture({process:async()=>{calls++;entered();await wait;return {result:'redacted'}}});const first=x.call();await started;assert.equal((await x.call()).code,409);release();assert.equal((await first).code,200);assert.equal(calls,1);
+});
+test('failure retains original cursor and next invocation can retry',async()=>{
+  let calls=0;const x=fixture({process:async()=>({result:++calls===1?'retry_needed':'redacted'})});assert.equal((await x.call()).code,503);assert.equal(x.rows.get('retention_scheduler/control').cursor,null);assert.equal((await x.call()).code,200);assert.equal(calls,2);assert.equal(x.rows.get('retention_scheduler_runs/run-1').outcome,'retry_needed');
+});

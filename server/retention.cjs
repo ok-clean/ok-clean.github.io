@@ -4,6 +4,7 @@
 const TERMINAL=new Set(['작업완료','종료','취소']);
 const DAY=86400000;
 const toMs=x=>x instanceof Date?x.getTime():typeof x?.toDate==='function'?x.toDate().getTime():NaN;
+const version=x=>x && Number.isInteger(x.seconds) && Number.isInteger(x.nanoseconds)?`${x.seconds}:${x.nanoseconds}`:null;
 function policyCheck(p){
   if(!p || !Number.isInteger(p.reservationDays) || !Number.isInteger(p.historyDays) || p.reservationDays<1 || p.historyDays<1 || p.reservationDays>36500 || p.historyDays>36500)throw Error('RETENTION_POLICY_REQUIRED');
 }
@@ -11,7 +12,7 @@ function ensureEmulator(projectId,host){
   if(typeof projectId!=='string'||!/^demo-[a-z0-9-]+$/.test(projectId)||host!=='127.0.0.1:8085')throw Error('DEMO_FIRESTORE_EMULATOR_REQUIRED');
 }
 function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new Date(),authorize=async()=>false}){
-  policyCheck(policy);ensureEmulator(projectId,firestoreHost);
+  policyCheck(policy);policy=Object.freeze({reservationDays:policy.reservationDays,historyDays:policy.historyDays});ensureEmulator(projectId,firestoreHost);
   // Never trust only caller-supplied emulator strings when destructive operations are available.
   if(require('node:process').env.FIRESTORE_EMULATOR_HOST!==firestoreHost || require('node:process').env.GCLOUD_PROJECT!==projectId || db?.projectId!==projectId)throw Error('DEMO_FIRESTORE_EMULATOR_REQUIRED');
   if(!db?.collection||!db?.runTransaction||typeof authorize!=='function')throw Error('INVALID_DEPENDENCIES');
@@ -23,17 +24,31 @@ function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new
     for(const doc of history.docs)if((await doc.ref.listCollections()).length)return false;
     return true;
   }
-  async function process(requestId,{apply=false}={}){
+  async function process(requestId,{apply=false,transactionFence=null,expectedVersion=null}={}){
     if(typeof requestId!=='string'||!/^[A-Za-z0-9_-]{1,80}$/.test(requestId))throw Error('INVALID_REQUEST_ID');
     if(typeof apply!=='boolean')throw Error('INVALID_MODE');
+    if(transactionFence!==null && typeof transactionFence!=='function')throw Error('INVALID_FENCE');
+    if(expectedVersion!==null && (typeof expectedVersion!=='string'||!/^\d+:\d{1,9}$/.test(expectedVersion)))throw Error('INVALID_VERSION');
     if(apply && await authorize()!==true)throw Error('APPLY_NOT_AUTHORIZED');
     const at=clock();if(!(at instanceof Date)||!Number.isFinite(at.getTime()))throw Error('INVALID_CLOCK');
     const ref=db.collection('quote_requests').doc(requestId);
     try{
       const initial=await ref.get();if(!initial.exists)return {result:'absent'};
+      // Never apply against a parent changed since dependency inspection.
+      // This does not eliminate races for an unknown new subcollection.
+      const inspectedVersion=version(initial.updateTime);
+      if(apply && !inspectedVersion)return {result:'retry_needed'};
       if(!await inspectChildren(ref))return {result:'blocked_dependencies'};
       return await db.runTransaction(async tx=>{
+        // Fencing is checked in the same transaction as any destructive writes.
+        // A stale scheduler cannot continue deleting after its lease was replaced.
+        if(apply && transactionFence && await transactionFence(tx)!==true)throw Error('FENCE_LOST');
         const snap=await tx.get(ref);if(!snap.exists)return {result:'absent'};
+        if(apply && version(snap.updateTime)!==inspectedVersion)return {result:'changed'};
+        if(expectedVersion!==null){
+          const v=snap.updateTime;
+          if(version(v)!==expectedVersion)return {result:'changed'};
+        }
         const value=snap.data();
         // Retention cannot proceed until a trusted operator explicitly rules out
         // a legal hold. Missing or malformed flags are not treated as clearance.
@@ -78,6 +93,6 @@ function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new
     if(!Array.isArray(ids)||ids.length>100)throw Error('INVALID_BATCH');
     const counts={};for(const id of ids){const {result}=await process(id,options);counts[result]=(counts[result]||0)+1;}return counts;
   }
-  return {process,processBatch,scan};
+  return {process,processBatch,scan,schedulerSafety:Object.freeze({projectId,firestoreHost,reservationDays:policy.reservationDays,historyDays:policy.historyDays})};
 }
 module.exports={createRetentionService};

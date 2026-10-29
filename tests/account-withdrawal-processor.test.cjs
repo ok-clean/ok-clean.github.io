@@ -1,0 +1,21 @@
+'use strict';
+const {test}=require('node:test'),assert=require('node:assert/strict');
+const {createDemoWithdrawalProcessor}=require('../server/account-withdrawal.cjs');
+process.env.GCLOUD_PROJECT='demo-okclean-integration';process.env.FIRESTORE_EMULATOR_HOST='127.0.0.1:8085';process.env.FIREBASE_AUTH_EMULATOR_HOST='127.0.0.1:9099';
+function fixture(){
+ const store=new Map([['account_lifecycle/customer',{status:'withdrawal_requested'}]]);let lock=Promise.resolve();let deleted=0, account={uid:'customer',customClaims:{},disabled:false}, blocked=false;
+ const collection=name=>({doc:id=>({name,id}),where:(field,op,uid)=>({limit:()=>({get:async()=>({empty:!blocked})})})});
+ const db={projectId:'demo-okclean-integration',collection,runTransaction(fn){const p=lock.then(()=>fn({get:async ref=>{const value=store.get(ref.name+'/'+ref.id);return {exists:!!value,data:()=>value};},update:(ref,fields)=>{const key=ref.name+'/'+ref.id;store.set(key,{...store.get(key),...fields});}}));lock=p.catch(()=>{});return p;}};
+ const auth={getUser:async()=>{if(!account)throw Object.assign(Error(),{code:'auth/user-not-found'});return account;},deleteUser:async()=>{deleted++;account=null;}};
+ const make=(policy,extra={})=>createDemoWithdrawalProcessor({db,auth,policy,protectedMemberAdminUid:'admin',...extra});
+ return {store,db,auth,make,get deleted(){return deleted},setBlocked(v){blocked=v},setAccount(v){account=v}};
+}
+const good={reviewed:true,allowDemoAuthDeletion:true};
+test('requires explicit policy and isolates production from demo worker',async()=>{const f=fixture();assert.equal((await f.make({})('customer')).result,'policy_unconfirmed');process.env.FIREBASE_AUTH_EMULATOR_HOST='';assert.throws(()=>f.make(good),/DEMO_EMULATOR_REQUIRED/);process.env.FIREBASE_AUTH_EMULATOR_HOST='127.0.0.1:9099';assert.equal(f.deleted,0);});
+test('refuses privileged accounts and retained or unresolved reservations',async()=>{const f=fixture(),p=f.make(good);f.setBlocked(true);assert.equal((await p('customer')).result,'reservations_pending');f.setBlocked(false);f.setAccount({customClaims:{reservation_admin:true}});assert.equal((await p('customer')).result,'blocked');assert.equal((await p('admin')).result,'blocked');assert.equal(f.deleted,0);});
+test('Auth removal remains pending for other data; retries cannot delete twice',async()=>{const f=fixture(),p=f.make(good);assert.equal((await p('customer')).result,'auth_absent_pending_other_data');assert.equal((await p('customer')).result,'absent');assert.equal(f.deleted,1);assert.equal(f.store.get('account_lifecycle/customer').status,'withdrawal_requested');});
+test('failed Auth delete is retryable and does not claim completion',async()=>{const f=fixture(),p=f.make(good);const del=f.auth.deleteUser;f.auth.deleteUser=async()=>{throw Error('unavailable')};assert.equal((await p('customer')).result,'retry_needed');assert.equal(f.store.get('account_lifecycle/customer').demoAuthState,undefined);f.auth.deleteUser=del;assert.equal((await p('customer')).result,'auth_absent_pending_other_data');});
+test('concurrent jobs cannot both delete the account',async()=>{const f=fixture();let release;const original=f.auth.getUser;f.auth.getUser=async()=>{await new Promise(resolve=>{release=resolve});return original();};const p=f.make(good),first=p('customer');while(!release)await new Promise(resolve=>setImmediate(resolve));assert.equal((await p('customer')).result,'busy');release();assert.equal((await first).result,'auth_absent_pending_other_data');assert.equal(f.deleted,1);});
+
+test('an Auth UID recreated after earlier deletion is not deleted again',async()=>{const f=fixture(),p=f.make(good);assert.equal((await p('customer')).result,'auth_absent_pending_other_data');f.setAccount({uid:'customer',customClaims:{},disabled:false});assert.equal((await p('customer')).result,'uid_reused_blocked');assert.equal(f.deleted,1);});
+test('stalled worker cannot initiate deletion after lease expiry',async()=>{const f=fixture();let time=100000,release;const old=f.auth.getUser;f.auth.getUser=async()=>{await new Promise(resolve=>{release=resolve});return old();};const p=f.make(good,{now:()=>time}),first=p('customer');while(!release)await new Promise(resolve=>setImmediate(resolve));time+=60001;release();assert.equal((await first).result,'retry_needed');assert.equal(f.deleted,0);});
