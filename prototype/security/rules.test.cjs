@@ -63,6 +63,17 @@ const {reviewPartnerAsAdmin,assignPartnerAsAdmin,revokeAssignmentAsAdmin,readAss
   await assertFails(updateDoc(doc(admin,'quote_requests','a'),{phone:'01011112222'}));
   await assertFails(deleteDoc(doc(admin,'quote_requests','a')));
   const form={service:'입주·이사 청소',area:'춘천',size:25,date:new Date(Date.now()+86400000),name:'가상고객',phone:'01000000000',consent:true};
+  await assert.rejects(createQuote(anon,'customer-1','invalid-notes',{...form,notes:'x'.repeat(501)}));
+  await assert.rejects(createQuote(anon,'customer-1','invalid-estimate',{...form,estimateMin:100,estimateMax:50}));
+  await assertFails(setDoc(doc(anon,'quote_requests','too-long-notes'),{...payload,notes:'x'.repeat(501)}));
+  await assertFails(setDoc(doc(anon,'quote_requests','bad-range'),{...payload,estimateMin:100,estimateMax:50}));
+  await assertFails(setDoc(doc(anon,'quote_requests','missing-min'),{...payload,estimateMax:100}));
+  await assertSucceeds(createQuote(anon,'customer-1','with-details',{...form,notes:'가상 요청',estimateMin:100000,estimateMax:120000}));
+  const detailed = await getDoc(doc(admin,'quote_requests','with-details'));
+  assert.equal(detailed.data().notes,'가상 요청');
+  assert.equal(detailed.data().estimateMin,100000);
+  assert.equal(detailed.data().estimateMax,120000);
+  await assertFails(getDoc(doc(other,'quote_requests','with-details')));
   await assert.rejects(createQuote(anon,'customer-1','ui-invalid',{...form,consent:false}));
   await assert.rejects(createQuote(anon,'customer-1','invalid-calendar',{...form,date:'2025-02-29'}));
   const tomorrowKst = new Date(Date.now()+33*3600000).toISOString().slice(0,10);
