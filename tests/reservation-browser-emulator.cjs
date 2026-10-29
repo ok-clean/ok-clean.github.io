@@ -80,6 +80,7 @@ async function main(){
     const saved=await db.collection('quote_requests').doc(id).get();
     assert.ok(saved.exists,'Firestore emulator contains request');
     assert.equal(saved.data().notes,'가상 요청사항');assert.ok(Number.isInteger(saved.data().estimateMin));
+    assert.ok(price.includes(saved.data().estimateMin.toLocaleString('ko-KR')),'saved estimate must match displayed calculator result');
     assert.equal(saved.data().name,'가상고객');
     assert.equal(await page.locator('#reserveSubmit').isDisabled(),true,'double click remains blocked');
     const replayData={id,date,estimateMin:saved.data().estimateMin,estimateMax:saved.data().estimateMax ?? null};
