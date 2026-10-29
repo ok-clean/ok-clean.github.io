@@ -9,6 +9,7 @@ on:
       - 'server/**'
       - 'prototype/security/*handler.cjs'
       - 'tests/server-handler.test.cjs'
+      - 'tests/server-emulator.test.cjs'
       - 'firestore.rules'
       - 'prototype/security/firestore.rules'
       - 'tests/build-generated-fixture.py'
@@ -38,6 +39,12 @@ jobs:
       - run: node tests/prepare-reservation-emulator.cjs
       - name: Browser with loopback emulators and synthetic data
         run: npx firebase emulators:exec --project demo-okclean-integration --only auth,firestore --config tests/fixtures/.reservation-e2e.json 'node tests/reservation-browser-emulator.cjs'
+        env:
+          FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085
+          GCLOUD_PROJECT: demo-okclean-integration
+      - name: Server adapter with real Auth and Firestore emulators
+        run: npx firebase emulators:exec --project demo-okclean-integration --only auth,firestore --config tests/fixtures/.reservation-e2e.json 'node tests/server-emulator.test.cjs'
         env:
           FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
           FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085
