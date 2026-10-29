@@ -335,7 +335,18 @@ def index_page(c, cases=()):
       <button class="btn glove" id="qKakao" type="button">이 견적으로 카톡 문의</button>
       {'<button class="btn line" id="qSms" type="button">문자로 견적 보내기</button>' if c.get("sms") else ''}
       <button class="link" id="qCopy" type="button">문의 내용만 복사하기</button>
+      <button class="btn line" id="qReserve" type="button" hidden>예약 신청</button>
     </div>
+    <form id="reservationForm" hidden>
+      <p>예약 접수 시험입니다. 가상 정보만 입력해 주세요.</p>
+      <div class="field"><label for="reserveName">이름</label><input id="reserveName" maxlength="30" required autocomplete="off"></div>
+      <div class="field"><label for="reservePhone">휴대폰 번호</label><input id="reservePhone" type="tel" required autocomplete="off"></div>
+      <div class="field"><label for="reserveSize">규모</label><input id="reserveSize" type="number" min="1" max="999" step="1" required></div>
+      <div class="field"><label for="reserveNotes">요청사항</label><textarea id="reserveNotes" maxlength="500" autocomplete="off"></textarea></div>
+      <label><input id="reserveConsent" type="checkbox" required> 예약 접수 시험에 동의합니다.</label>
+      <button class="btn glove" id="reserveSubmit" type="submit">예약 접수</button>
+      <p id="reserveStatus" role="status" aria-live="polite"></p>
+    </form>
   </div>
 </div></section>
 
