@@ -14,11 +14,11 @@ const vm = require('node:vm');
   };
   vm.runInNewContext(fs.readFileSync('sw.js', 'utf8'), sandbox);
   async function request(url, mode='cors', method='GET') {
-    let result;
+    let result, lifetime;
     const req = {url, mode, method};
-    handlers.fetch({request:req, respondWith:p => {result = p;}});
+    handlers.fetch({request:req, respondWith:p => {result = p;}, waitUntil:p => {lifetime = p;}});
     if(result) await result;
-    await new Promise(resolve => setImmediate(resolve));
+    if(lifetime) await lifetime;
     return !!result;
   }
   assert.equal(await request('https://example.test/sub/cases.json?t=123'), true);
