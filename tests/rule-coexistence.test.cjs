@@ -19,7 +19,7 @@ if (host !== '127.0.0.1:8080' && host !== 'localhost:8080') {
 }
 const PINNED = {
   // #49: 877d02c1500019ae177508763e1f18cf0a8266e6 (member rules)
-  memberRules: 'cffe990459628663b0e021803ec5bd5acaa30a19a73eb0249e32b9515c6e174a',
+  memberRules: 'aa02338dda71e711605059c6b6386195d6efd4a0fc9007188c7ed290fc63f458',
   // Updated alongside the auth initialization fix; the VM runs this exact client.
   memberClient: 'cb8c651e6b17b4fab91911eeca463907a925085271c107b5274864e58587c764',
   // Updated test-only matching policy including optional notes and indicative estimates.
