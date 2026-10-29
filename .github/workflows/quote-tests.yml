@@ -32,6 +32,7 @@ jobs:
       - run: node tests/estimate.test.cjs
       - run: node tests/case-cache.test.cjs
       - run: python3 tests/test_pages_staging.py
+      - run: python3 tests/test_pages_publish_guard.py
       - run: python3 tests/test_privacy_page.py
       - run: python3 tests/test_sitemap.py
       - run: python3 tests/test_region_pages.py
