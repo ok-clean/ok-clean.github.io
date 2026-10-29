@@ -7,6 +7,7 @@ on:
       - 'tests/member-auth-ready.test.cjs'
       - 'tests/rule-coexistence.test.cjs'
       - 'tests/fixtures/matching-test-only.rules'
+      - 'prototype/security/firestore.rules'
       - 'tests/fixtures/deny-test-only.rules'
       - 'tests/fixtures/firebase-coexist.json'
       - '.github/workflows/rule-coexistence.yml'
