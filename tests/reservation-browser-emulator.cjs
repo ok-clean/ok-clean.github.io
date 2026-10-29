@@ -19,6 +19,7 @@ async function main(){
   for(const name of ['reservation-emulator.js','admin/admin.js','admin/index.html']){
     const dest=path.join(root,name);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(name,dest);
   }
+  fs.copyFileSync('reservation-emulator.js',path.join(root,'reservation-real.js'));
   fs.copyFileSync('/tmp/okclean-firebase-bundle.js',path.join(root,'firebase-bundle.js'));
   const configPath=path.join(root,'config.json');
   const cfg=JSON.parse(fs.readFileSync(configPath,'utf8'));
@@ -174,6 +175,40 @@ async function main(){
     assert.equal(await interruptedPage.evaluate(()=>sessionStorage.getItem('okclean-reservation-attempt-v1')),pending);
     assert.equal((await db.collection('quote_requests').get()).size,2,'blocked in-flight attempt did not create another document');
     await interrupted.close();
+    // Real SDK writes to the emulator; a test wrapper withholds its success
+    // result from the UI, representing a lost/delayed application response.
+    const lost=await context();
+    await lost.route('**/reservation-emulator.js',route=>route.fulfill({
+      status:200,contentType:'text/javascript',
+      body:`import {submitReservation as real} from "${base}/reservation-real.js"; export async function submitReservation(...args){await real(...args);return new Promise(()=>{});}`
+    }));
+    const lostPage=await lost.newPage();
+    await lostPage.goto(base+'/',{waitUntil:'load'});
+    await lostPage.locator('#qArea').selectOption('춘천');
+    await lostPage.locator('#qDate').fill(date);
+    await lostPage.locator('#qReserve').click();
+    await lostPage.locator('#reserveName').fill('가상응답지연');
+    await lostPage.locator('#reservePhone').fill('01000000003');
+    await lostPage.locator('#reserveSize').fill('15');
+    await lostPage.locator('#reserveNotes').fill('가상 응답 지연');
+    await lostPage.locator('#reserveConsent').check();
+    await lostPage.locator('#reserveSubmit').click();
+    const lostId=await lostPage.evaluate(()=>sessionStorage.getItem('okclean-reservation-attempt-v1'));
+    assert.match(lostId,/^[a-f0-9-]{36}$/);
+    let written;
+    for(let i=0;i<100;i++){
+      written=await db.collection('quote_requests').doc(lostId).get();
+      if(written.exists)break;
+      await new Promise(resolve=>setTimeout(resolve,100));
+    }
+    assert.ok(written.exists,'write reached emulator despite withheld UI result');
+    assert.doesNotMatch(await lostPage.locator('#reserveStatus').innerText(),/접수 완료/);
+    await lostPage.reload({waitUntil:'load'});
+    await lostPage.locator('#qReserve').click();
+    assert.equal(await lostPage.locator('#reserveSubmit').isDisabled(),true);
+    assert.equal(await lostPage.evaluate(()=>sessionStorage.getItem('okclean-reservation-attempt-v1')),lostId);
+    assert.equal((await db.collection('quote_requests').get()).size,3,'lost response plus reload must not duplicate');
+    await lost.close();
     console.log('PASS: real browser reservation -> emulators -> admin status -> reload');
   }finally{
     await browser.close();await new Promise(resolve=>server.close(resolve));await app.delete();
