@@ -56,8 +56,18 @@ const server = http.createServer((req, res) => {
         const url = new URL(request.url());
         if(url.origin === base && url.pathname === '/cases.json' && /^\?t=[0-9]{10,}$/.test(url.search)) appCaseRequests.push(url.pathname + url.search);
       });
+      // Existing caches may belong to a different application on this origin.
+      await page.goto(base + '/bootstrap');
+      await page.evaluate(async () => {
+        await (await caches.open('other-app')).put('/foreign-only.json', new Response('foreign data'));
+        await (await caches.open('okclean-v0')).put('/obsolete.json', new Response('old data'));
+      });
       await page.goto(base + '/index.html', {waitUntil:'load'});
       await page.evaluate(() => navigator.serviceWorker.ready);
+      assert.deepEqual(await page.evaluate(async () => {
+        const keys = await caches.keys();
+        return [keys.includes('other-app'), keys.includes('okclean-v0')];
+      }), [true, false], 'activation only removes obsolete okclean caches');
       await page.waitForFunction(() => !document.getElementById('caseList'));
       const beforeReloadCount = appCaseRequests.length;
       await page.reload({waitUntil:'load'});
@@ -118,6 +128,10 @@ const server = http.createServer((req, res) => {
       )), [false, false, false, false, false, false, false]);
       networkDown = true;
       await context.setOffline(true);
+      assert.equal(await page.evaluate(async () => {
+        try { await fetch('/foreign-only.json'); return false; }
+        catch(_) { return true; }
+      }), true, 'offline fallback must not read another application cache');
       const response = await page.goto(base + '/index.html?area=' + encodeURIComponent('춘천') + '#quote', {waitUntil:'domcontentloaded'});
       assert.equal(response.status(), 200);
       assert.equal(await page.locator('#qArea').inputValue(), '춘천');
