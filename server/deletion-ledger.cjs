@@ -5,8 +5,8 @@
 const {createHash}=require('node:crypto');
 const idPattern=/^[A-Za-z0-9_-]{1,80}$/;
 const actions=new Set(['redacted','history_purged']);
-function valid({id,action,expectedVersion}){
-  if(typeof id!=='string'||!idPattern.test(id)||!actions.has(action)||typeof expectedVersion!=='string'||!expectedVersion||expectedVersion.length>100)throw Error('INVALID_LEDGER_INPUT');
+function valid({id,action,expectedVersion,expectedHistoryVersion}){
+  if(typeof id!=='string'||!idPattern.test(id)||!actions.has(action)||typeof expectedVersion!=='string'||!/^\d+:\d{1,9}$/.test(expectedVersion)||typeof expectedHistoryVersion!=='string'||!/^[a-f0-9]{64}$/.test(expectedHistoryVersion))throw Error('INVALID_LEDGER_INPUT');
 }
 function key(source,id,action){return createHash('sha256').update(source).update('\0').update(action).update('\0').update(id).digest('hex');}
 function createDeletionLedger({ledgerDb,primaryProjectId,ledgerProjectId,clock=()=>new Date()}){
@@ -16,16 +16,16 @@ function createDeletionLedger({ledgerDb,primaryProjectId,ledgerProjectId,clock=(
     valid(input);const ref=collection.doc(key(primaryProjectId,input.id,input.action));
     return ledgerDb.runTransaction(async tx=>{
       const snap=await tx.get(ref);
-      if(snap.exists){const row=snap.data();if(row.sourceProject!==primaryProjectId||row.id!==input.id||row.action!==input.action||row.expectedVersion!==input.expectedVersion)throw Error('LEDGER_CONFLICT');if(!['pending','committed'].includes(row.state))throw Error('LEDGER_INVALID');return row.state;}
+      if(snap.exists){const row=snap.data();if(row.sourceProject!==primaryProjectId||row.id!==input.id||row.action!==input.action||row.expectedVersion!==input.expectedVersion||row.expectedHistoryVersion!==input.expectedHistoryVersion)throw Error('LEDGER_CONFLICT');if(!['pending','committed'].includes(row.state))throw Error('LEDGER_INVALID');return row.state;}
       const at=clock();if(!(at instanceof Date)||!Number.isFinite(at.getTime()))throw Error('INVALID_CLOCK');
-      tx.create(ref,{sourceProject:primaryProjectId,id:input.id,action:input.action,expectedVersion:input.expectedVersion,state:'pending',recordedAt:at});return 'pending';
+      tx.create(ref,{sourceProject:primaryProjectId,id:input.id,action:input.action,expectedVersion:input.expectedVersion,expectedHistoryVersion:input.expectedHistoryVersion,state:'pending',recordedAt:at});return 'pending';
     });
   }
   async function markCommitted(input){
     valid(input);const ref=collection.doc(key(primaryProjectId,input.id,input.action));
     return ledgerDb.runTransaction(async tx=>{
       const snap=await tx.get(ref);if(!snap.exists)throw Error('LEDGER_INTENT_REQUIRED');const row=snap.data();
-      if(row.sourceProject!==primaryProjectId||row.id!==input.id||row.action!==input.action||row.expectedVersion!==input.expectedVersion)throw Error('LEDGER_CONFLICT');
+      if(row.sourceProject!==primaryProjectId||row.id!==input.id||row.action!==input.action||row.expectedVersion!==input.expectedVersion||row.expectedHistoryVersion!==input.expectedHistoryVersion)throw Error('LEDGER_CONFLICT');
       if(row.state==='committed')return 'committed';if(row.state!=='pending')throw Error('LEDGER_INVALID');
       const at=clock();if(!(at instanceof Date)||!Number.isFinite(at.getTime()))throw Error('INVALID_CLOCK');tx.update(ref,{state:'committed',committedAt:at});return 'committed';
     });
@@ -35,6 +35,13 @@ function createDeletionLedger({ledgerDb,primaryProjectId,ledgerProjectId,clock=(
     let query=collection.orderBy('__name__');if(after!==undefined)query=query.startAfter(after);
     const snap=await query.limit(limit+1).get();const docs=snap.docs.slice(0,limit);
     return {records:docs.map(d=>d.data()),next:snap.docs.length>limit?docs[docs.length-1].id:null};
+  }
+  // A previous deletion may have succeeded while confirmation to this separate
+  // store failed. Never advance the scheduler while any intent is unresolved.
+  // Query or credential failures propagate to the caller, which must fail closed.
+  async function assertNoPending(){
+    const snap=await collection.where('state','==','pending').limit(1).get();
+    if(!snap.empty)throw Error('LEDGER_RECONCILIATION_REQUIRED');
   }
   // The caller must enforce an external exclusive restore fence and network
   // isolation throughout this operation, including after this function returns.
@@ -54,7 +61,7 @@ function createDeletionLedger({ledgerDb,primaryProjectId,ledgerProjectId,clock=(
           if(await isRestoreFenced()!==true)throw Error('RESTORE_FENCE_REQUIRED');
           valid(record);if(record.sourceProject!==primaryProjectId)throw Error('LEDGER_SOURCE_MISMATCH');if(record.state!=='committed')throw Error('LEDGER_RECONCILIATION_REQUIRED');
           if(action && record.action===action){
-            if(await reapply({id:record.id,action:record.action,expectedVersion:record.expectedVersion})!==true)throw Error('RESTORE_REAPPLY_FAILED');
+            if(await reapply({id:record.id,action:record.action,expectedVersion:record.expectedVersion,expectedHistoryVersion:record.expectedHistoryVersion})!==true)throw Error('RESTORE_REAPPLY_FAILED');
             processed++;
           }
         }
@@ -68,18 +75,18 @@ function createDeletionLedger({ledgerDb,primaryProjectId,ledgerProjectId,clock=(
     if(await verifyLedgerSnapshot()!==true)throw Error('LEDGER_SNAPSHOT_UNVERIFIED');
     return {processed};
   }
-  return {recordIntent,markCommitted,page,replay};
+  return {recordIntent,markCommitted,assertNoPending,page,replay,safety:Object.freeze({sourceProjectId:primaryProjectId,ledgerProjectId})};
 }
 module.exports={createDeletionLedger};
 
 // Integrate only with a worker whose process method rechecks expectedVersion
 // inside the same transaction that modifies the original. A failed or uncertain
 // operation deliberately leaves its ledger entry pending for reconciliation.
-async function processWithLedger({ledger,service,id,action,expectedVersion}){
-  if(!ledger?.recordIntent||!ledger?.markCommitted||!service?.process)throw Error('INCOMPLETE_DELETION_GUARD');
-  const input={id,action,expectedVersion};valid(input);
+async function processWithLedger({ledger,service,id,action,expectedVersion,expectedHistoryVersion,transactionFence}){
+  if(!ledger?.recordIntent||!ledger?.markCommitted||!service?.process||typeof transactionFence!=='function')throw Error('INCOMPLETE_DELETION_GUARD');
+  const input={id,action,expectedVersion,expectedHistoryVersion};valid(input);
   if(await ledger.recordIntent(input)==='committed')throw Error('LEDGER_ALREADY_COMMITTED');
-  const result=await service.process(id,{apply:true,expectedVersion});
+  const result=await service.process(id,{apply:true,expectedAction:action,expectedVersion,expectedHistoryVersion,transactionFence});
   if(result?.result===action || (action==='history_purged'&&result?.result==='already_purged'))await ledger.markCommitted(input);
   return result;
 }

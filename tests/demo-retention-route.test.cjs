@@ -16,7 +16,9 @@ test('demo route is mounted before application authentication and rejects missin
  try{
   const env={...process.env,OKCLEAN_DEMO_RETENTION_ENABLED:'true',OKCLEAN_DEMO_POLICY_REVIEWED:'true',OKCLEAN_DEMO_RESERVATION_DAYS:'30',OKCLEAN_DEMO_HISTORY_DAYS:'90',OKCLEAN_DEMO_POLICY_VERSION:'demo-1',OKCLEAN_DEMO_SCHEDULER_AUDIENCE:'https://scheduler.example.test',OKCLEAN_DEMO_SCHEDULER_ACCOUNT:'scheduler@demo-ok.iam.gserviceaccount.com'};
   let handler,path;const app={post(p,h){path=p;handler=h;}};const db={projectId:'demo-okclean-integration',runTransaction(){throw Error('unexpected read');},collection(){return {doc(){return {}}};}};
-  assert.equal(attachDemoRetentionRoute({app,db,env,verifyOidc:async()=>{throw Error('unexpected verify');}}),true);assert.equal(path,'/_internal/demo/retention/run');
+  assert.throws(()=>attachDemoRetentionRoute({app,db,createLedgerDb:()=>db,env,verifyOidc:async()=>({})}),/DEMO_LEDGER_REQUIRED/);
+  const ledgerDb={...db,projectId:'demo-okclean-ledger'};
+  assert.equal(attachDemoRetentionRoute({app,db,createLedgerDb:()=>ledgerDb,env,verifyOidc:async()=>{throw Error('unexpected verify');}}),true);assert.equal(path,'/_internal/demo/retention/run');
   const res={set(){return this},status(c){this.code=c;return this},json(v){this.body=v;return this}};await handler({method:'POST',headers:{}},res);assert.equal(res.code,401);
  }finally{for(const k of keys){if(old[k]===undefined)delete process.env[k];else process.env[k]=old[k];}}
 });

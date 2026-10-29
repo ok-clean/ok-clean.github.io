@@ -1,4 +1,5 @@
 'use strict';
+const {createHash}=require('node:crypto');
 // Emulator-only retention execution. Not a deployable worker and not exposed through HTTP.
 // No real project or customer data may be accessed by this module.
 const TERMINAL=new Set(['작업완료','종료','취소']);
@@ -24,11 +25,13 @@ function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new
     for(const doc of history.docs)if((await doc.ref.listCollections()).length)return false;
     return true;
   }
-  async function process(requestId,{apply=false,transactionFence=null,expectedVersion=null}={}){
+  async function process(requestId,{apply=false,transactionFence=null,expectedVersion=null,expectedHistoryVersion=null,expectedAction=null}={}){
     if(typeof requestId!=='string'||!/^[A-Za-z0-9_-]{1,80}$/.test(requestId))throw Error('INVALID_REQUEST_ID');
     if(typeof apply!=='boolean')throw Error('INVALID_MODE');
     if(transactionFence!==null && typeof transactionFence!=='function')throw Error('INVALID_FENCE');
     if(expectedVersion!==null && (typeof expectedVersion!=='string'||!/^\d+:\d{1,9}$/.test(expectedVersion)))throw Error('INVALID_VERSION');
+    if(expectedHistoryVersion!==null && (typeof expectedHistoryVersion!=='string'||!/^[0-9a-f]{64}$/.test(expectedHistoryVersion)))throw Error('INVALID_HISTORY_VERSION');
+    if(expectedAction!==null && !['redacted','history_purged'].includes(expectedAction))throw Error('INVALID_ACTION');
     if(apply && await authorize()!==true)throw Error('APPLY_NOT_AUTHORIZED');
     const at=clock();if(!(at instanceof Date)||!Number.isFinite(at.getTime()))throw Error('INVALID_CLOCK');
     const ref=db.collection('quote_requests').doc(requestId);
@@ -56,11 +59,17 @@ function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new
         const historyQuery=ref.collection('status_history').orderBy('at','desc').limit(201);
         const history=await tx.get(historyQuery);
         if(history.size>200)return {result:'blocked_dependencies'};
+        const versions=history.docs.map(doc=>[doc.id||doc.ref?.id,version(doc.updateTime)]);
+        if(versions.some(([id,v])=>typeof id!=='string'||!v))return {result:'retry_needed'};
+        versions.sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0);
+        const historyVersion=createHash('sha256').update(JSON.stringify(versions)).digest('hex');
+        if(expectedHistoryVersion!==null && expectedHistoryVersion!==historyVersion)return {result:'changed'};
+        if(expectedAction!==null && expectedAction!==(value.retentionRedacted?'history_purged':'redacted'))return {result:'changed'};
         if(!value.retentionRedacted){
           if(!TERMINAL.has(value.status)||!history.docs.length)return {result:'preserved'};
           const latest=history.docs[0].data(),terminalAt=toMs(latest.at);
           if(latest.to!==value.status||!Number.isFinite(terminalAt)||terminalAt>at.getTime()-policy.reservationDays*DAY)return {result:'preserved'};
-          if(!apply)return {result:'would_redact'};
+          if(!apply)return {result:'would_redact',version:version(snap.updateTime),historyVersion};
           // Full replacement removes name, phone, notes, UID, fingerprint and other request fields.
           // Keep a receipt tombstone to prevent reuse and preserve separately retained history.
           tx.set(ref,{retentionRedacted:true,status:'보유기간만료',terminalAt:new Date(terminalAt),redactedAt:at,legalHold:false});
@@ -69,7 +78,8 @@ function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new
         }
         const terminalAt=toMs(value.terminalAt);
         if(!Number.isFinite(terminalAt)||terminalAt>at.getTime()-policy.historyDays*DAY)return {result:'preserved'};
-        if(!apply)return {result:'would_purge_history'};
+        if(!history.size)return {result:'already_purged'};
+        if(!apply)return {result:'would_purge_history',version:version(snap.updateTime),historyVersion};
         for(const doc of history.docs)tx.delete(doc.ref);
         if(history.size)tx.create(db.collection('retention_audit').doc(),{action:'history_purged',at});
         // Keep the irreversible, non-owner tombstone to prevent replay of a deleted ID.

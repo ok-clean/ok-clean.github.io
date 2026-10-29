@@ -17,7 +17,7 @@ initializeApp({credential:applicationDefault(),projectId:process.env.OKCLEAN_PRO
 const db=getFirestore();const app=express();
 app.disable('x-powered-by');app.use(express.json({limit:'8kb',strict:true}));
 // Always disabled under production preflight; test harness can exercise it on demo emulators.
-attachDemoRetentionRoute({app,db});
+attachDemoRetentionRoute({app,db,createLedgerDb:()=>getFirestore(initializeApp({projectId:'demo-okclean-ledger'},'demo-retention-ledger'))});
 app.use(createHttpHandler({auth:getAuth(),appCheck:restrictedAppCheck(getAppCheck(),process.env.OKCLEAN_FIREBASE_WEB_APP_ID),db,rateLimit:createRateLimit(db),allowedOrigin:process.env.ALLOWED_ORIGIN,services,consentVersion:process.env.CONSENT_VERSION,protectedMemberAdminUid:process.env.OKCLEAN_MEMBER_ADMIN_UID,withdrawalPolicyReviewed:process.env.OKCLEAN_WITHDRAWAL_POLICY_REVIEWED==='true'}));
 app.use((err,req,res,next)=>{res.status(400).set('Cache-Control','no-store').json({status:'unavailable'});});
 app.listen(Number(process.env.PORT)||8080,'0.0.0.0');

@@ -6,6 +6,7 @@ const project='demo-okclean-integration';
 if(process.env.GCLOUD_PROJECT!==project||process.env.FIRESTORE_EMULATOR_HOST!=='127.0.0.1:8085'||process.env.FIREBASE_AUTH_EMULATOR_HOST!=='127.0.0.1:9099')throw Error('DEMO_EMULATOR_REQUIRED');
 async function main(){
  const firebase=admin.initializeApp({projectId:project},'demo-retention-http'),db=admin.firestore(firebase),ref=db.collection('quote_requests').doc('synthetic-http-retention');
+ const ledgerApp=admin.initializeApp({projectId:'demo-okclean-ledger'},'demo-retention-http-ledger'),ledgerDb=admin.firestore(ledgerApp);
  let server;
  try{
   await ref.create({status:'종료',legalHold:false,name:'가상고객'});
@@ -13,7 +14,7 @@ async function main(){
   const aud='https://scheduler.example.test',email='scheduler@demo-ok.iam.gserviceaccount.com';
   const env={...process.env,OKCLEAN_DEMO_RETENTION_ENABLED:'true',OKCLEAN_DEMO_POLICY_REVIEWED:'true',OKCLEAN_DEMO_RESERVATION_DAYS:'30',OKCLEAN_DEMO_HISTORY_DAYS:'90',OKCLEAN_DEMO_POLICY_VERSION:'demo-1',OKCLEAN_DEMO_SCHEDULER_AUDIENCE:aud,OKCLEAN_DEMO_SCHEDULER_ACCOUNT:email};
   let handler;const app={post(path,fn){assert.equal(path,'/_internal/demo/retention/run');handler=fn;}};
-  attachDemoRetentionRoute({app,db,env,verifyOidc:async token=>{if(token!=='synthetic')throw Error('invalid');return {aud,iss:'https://accounts.google.com',email_verified:true,email};}});
+  attachDemoRetentionRoute({app,db,createLedgerDb:()=>ledgerDb,env,verifyOidc:async token=>{if(token!=='synthetic')throw Error('invalid');return {aud,iss:'https://accounts.google.com',email_verified:true,email};}});
   server=http.createServer(async(req,res)=>{
    if(req.url!=='/_internal/demo/retention/run'){res.writeHead(404).end();return;}
    res.set=(key,value)=>{res.setHeader(key,value);return res;};res.status=code=>{res.statusCode=code;return res;};res.json=value=>{res.setHeader('content-type','application/json');res.end(JSON.stringify(value));return res;};
@@ -23,7 +24,8 @@ async function main(){
   assert.equal((await fetch(url,{method:'POST'})).status,401);assert.equal((await ref.get()).data().name,'가상고객');
   const ok=await fetch(url,{method:'POST',headers:{authorization:'Bearer synthetic'}});assert.equal(ok.status,200);assert.equal((await ref.get()).data().name,undefined);
   assert.equal((await db.collection('retention_scheduler_runs').get()).size,1);
+  const ledger=await ledgerDb.collection('deletion_ledger').get();assert.equal(ledger.size,1);assert.equal(ledger.docs[0].data().state,'committed');
   console.log('PASS demo scheduler via loopback HTTP and synthetic Firestore; OIDC verification is a test double');
- }finally{if(server)await new Promise(resolve=>server.close(resolve));await firebase.delete();}
+ }finally{if(server)await new Promise(resolve=>server.close(resolve));await Promise.all([firebase.delete(),ledgerApp.delete()]);}
 }
 main().catch(()=>{console.error('DEMO_HTTP_TEST_FAILED');process.exitCode=1;});

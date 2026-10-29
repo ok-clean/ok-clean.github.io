@@ -2,14 +2,17 @@
 // This scheduler orchestration is wired only to the demo-only retention service.
 // It does not itself make retention safe for production or enable a schedule.
 const {randomUUID}=require('node:crypto');
+const {processWithLedger}=require('./deletion-ledger.cjs');
 
-function createScheduledRetentionHandler({db,service,verifyOidc,config,clock=()=>new Date(),newId=randomUUID}){
-  if(!db?.collection||!db?.runTransaction||!service?.scan||!service?.process||typeof verifyOidc!=='function')throw Error('INVALID_SCHEDULER_DEPENDENCIES');
+function createScheduledRetentionHandler({db,service,ledger,verifyOidc,config,clock=()=>new Date(),newId=randomUUID}){
+  if(!db?.collection||!db?.runTransaction||!service?.scan||!service?.process||!ledger?.recordIntent||!ledger?.markCommitted||!ledger?.assertNoPending||typeof verifyOidc!=='function')throw Error('INVALID_SCHEDULER_DEPENDENCIES');
   const cfg=config||{};
   const ready=cfg.enabled===true && cfg.reviewed===true && /^demo-[a-z0-9-]+$/.test(cfg.projectId||'') &&
     process.env.FIRESTORE_EMULATOR_HOST==='127.0.0.1:8085' && process.env.GCLOUD_PROJECT===cfg.projectId && db.projectId===cfg.projectId &&
     service.schedulerSafety?.projectId===cfg.projectId && service.schedulerSafety?.firestoreHost===process.env.FIRESTORE_EMULATOR_HOST &&
     service.schedulerSafety?.reservationDays===cfg.reservationDays && service.schedulerSafety?.historyDays===cfg.historyDays &&
+    /^demo-[a-z0-9-]+$/.test(cfg.ledgerProjectId||'') && cfg.ledgerProjectId!==cfg.projectId &&
+    ledger.safety?.sourceProjectId===cfg.projectId && ledger.safety?.ledgerProjectId===cfg.ledgerProjectId &&
     typeof cfg.audience==='string' && /^https:\/\//.test(cfg.audience) &&
     typeof cfg.serviceAccount==='string' && /^[a-z0-9-]+@[a-z0-9-]+\.iam\.gserviceaccount\.com$/.test(cfg.serviceAccount) &&
     typeof cfg.policyVersion==='string' && /^[A-Za-z0-9._-]{1,80}$/.test(cfg.policyVersion) &&
@@ -46,11 +49,24 @@ function createScheduledRetentionHandler({db,service,verifyOidc,config,clock=()=
     const lease=await acquire(id);if(!lease)return {status:409,body:{status:'busy'}};
     const counts={};let next=lease.cursor;
     try{
+      // An unresolved prior intent may represent a committed source deletion
+      // whose journal completion failed. Never silently skip that record.
+      await ledger.assertNoPending();
       const page=await service.scan({limit,after:lease.cursor});
       for(const requestId of page.ids){
         if(!await renew(id))throw Error('FENCE_LOST');
+        await ledger.assertNoPending();
         const transactionFence=async tx=>{const snap=await tx.get(control),s=snap.exists?snap.data():{};return s.owner===id&&ms(s.expiresAt)>now().getTime();};
-        const {result}=await service.process(requestId,{apply:true,transactionFence});
+        const plan=await service.process(requestId);
+        const action=plan.result==='would_redact'?'redacted':plan.result==='would_purge_history'?'history_purged':null;
+        let result=plan.result;
+        if(action){
+          // Independent intent precedes source write; failure to commit its
+          // completion is treated as uncertain and leaves this cursor pending.
+          const applied=await processWithLedger({ledger,service,id:requestId,action,expectedVersion:plan.version,expectedHistoryVersion:plan.historyVersion,transactionFence});
+          result=applied?.result;
+          if(result!==action)throw Error('RECONCILIATION_REQUIRED');
+        }
         if(result==='retry_needed')throw Error('RETRY_NEEDED');
         // Results are fixed server-side labels, never request-supplied strings.
         if(!['absent','blocked_dependencies','blocked_legal_hold','preserved','changed','redacted','history_purged','already_purged'].includes(result))throw Error('INVALID_RESULT');
