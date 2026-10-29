@@ -19,7 +19,7 @@ async function main(){
  const fb=admin.initializeApp({projectId:project},'container-browser'),db=admin.firestore(fb);
  const browser=await chromium.launch({headless:true});
  const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css','.json':'application/json'};
- async function context(){
+ async function context({simulateMemberDenial=false}={}){
   const ctx=await browser.newContext({viewport:{width:390,height:844},serviceWorkers:'block'});
   await ctx.addInitScript(()=>{if(location.origin==='https://ok-clean.github.io')localStorage.setItem('joinLater',JSON.stringify(Date.now()));});
   await ctx.route('**/*',async route=>{
@@ -37,7 +37,10 @@ async function main(){
    if(u.hostname==='127.0.0.1'&&u.port==='8085')return route.continue();
    if(u.origin==='https://www.gstatic.com'&&u.pathname==='/firebasejs/10.14.1/firebase-app-check.js')return route.fulfill({status:200,contentType:'text/javascript',headers:{'Access-Control-Allow-Origin':'*'},body:'export class ReCaptchaV3Provider {constructor(key){}} export function initializeAppCheck(){return {}} export async function getToken(){return {token:"test-app-check"}}'});
    if(u.origin==='https://www.gstatic.com'&&u.pathname==='/firebasejs/10.14.1/firebase-auth.js')return route.fulfill({status:200,contentType:'text/javascript',headers:{'Access-Control-Allow-Origin':'*'},body:`export * from '${origin}/firebase-bundle.js'; import {getAuth as real,connectAuthEmulator} from '${origin}/firebase-bundle.js'; const seen=new WeakSet(); export function getAuth(...args){const a=real(...args);if(!seen.has(a)){connectAuthEmulator(a,'http://127.0.0.1:9099',{disableWarnings:true});seen.add(a)}return a}`});
-   if(u.origin==='https://www.gstatic.com'&&u.pathname==='/firebasejs/10.14.1/firebase-firestore.js')return route.fulfill({status:200,contentType:'text/javascript',headers:{'Access-Control-Allow-Origin':'*'},body:`export * from '${origin}/firebase-bundle.js'; import {getFirestore as real,connectFirestoreEmulator} from '${origin}/firebase-bundle.js'; const seen=new WeakSet(); export function getFirestore(...args){const d=real(...args);if(!seen.has(d)){connectFirestoreEmulator(d,'127.0.0.1',8085);seen.add(d)}return d}`});
+   if(u.origin==='https://www.gstatic.com'&&u.pathname==='/firebasejs/10.14.1/firebase-firestore.js'){
+    const memberDenial=simulateMemberDenial ? `export function onSnapshot(...args){const fail=args[args.length-1];setTimeout(()=>fail({code:'permission-denied'}),0);return ()=>{};}` : '';
+    return route.fulfill({status:200,contentType:'text/javascript',headers:{'Access-Control-Allow-Origin':'*'},body:`export * from '${origin}/firebase-bundle.js'; import {getFirestore as real,connectFirestoreEmulator} from '${origin}/firebase-bundle.js'; const seen=new WeakSet(); export function getFirestore(...args){const d=real(...args);if(!seen.has(d)){connectFirestoreEmulator(d,'127.0.0.1',8085);seen.add(d)}return d} ${memberDenial}`});
+   }
    if(u.origin==='https://www.gstatic.com'&&u.pathname==='/firebasejs/10.14.1/firebase-app.js')return route.fulfill({status:200,contentType:'text/javascript',headers:{'Access-Control-Allow-Origin':'*'},body:`export * from '${origin}/firebase-bundle.js'`});
    return route.abort();
   });return ctx;
@@ -74,8 +77,9 @@ async function main(){
   const card=mp.locator('#reservationList article').filter({hasText:'가상브라우저'});await card.waitFor({timeout:30000});await card.locator('select').selectOption('상담중');await card.getByRole('button',{name:'상태 저장'}).click();await mp.getByText('상태가 저장되었습니다.').waitFor();
   assert.equal((await db.collection('quote_requests').doc(id).get()).data().status,'상담중');await card.getByRole('button',{name:'처리 이력'}).click();await card.getByText('신규 → 상담중').waitFor({timeout:30000});
   // A reservation-only admin must retain its server-backed reservation view when
-  // Firestore denies access to the unrelated member ledger.
-  const reserveOnly=await context(),rp=await reserveOnly.newPage();await rp.goto(origin+'/admin/index.html',{waitUntil:'load'});
+  // Firestore member-list denial callback is explicitly simulated here; separate
+  // emulator REST assertions exercise the actual rules with real test tokens.
+  const reserveOnly=await context({simulateMemberDenial:true}),rp=await reserveOnly.newPage();await rp.goto(origin+'/admin/index.html',{waitUntil:'load'});
   await rp.waitForFunction(async()=>{const f=await import('/firebase-bundle.js');return f.getApps().some(a=>a.name==='[DEFAULT]');});
   await rp.evaluate(async()=>{const f=await import('/firebase-bundle.js');await f.signInWithEmailAndPassword(f.getAuth(),'container-reservation@example.test','synthetic-test-password');});
   const reserveCard=rp.locator('#reservationList article').filter({hasText:'가상브라우저'});await reserveCard.waitFor({timeout:30000});

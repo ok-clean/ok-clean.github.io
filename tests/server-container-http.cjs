@@ -14,6 +14,7 @@ async function main(){
    await auth.setCustomUserClaims('REPLACE_WITH_ADMIN_UID',{admin:true});
    await auth.setCustomUserClaims('container-reservation',{reservation_admin:true});
    await auth.setCustomUserClaims('container-member',{member_admin:true});
+   await db.collection('member_requests').doc('container-fixture').set({name:'가상회원',joined:new Date()});
   }
   const signIn=async email=>{const r=await fetch('http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=unused-test',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email,password,returnSecureToken:true})});const d=await r.json();assert.ok(d.idToken);return d.idToken;};
   const [customer,other,manager,reservation,member]=await Promise.all(Object.values(emails).map(signIn));
@@ -32,6 +33,12 @@ async function main(){
    assert.equal((await send('/reservation/status',customer,{requestId:req.requestId})).code,200);
    assert.equal((await send('/reservation/status',other,{requestId:req.requestId})).code,404);
    assert.equal((await send('/reservation/submit',customer,req)).code,200);
+   // Query the real Firestore emulator as the synthetic users; never Admin SDK.
+   const memberDoc='http://127.0.0.1:8085/v1/projects/'+project+'/databases/(default)/documents/member_requests/container-fixture';
+   const readMember=token=>fetch(memberDoc,{headers:{authorization:'Bearer '+token}}).then(r=>r.status);
+   assert.equal(await readMember(reservation),403,'reservation-only admin must not read member data');
+   assert.equal(await readMember(customer),403,'customer must not read member data');
+   assert.equal(await readMember(member),200,'member admin can read member data');
    assert.equal((await send('/admin/list',customer,{})).code,403);
    assert.equal((await send('/admin/list',member,{})).code,403);
    assert.equal((await send('/admin/list',reservation,{})).code,200);
