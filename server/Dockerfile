@@ -1,9 +1,9 @@
 # Only pricing policy, never the full website configuration, enters the runtime image.
-FROM node:20-bookworm-slim AS price-policy
+FROM node:22-bookworm-slim AS price-policy
 WORKDIR /extract
 COPY config.json ./config.json
 RUN node -e "const c=require('./config.json');if(!Array.isArray(c.services)||!c.services.length)process.exit(1);require('fs').writeFileSync('services.json',JSON.stringify(c.services))"
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
 WORKDIR /app
 COPY server/package.json server/package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force

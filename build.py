@@ -350,6 +350,8 @@ def index_page(c, cases=()):
       <div class="field"><label for="reservePhone">휴대폰 번호</label><input id="reservePhone" type="tel" required autocomplete="off"></div>
       <div class="field"><label for="reserveSize">규모</label><input id="reserveSize" type="number" min="1" max="999" step="1" required></div>
       <div class="field"><label for="reserveNotes">요청사항</label><textarea id="reserveNotes" maxlength="500" autocomplete="off"></textarea></div>
+      <p id="reserveConsentDetails" hidden></p>
+      <a id="reservePolicyLink" target="_blank" rel="noopener noreferrer" hidden>개인정보 처리방침 보기</a>
       <label><input id="reserveConsent" type="checkbox" required> <span id="reserveConsentText">예약 접수 시험에 동의합니다.</span></label>
       <button class="btn glove" id="reserveSubmit" type="submit">예약 접수</button>
       <button class="btn line" id="reserveNew" type="button" hidden>새 예약 작성</button>

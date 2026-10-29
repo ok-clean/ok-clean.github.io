@@ -396,18 +396,31 @@ if(reservationTest && !C.reservation?.verifiedEmulator && $("qReserve") && $("re
   };
 }
 
+// Required operating facts are never inferred from placeholder values.
+function reservationConsentPolicy(settings){
+  const policy=settings?.privacy;
+  const validText=value=>typeof value==='string' && value.trim().length>=2 && value.trim().length<=200 && !/미정|미확정|확인 필요|설정 필요|TODO|TBD/i.test(value);
+  if(policy?.reviewed!==true || !validText(policy.operator) || !validText(policy.officer) || !validText(policy.retention) ||
+     typeof settings.consentVersion!=='string' || !/^[A-Za-z0-9._-]{1,80}$/.test(settings.consentVersion)) return null;
+  let url;try{url=new URL(policy.policyUrl);}catch(_){return null;}
+  if(url.protocol!=='https:' || url.username || url.password) return null;
+  return {
+    text:'수집·이용 목적: 청소 견적·예약 접수 및 고객 상담. 수집 항목: 이름, 휴대폰 번호, 청소 종류·지역·규모·희망 날짜, 요청사항(선택), 예상 견적, 계정 이메일 및 고객 계정 식별정보. 보유·이용 기간: '+policy.retention.trim()+'. 운영자: '+policy.operator.trim()+'. 개인정보 처리 책임자: '+policy.officer.trim()+'. 동의를 거부할 권리가 있으며, 동의하지 않으면 온라인 예약 접수가 제한됩니다.',
+    policyUrl:url.href
+  };
+}
+const reservationConsent=reservationConsentPolicy(C.reservation);
 // Production stays disabled unless the endpoint, App Check and a reviewed consent policy are configured.
 const reservationProduction = !reservationTest && C.reservation?.enabled === true &&
   typeof C.reservation.apiUrl === 'string' && /^https:\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)*\.run\.app\/?$/i.test(C.reservation.apiUrl) &&
   typeof C.reservation.appCheckSiteKey === 'string' && !!C.reservation.appCheckSiteKey.trim() &&
-  typeof C.reservation.consentText === 'string' && !!C.reservation.consentText.trim() &&
-  typeof C.reservation.consentVersion === 'string' && !!C.reservation.consentVersion.trim() &&
+  !!reservationConsent &&
   !!C.firebase?.apiKey && !!C.firebase?.projectId && !!C.firebase?.appId;
 if(((reservationTest && C.reservation?.verifiedEmulator) || reservationProduction) && $("qReserve") && $("reservationForm")){
   const form=$("reservationForm"), status=$("reserveStatus"), key='okclean-reservation-attempt-v1';
   const getClient=()=>reservationProduction ? import('./reservation-api.js') : import('./verified-reservation-emulator.js');
   const receiptPrefix=reservationProduction?'예약 접수 완료 · 접수번호: ':'시험 접수 완료 · 접수번호: ';
-  if(reservationProduction){$("reserveIntro").textContent='예상 견적은 현장 확인 후 달라질 수 있습니다.';$("reserveConsentText").textContent=C.reservation.consentText;$("reserveLogin").textContent='로그인';$("reserveEmailLabel").textContent='이메일';$("reservePasswordLabel").textContent='비밀번호';}
+  if(reservationProduction){$("reserveIntro").textContent='예상 견적은 현장 확인 후 달라질 수 있습니다.';$("reserveConsentDetails").hidden=false;$("reserveConsentDetails").textContent=reservationConsent.text;$("reservePolicyLink").href=reservationConsent.policyUrl;$("reservePolicyLink").hidden=false;$("reserveConsentText").textContent='위 개인정보 수집·이용에 동의합니다.';$("reserveLogin").textContent='로그인';$("reserveEmailLabel").textContent='이메일';$("reservePasswordLabel").textContent='비밀번호';}
   let busy=false, pending=null;
   try{pending=sessionStorage.getItem(key);}catch(_){busy=true;}
   $("qReserve").hidden=false;$("reserveVerified").hidden=false;

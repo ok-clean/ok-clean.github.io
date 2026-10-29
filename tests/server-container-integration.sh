@@ -6,6 +6,11 @@ cleanup(){ docker rm -f "$name" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 # Both images are ephemeral and must never be pushed or deployed.
 docker build -f server/Dockerfile -t okclean-reservation:integration .
+# An unconfigured production entrypoint must refuse to start.
+if docker run --rm okclean-reservation:integration >/dev/null 2>&1; then
+  echo 'FAIL: unconfigured production server unexpectedly started' >&2
+  exit 1
+fi
 docker build -f tests/Dockerfile.reservation-test -t okclean-reservation:test .
 docker run --detach --network host --name "$name" \
   -e FIREBASE_AUTH_EMULATOR_HOST -e FIRESTORE_EMULATOR_HOST -e GCLOUD_PROJECT \

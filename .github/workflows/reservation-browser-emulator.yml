@@ -11,6 +11,8 @@ on:
       - 'config.json'
       - 'tests/*container*'
       - 'tests/pricing.test.cjs'
+      - 'tests/preflight.test.cjs'
+      - 'tests/reservation-consent.test.cjs'
       - 'tests/reservation-api.test.cjs'
       - 'tests/admin-reservation-config.test.cjs'
       - 'prototype/security/*handler.cjs'
@@ -34,7 +36,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: node --test tests/server-handler.test.cjs tests/verified-reservation-handler.test.cjs tests/pricing.test.cjs tests/reservation-api.test.cjs tests/admin-reservation-config.test.cjs
+      - run: node --test tests/server-handler.test.cjs tests/verified-reservation-handler.test.cjs tests/pricing.test.cjs tests/reservation-api.test.cjs tests/admin-reservation-config.test.cjs tests/preflight.test.cjs tests/reservation-consent.test.cjs
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

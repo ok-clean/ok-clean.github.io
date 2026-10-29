@@ -14,7 +14,7 @@ async function main(){
  const configPath=path.join(root,'config.json'),cfg=JSON.parse(fs.readFileSync(configPath,'utf8'));
  cfg.services=JSON.parse(fs.readFileSync('config.json','utf8')).services;
  cfg.firebase={apiKey:'fake-test-identifier',authDomain:'localhost',projectId:project,appId:'1:123:web:fake'};
- cfg.reservation={enabled:true,apiUrl:api,appCheckSiteKey:'synthetic-test-site-key',consentText:'가상 시험 동의',consentVersion:'test-v1'};
+ cfg.reservation={enabled:true,apiUrl:api,appCheckSiteKey:'synthetic-test-site-key',consentText:'가상 시험 동의',consentVersion:'test-v1',privacy:{operator:'가상 사업자',officer:'가상 책임자',retention:'시험 후 삭제',policyUrl:'https://ok-clean.github.io/privacy-test',reviewed:true}};
  fs.writeFileSync(configPath,JSON.stringify(cfg));execFileSync('python3',['-c','import build; build.run()'],{cwd:root,stdio:'ignore'});
  const fb=admin.initializeApp({projectId:project},'container-browser'),db=admin.firestore(fb);
  const browser=await chromium.launch({headless:true});
