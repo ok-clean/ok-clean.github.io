@@ -3,10 +3,15 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function admin() { return request.auth != null && request.auth.token.get('admin', false) == true; }
+    function verifiedCustomer() {
+      return request.auth != null
+        && request.auth.token.get('email_verified', false) == true
+        && request.auth.token.firebase.sign_in_provider in ['password', 'google.com'];
+    }
     function safeId(id) { return id is string && id.matches('^[A-Za-z0-9_-]{1,80}$'); }
     function newRequest() {
       let d = request.resource.data;
-      return request.auth != null && request.auth.token.firebase.sign_in_provider == 'anonymous'
+      return request.auth != null && (request.auth.token.firebase.sign_in_provider == 'anonymous' || verifiedCustomer())
         && d.keys().hasAll(['service','area','size','date','name','phone','consentVersion','consentAt','createdAt','ownerUid','status'])
         && d.keys().hasOnly(['service','area','size','date','name','phone','consentVersion','consentAt','createdAt','ownerUid','status','notes','estimateMin','estimateMax'])
         && (d['service'] in ['입주·이사 청소','거주·정기 청소','사무실·상가 청소','에어컨 청소','후드·주방 청소','그 외 청소'])
@@ -61,7 +66,10 @@ service cloud.firestore {
     }
     match /quote_requests/{id} {
       allow create: if newRequest();
-      allow get, list: if admin();
+      // Verified account owners may retrieve an identified request; anonymous
+      // users cannot use a receipt number as proof of identity.
+      allow get: if admin() || (verifiedCustomer() && resource.data.ownerUid == request.auth.uid);
+      allow list: if admin();
       allow update: if admin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
         && (request.resource.data.status in ['신규','검토중','상담중','예약확정','작업완료','종료','취소'])
         // A closed request cannot become open again: that would revive old partner grants.
