@@ -82,6 +82,33 @@ async function main(){
     assert.equal(saved.data().notes,'가상 요청사항');assert.ok(Number.isInteger(saved.data().estimateMin));
     assert.equal(saved.data().name,'가상고객');
     assert.equal(await page.locator('#reserveSubmit').isDisabled(),true,'double click remains blocked');
+    const replayData={id,date,estimateMin:saved.data().estimateMin,estimateMax:saved.data().estimateMax ?? null};
+    const sameRequest=await page.evaluate(async data=>{
+      const f=await import('/firebase-bundle.js'), app=f.getApp('reservation-emulator'), auth=f.getAuth(app), db=f.getFirestore(app);
+      const payload={service:'입주·이사 청소',area:'춘천',size:25,date:new Date(data.date+'T14:59:59.999Z'),
+        name:'가상고객',phone:'01000000000',notes:'가상 요청사항',consentVersion:'test-v1',
+        consentAt:f.serverTimestamp(),createdAt:f.serverTimestamp(),ownerUid:auth.currentUser.uid,status:'신규',estimateMin:data.estimateMin};
+      if(data.estimateMax!==null)payload.estimateMax=data.estimateMax;
+      try{await f.setDoc(f.doc(db,'quote_requests',data.id),payload);return false;}catch(e){return e.code==='permission-denied';}
+    },replayData);
+    assert.equal(sameRequest,true,'repeat write with the same receipt ID must be rejected');
+    const other=await context(), otherPage=await other.newPage();
+    await otherPage.goto(base+'/',{waitUntil:'load'});
+    const otherReplay=await otherPage.evaluate(async data=>{
+      const f=await import('/firebase-bundle.js');
+      const app=f.initializeApp({apiKey:'fake-test-identifier',projectId:'demo-okclean-integration'},'other-customer');
+      const auth=f.getAuth(app);f.connectAuthEmulator(auth,'http://127.0.0.1:9099',{disableWarnings:true});
+      await f.signInAnonymously(auth);
+      const db=f.getFirestore(app);f.connectFirestoreEmulator(db,'127.0.0.1',8085);
+      const payload={service:'입주·이사 청소',area:'춘천',size:25,date:new Date(data.date+'T14:59:59.999Z'),
+        name:'가상고객',phone:'01000000000',notes:'가상 요청사항',consentVersion:'test-v1',
+        consentAt:f.serverTimestamp(),createdAt:f.serverTimestamp(),ownerUid:auth.currentUser.uid,status:'신규',estimateMin:data.estimateMin};
+      if(data.estimateMax!==null)payload.estimateMax=data.estimateMax;
+      try{await f.setDoc(f.doc(db,'quote_requests',data.id),payload);return false;}catch(e){return e.code==='permission-denied';}
+    },replayData);
+    assert.equal(otherReplay,true,'new session cannot overwrite an existing request ID');
+    assert.equal((await db.collection('quote_requests').get()).size,1,'replays do not create a second request');
+    await other.close();
     const denied=await page.evaluate(async()=>{
       const f=await import('/firebase-bundle.js'), app=f.getApp('reservation-emulator');
       try{await f.getDocs(f.collection(f.getFirestore(app),'quote_requests'));return false;}catch(e){return e.code==='permission-denied';}
