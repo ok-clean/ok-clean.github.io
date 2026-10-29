@@ -228,6 +228,7 @@ async function main(){
 
     // Verified flow: real Auth/Firestore emulators and actual website form.
     cfg.reservation.verifiedEmulator=true;fs.writeFileSync(configPath,JSON.stringify(cfg));
+    execFileSync('python3',['-c','import build; build.run()'],{cwd:root,stdio:'ignore'});
     const verified=await context(), vp=await verified.newPage();
     await vp.goto(base+'/',{waitUntil:'load'});await vp.locator('#qArea').selectOption('춘천');await vp.locator('#qDate').fill(date);await vp.locator('#qReserve').click();
     await vp.locator('#reserveEmail').fill(verifiedCustomer);await vp.locator('#reservePassword').fill(customerPassword);await vp.locator('#reserveLogin').click();
