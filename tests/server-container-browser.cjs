@@ -79,7 +79,7 @@ async function main(){
   await page.getByText('회원정보 접수 요청이 완료됐어요. 카톡으로 가입을 확인해 주세요.').waitFor({timeout:30000});
   assert.ok(firestoreProxyRequests>0,'browser must send real SDK traffic to Firestore emulator');
   assert.ok((await db.collection('member_requests').get()).size>0,'membership must exist in Firestore emulator');
-  await page.locator('#join [data-close]').click();
+  await page.locator('#join button.x[data-close]').click();
   await page.locator('#qArea').selectOption('춘천');await page.locator('#qDate').fill(new Date(Date.now()+7*86400000).toISOString().slice(0,10));await page.locator('#qReserve').click();
   await page.locator('#reserveEmail').fill('container-user@example.test');await page.locator('#reservePassword').fill('synthetic-test-password');await page.locator('#reserveLogin').click();try{await page.getByText('로그인했습니다.').waitFor({timeout:10000});}catch{throw Error('login failed: '+await page.locator('#reserveStatus').innerText()+' / '+await page.evaluate(()=>globalThis.__testAuthError||'no-auth-error'));}
   await page.locator('#reserveMemberLinkSubmit').click();await page.getByText('회원 계정 연결에 동의해 주세요.').waitFor({timeout:10000});
