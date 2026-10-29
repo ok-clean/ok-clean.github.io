@@ -9,6 +9,10 @@ async function main(){
  try{
   await ref.create({status:'종료',legalHold:false,name:'가상고객',phone:'01000000000',ownerUid:'synthetic',notes:'synthetic'});
   await ref.collection('status_history').doc('event').create({from:'상담중',to:'종료',at:new Date('2030-01-01T00:00:00Z'),actorUid:'synthetic-admin'});
+  // Synthetic in-memory copies only: not a production backup or independent deletion ledger.
+  const beforeDelete=(await ref.get()).data();
+  const beforeDeleteHistory=(await ref.collection('status_history').doc('event').get()).data();
+  const recoveryIds=[ref.id];
   const opts={db,projectId:project,firestoreHost:host,policy:{reservationDays:30,historyDays:90},clock:()=>new Date('2030-03-01T00:00:00Z'),authorize:async()=>true};
   const service=createRetentionService(opts);
   assert.equal((await service.process(ref.id)).result,'would_redact');assert.equal((await ref.get()).data().name,'가상고객');
@@ -18,8 +22,18 @@ async function main(){
   assert.equal((await ref.collection('status_history').get()).size,1);
   const later=createRetentionService({...opts,clock:()=>new Date('2030-05-01T00:00:00Z')});
   assert.equal((await later.process(ref.id,{apply:true})).result,'history_purged');assert.equal((await ref.collection('status_history').get()).size,0);assert.equal((await later.process(ref.id,{apply:true})).result,'already_purged');
-  const audit=await db.collection('retention_audit').get();assert.equal(audit.size,2);for(const d of audit.docs)assert.deepEqual(Object.keys(d.data()).sort(),['action','at']);
-  console.log('PASS: retention with synthetic Firestore emulator records');
+  // Restore an old synthetic parent and child within this isolated emulator, then
+  // reapply the existing retention operation using only in-memory test IDs.
+  // This does not test an independently retained ledger or enforce network isolation.
+  await ref.set(beforeDelete);await ref.collection('status_history').doc('event').set(beforeDeleteHistory);
+  assert.equal((await ref.get()).data().name,'가상고객');
+  const reapplied=await later.processBatch(recoveryIds,{apply:true});assert.equal(reapplied.redacted,1);
+  assert.equal((await ref.get()).data().name,undefined);assert.equal((await ref.get()).data().ownerUid,undefined);
+  const repurged=await later.processBatch(recoveryIds,{apply:true});assert.equal(repurged.history_purged,1);
+  assert.equal((await ref.collection('status_history').get()).size,0);
+  assert.equal((await later.processBatch(recoveryIds,{apply:true})).already_purged,1);
+  const audit=await db.collection('retention_audit').get();assert.equal(audit.size,4);for(const d of audit.docs)assert.deepEqual(Object.keys(d.data()).sort(),['action','at']);
+  console.log('PASS: retention and manual synthetic snapshot restore/reapply; independent ledger and isolation untested');
  }finally{await app.delete();}
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});
