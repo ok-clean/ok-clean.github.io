@@ -48,13 +48,40 @@ async function main(){
    assert.equal((await db.collection('quote_requests').get()).size,1);
    assert.equal((await send('/reservation/withdraw',manager,{})).code,403,'administrators are protected');
    assert.equal((await send('/reservation/submit',withdraw,{requestId:'withdraw-booking',form})).code,200);
+   // Separate Auth token issuance from revocation by at least one second.
+   await new Promise(resolve=>setTimeout(resolve,1100));
    assert.equal((await send('/reservation/withdraw',withdraw,{})).body.status,'pending');
-   assert.equal((await send('/reservation/withdraw',withdraw,{})).body.status,'pending');
-   assert.equal((await send('/reservation/list',withdraw,{})).code,403);
-   assert.equal((await send('/reservation/status',withdraw,{requestId:'withdraw-booking'})).code,404);
-   assert.equal((await send('/reservation/submit',withdraw,{requestId:'withdraw-after',form})).code,409);
+   assert.equal((await db.collection('account_lifecycle').doc('container-withdraw').get()).data().sessionRevocation,'revoked');
+   await assert.rejects(()=>auth.verifyIdToken(withdraw,true));
+   assert.notEqual((await send('/reservation/list',withdraw,{})).code,200,'the revoked session must not access reservations');
+   const freshWithdraw=await signIn(emails.withdraw);
+   assert.equal((await send('/reservation/list',freshWithdraw,{})).code,403);
+   assert.equal((await send('/reservation/status',freshWithdraw,{requestId:'withdraw-booking'})).code,404);
+   assert.equal((await send('/reservation/submit',freshWithdraw,{requestId:'withdraw-after',form})).code,409);
+   assert.equal((await send('/reservation/withdraw',freshWithdraw,{})).body.status,'pending');
    assert.ok((await db.collection('quote_requests').doc('withdraw-booking').get()).exists,'no reservation deleted');
    assert.ok(await auth.getUser('container-withdraw'),'no Auth account deleted');
+   // Run the freeze against an actual Firestore transaction concurrently with
+   // the real container's admin status writer. Only one order may win.
+   const probe=db.collection('quote_requests').doc('freeze-probe');
+   const freeze=db.collection('account_lifecycle').doc('synthetic-freeze-owner');
+   await probe.create({ownerUid:'synthetic-freeze-owner',status:'신규'});
+   const [_,during]=await Promise.all([
+    db.runTransaction(async tx=>{await tx.get(freeze);tx.set(freeze,{status:'withdrawal_requested',dataMutationFrozen:true});}),
+    send('/admin/status',manager,{requestId:'freeze-probe',status:'상담중'})
+   ]);
+   assert.ok([200,409].includes(during.code));
+   const historyCount=(await probe.collection('status_history').get()).size;
+   assert.equal((await send('/admin/status',manager,{requestId:'freeze-probe',status:'예약확정'})).code,409);
+   assert.equal((await probe.collection('status_history').get()).size,historyCount,'no related history after account freeze');
+   // A still-valid privileged ID token must not bypass an actor's lifecycle gate.
+   const adminLife=db.collection('account_lifecycle').doc('REPLACE_WITH_ADMIN_UID');
+   await adminLife.create({status:'withdrawal_requested'});
+   assert.equal((await send('/admin/list',manager,{})).code,403);
+   assert.equal((await send('/admin/history',manager,{requestId:req.requestId})).code,403);
+   assert.equal((await send('/admin/status',manager,{requestId:req.requestId,status:'예약확정'})).code,403);
+   await adminLife.delete();
+   assert.equal((await send('/admin/list',manager,{})).code,200);
   }
   console.log(`PASS container HTTP ${phase}: Auth/Firestore emulators; App Check stubbed`);
  }finally{await app.delete();}

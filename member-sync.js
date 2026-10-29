@@ -25,4 +25,19 @@ export async function submitMember(config, m){
     joined:serverTimestamp(),status:'신규',couponStatus:'미사용',freeStatus:'미제공',
     memo:'',points:0,grade:'새싹',ownerUid:auth.currentUser.uid
   });
+  // Only a newly written document may be considered for account linking.
+  // The caller keeps this identifier in memory, not in public browser storage.
+  return {memberId:id};
 }
+
+export async function getMemberLinkToken(config){
+  const app=getApps().find(a=>a.name==='[DEFAULT]');
+  if(!app || !config?.projectId || app.options.projectId!==config.projectId)throw Error('회원 인증을 확인해 주세요.');
+  const auth=getAuth(app);await auth.authStateReady();
+  const user=auth.currentUser;
+  if(!user?.isAnonymous)throw Error('회원 인증을 확인해 주세요.');
+  const token=await user.getIdToken(true);
+  if(auth.currentUser!==user||!user.isAnonymous)throw Error('회원 인증이 변경되었습니다.');
+  return token;
+}
+

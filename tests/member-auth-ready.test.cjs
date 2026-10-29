@@ -17,7 +17,7 @@ function makeClient({signInError,writeError}={}) {
   const imports=source.match(/^import [^\n]+;$/gm)||[];
   assert.equal(imports.length,3,'review changed client dependencies');
   const program=source.replace(/^import [^\n]+;\n/gm,'')
-    .replace('export async function submitMember','async function submitMember');
+    .replace(/export async function /g,'async function ');
   assert.notEqual(program,source,'client body must be loaded');
   const context={
     initializeApp:()=>app,getApps:()=>[],getApp:()=>app,getAuth:()=>auth,getFirestore:()=>({}),
@@ -93,4 +93,21 @@ test('anonymous sign-in failure causes no write',async()=>{
   await assert.rejects(pending,err=>err===failure);
   assert.equal(rig.calls.signIns,1);assert.equal(rig.calls.writes.length,0);
   assert.equal(rig.calls.timers.size,0);
+});
+
+
+test('member linking token requires same project and an existing anonymous identity',async()=>{
+ const source=readFileSync('member-sync.js','utf8').replace(/^import [^\n]+;\n/gm,'').replace(/export async function /g,'async function ');
+ const app={name:'[DEFAULT]',options:{projectId:'demo-fake'}},auth={currentUser:{uid:'anonymous',isAnonymous:true,getIdToken:async()=> 'synthetic-token'},authStateReady:async()=>{}};
+ const ctx={getApps:()=>[app],getAuth:()=>auth};vm.runInNewContext(source+'\nthis.proof=getMemberLinkToken;',ctx);
+ assert.equal(await ctx.proof({projectId:'demo-fake'}),'synthetic-token');
+ await assert.rejects(()=>ctx.proof({projectId:'other-project'}));
+ auth.currentUser.isAnonymous=false;await assert.rejects(()=>ctx.proof({projectId:'demo-fake'}));
+});
+test('member linking token rejects identity change during refresh',async()=>{
+ const source=readFileSync('member-sync.js','utf8').replace(/^import [^\n]+;\n/gm,'').replace(/export async function /g,'async function ');
+ const app={name:'[DEFAULT]',options:{projectId:'demo-fake'}},auth={currentUser:null,authStateReady:async()=>{}};
+ auth.currentUser={uid:'one',isAnonymous:true,getIdToken:async()=>{auth.currentUser={uid:'two',isAnonymous:true};return 'synthetic-token';}};
+ const ctx={getApps:()=>[app],getAuth:()=>auth};vm.runInNewContext(source+'\nthis.proof=getMemberLinkToken;',ctx);
+ await assert.rejects(()=>ctx.proof({projectId:'demo-fake'}));
 });

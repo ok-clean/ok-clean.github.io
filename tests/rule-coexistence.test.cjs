@@ -11,7 +11,7 @@ const {readFileSync} = require('node:fs');
 const {createHash} = require('node:crypto');
 const vm = require('node:vm');
 const {initializeTestEnvironment} = require('@firebase/rules-unit-testing');
-const {doc, collection, getDoc, getDocs, setDoc, updateDoc, writeBatch, serverTimestamp, Timestamp} = require('firebase/firestore');
+const {doc, collection, getDoc, getDocs, setDoc, updateDoc, deleteDoc, writeBatch, serverTimestamp, Timestamp} = require('firebase/firestore');
 
 const host = process.env.FIRESTORE_EMULATOR_HOST;
 if (host !== '127.0.0.1:8080' && host !== 'localhost:8080') {
@@ -19,9 +19,9 @@ if (host !== '127.0.0.1:8080' && host !== 'localhost:8080') {
 }
 const PINNED = {
   // #49: 877d02c1500019ae177508763e1f18cf0a8266e6 (member rules)
-  memberRules: '8f057918a534f6522e787e6c0e8559f520af86af66f2dd6075c5900c44301b35',
+  memberRules: 'cffe990459628663b0e021803ec5bd5acaa30a19a73eb0249e32b9515c6e174a',
   // Updated alongside the auth initialization fix; the VM runs this exact client.
-  memberClient: '0bd219f10ddd43e5a0a0a0152d805383e0c22023c86f22d26590770c7d2c51a3',
+  memberClient: 'cb8c651e6b17b4fab91911eeca463907a925085271c107b5274864e58587c764',
   // Updated test-only matching policy including optional notes and indicative estimates.
   matchingRules: '6ad02c5ab44f4031b5b97589ea51064d2c0e5a6b923e4d36ebbe126d5bcd4a9b',
 };
@@ -80,6 +80,11 @@ async function seed(env) {
     const db=ctx.firestore();
     await Promise.all([
       setDoc(doc(db,'member_requests','sample'),fakeMember),
+      setDoc(doc(db,'member_requests','legacy'),{name:'가상 이전 회원',memo:''}),
+      setDoc(doc(db,'member_requests','linked'),fakeMember),
+      setDoc(doc(db,'member_requests','unlinked'),fakeMember),
+      setDoc(doc(db,'member_account_links','linked'),{reservationUid:'fake-verified-customer'}),
+      setDoc(doc(db,'member_account_links','linked-missing'),{reservationUid:'fake-verified-customer'}),
       setDoc(doc(db,'quote_requests','sample'),fakeQuote),
       setDoc(doc(db,'quote_requests','verified-owned'),{...fakeQuote,ownerUid:'fake-verified-customer'}),
       setDoc(doc(db,'quote_requests','new-offer'),fakeQuote),
@@ -142,6 +147,13 @@ add('member update reservation claim denied','member','reservationClaim',false,d
 add('member update super claim','member','superClaim',true,db=>updateDoc(doc(db,'member_requests','sample'),{memo:'가상 변경'}));
 add('member privileged update uid admin','member','memberAdmin',true,db=>updateDoc(doc(db,'member_requests','sample'),{memo:'가상 변경'}));
 add('member privileged update claim admin','member','claim',false,db=>updateDoc(doc(db,'member_requests','sample'),{memo:'가상 금지'}));
+add('member admin may update legacy without owner','member','memberAdmin',true,db=>updateDoc(doc(db,'member_requests','legacy'),{memo:'가상 변경'}));
+add('member admin may not assign legacy owner','member','memberAdmin',false,db=>updateDoc(doc(db,'member_requests','legacy'),{ownerUid:'fake-customer-a'}));
+add('member admin may not reassign owner','member','memberAdmin',false,db=>updateDoc(doc(db,'member_requests','sample'),{ownerUid:'fake-customer-b'}));
+add('member admin may delete unlinked member','member','memberAdmin',true,db=>deleteDoc(doc(db,'member_requests','unlinked')));
+add('member admin cannot delete linked member','member','memberAdmin',false,db=>deleteDoc(doc(db,'member_requests','linked')));
+add('linked id cannot be recreated by anonymous customer','member','anon',false,db=>setDoc(doc(db,'member_requests','linked-missing'),memberPayload('fake-customer-a')));
+add('member link index is not readable to member admin','member','memberAdmin',false,db=>getDoc(doc(db,'member_account_links','linked')));
 add('quote create anonymous','matching','anon',true,db=>setDoc(doc(db,'quote_requests','new-anon'),quotePayload('fake-customer-a')));
 add('verified customer creates own request','matching','verifiedCustomer',true,db=>setDoc(doc(db,'quote_requests','verified-new'),quotePayload('fake-verified-customer')));
 add('verified customer reads own request','matching','verifiedCustomer',true,db=>getDoc(doc(db,'quote_requests','verified-owned')));
@@ -209,7 +221,7 @@ function memberEntry(db, existing, uid, recordId) {
   assert.equal(imports.length,3,'Unexpected member client imports');
   let program = memberClient.replace(/^import [^\n]+;\n/gm,'');
   assert.ok(program.includes('export async function submitMember'));
-  program = program.replace('export async function submitMember','async function submitMember');
+  program = program.replace(/export async function /g,'async function ');
   const context={
     initializeApp:()=>({}),getApps:()=>[],getApp:()=>({}),getAuth:()=>auth,getFirestore:()=>db,
     signInAnonymously:async()=>{signIns++;auth.currentUser={uid};},
@@ -276,3 +288,4 @@ test('the same matrix detects an intentionally broad overlapping allow', {timeou
     assert.ok(mismatches.some(x=>x.startsWith('unverified partner cannot create offer:')),'broad wildcard must break partner verification');
   } finally { await env.cleanup(); }
 });
+

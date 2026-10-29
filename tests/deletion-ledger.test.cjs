@@ -2,10 +2,10 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const {createDeletionLedger}=require('../server/deletion-ledger.cjs');
 function dbMock(projectId='demo-ledger'){
- const rows=new Map();let failQuery=false;
- const makeRef=id=>({id});
+ const rows=new Map(),headRows=new Map();let failQuery=false;
+ const makeRef=id=>({id,map:rows});
  const collection={doc:makeRef,where(field,operator,value){assert.equal(field,'state');assert.equal(operator,'==');assert.equal(value,'pending');return {limit(n){assert.equal(n,1);return this;},async get(){if(failQuery)throw Error('QUERY_FAILED');return {empty:![...rows.values()].some(row=>row.state==='pending')};}};},orderBy(){let after='';let max=100;return {startAfter(a){after=a;return this;},limit(n){max=n;return this;},async get(){let ids=[...rows.keys()].sort().filter(id=>id>after).slice(0,max);return {docs:ids.map(id=>({id,data:()=>structuredClone(rows.get(id))}))};}};}};
- return {projectId,rows,setFailQuery(value){failQuery=value;},collection(){return collection;},async runTransaction(fn){const writes=[];const tx={async get(ref){const val=rows.get(ref.id);return {exists:val!==undefined,data:()=>structuredClone(val)};},create(ref,v){writes.push(()=>{if(rows.has(ref.id))throw Error('conflict');rows.set(ref.id,structuredClone(v));});},update(ref,v){writes.push(()=>rows.set(ref.id,{...rows.get(ref.id),...structuredClone(v)}));}};const result=await fn(tx);writes.forEach(w=>w());return result;}};
+ return {projectId,rows,headRows,setFailQuery(value){failQuery=value;},collection(name){return name==='deletion_ledger_meta'?{doc:id=>({id,map:headRows})}:collection;},async runTransaction(fn){const writes=[];const tx={async get(ref){const val=ref.map.get(ref.id);return {exists:val!==undefined,data:()=>structuredClone(val)};},create(ref,v){writes.push(()=>{if(ref.map.has(ref.id))throw Error('conflict');ref.map.set(ref.id,structuredClone(v));});},update(ref,v){writes.push(()=>ref.map.set(ref.id,{...ref.map.get(ref.id),...structuredClone(v)}));},set(ref,v){writes.push(()=>ref.map.set(ref.id,structuredClone(v)));}};const result=await fn(tx);writes.forEach(w=>w());return result;}};
 }
 function setup(){const db=dbMock();return {db,ledger:createDeletionLedger({ledgerDb:db,primaryProjectId:'demo-primary',ledgerProjectId:'demo-ledger',clock:()=>new Date('2030-01-01T00:00:00Z')})};}
 const one={id:'request-1',action:'redacted',expectedVersion:'123:1',expectedHistoryVersion:'a'.repeat(64)};const transactionFence=async()=>true;
@@ -31,3 +31,5 @@ test('replays parent redaction before history purge regardless of key order',asy
 });
 
 test('pending intent or ledger query failure blocks scheduling',async()=>{const {ledger,db}=setup();await ledger.assertNoPending();await ledger.recordIntent(one);await assert.rejects(ledger.assertNoPending(),/RECONCILIATION/);await ledger.markCommitted(one);await ledger.assertNoPending();db.setFailQuery(true);await assert.rejects(ledger.assertNoPending(),/QUERY_FAILED/);});
+
+test('new intent and completion increment ledger revision atomically; retries do not',async()=>{const {ledger,db}=setup();await ledger.recordIntent(one);assert.equal(db.headRows.get('demo-primary').revision,1);await ledger.recordIntent(one);assert.equal(db.headRows.get('demo-primary').revision,1);await ledger.markCommitted(one);assert.equal(db.headRows.get('demo-primary').revision,2);await ledger.markCommitted(one);assert.equal(db.headRows.get('demo-primary').revision,2);});

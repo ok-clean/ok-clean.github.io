@@ -8,6 +8,7 @@ on:
       - 'admin/**'
       - 'server/**'
       - 'reservation-api.js'
+      - 'member-sync.js'
       - 'config.json'
       - 'tests/*container*'
       - 'tests/pricing.test.cjs'
@@ -16,6 +17,10 @@ on:
       - 'tests/account-withdrawal*.cjs'
       - 'tests/demo-retention-route*.cjs'
       - 'tests/deletion-ledger*.cjs'
+      - 'tests/member-account-link*.cjs'
+      - 'tests/member-link-client.test.cjs'
+      - 'tests/restore-gate*.cjs'
+      - 'tests/server-index-gate.test.cjs'
       - 'tests/app-check*.cjs'
       - 'tests/admin-app-check-debug.test.cjs'
       - 'tests/preflight.test.cjs'
@@ -43,7 +48,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: node --test tests/server-handler.test.cjs tests/verified-reservation-handler.test.cjs tests/pricing.test.cjs tests/reservation-api.test.cjs tests/admin-reservation-config.test.cjs tests/preflight.test.cjs tests/reservation-consent.test.cjs tests/retention.test.cjs tests/customer-reservations.test.cjs tests/account-withdrawal.test.cjs tests/account-withdrawal-processor.test.cjs tests/retention-scheduler.test.cjs tests/demo-retention-route.test.cjs tests/deletion-ledger.test.cjs tests/app-check-policy.test.cjs tests/app-check-handler.test.cjs tests/admin-app-check-debug.test.cjs
+      - run: node --test tests/server-handler.test.cjs tests/verified-reservation-handler.test.cjs tests/pricing.test.cjs tests/reservation-api.test.cjs tests/admin-reservation-config.test.cjs tests/preflight.test.cjs tests/reservation-consent.test.cjs tests/retention.test.cjs tests/customer-reservations.test.cjs tests/account-withdrawal.test.cjs tests/account-withdrawal-processor.test.cjs tests/retention-scheduler.test.cjs tests/demo-retention-route.test.cjs tests/deletion-ledger.test.cjs tests/restore-gate.test.cjs tests/member-account-link.test.cjs tests/member-link-client.test.cjs tests/server-index-gate.test.cjs tests/app-check-policy.test.cjs tests/app-check-handler.test.cjs tests/admin-app-check-debug.test.cjs
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -90,6 +95,18 @@ jobs:
           GCLOUD_PROJECT: demo-okclean-integration
       - name: Demo scheduler loopback HTTP with Firestore emulator
         run: npx firebase emulators:exec --project demo-okclean-integration --only auth,firestore --config tests/fixtures/.reservation-e2e.json 'node tests/demo-retention-route-emulator.cjs'
+        env:
+          FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085
+          GCLOUD_PROJECT: demo-okclean-integration
+      - name: Restore gate with independent synthetic ledger emulator
+        run: npx firebase emulators:exec --project demo-okclean-integration --only auth,firestore --config tests/fixtures/.reservation-e2e.json 'node tests/restore-gate-emulator.cjs'
+        env:
+          FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085
+          GCLOUD_PROJECT: demo-okclean-integration
+      - name: Member linking with synthetic Auth and Firestore emulators
+        run: npx firebase emulators:exec --project demo-okclean-integration --only auth,firestore --config tests/fixtures/.reservation-e2e.json 'node tests/member-account-link-emulator.cjs'
         env:
           FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
           FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085

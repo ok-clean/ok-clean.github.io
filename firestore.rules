@@ -8,9 +8,18 @@ service cloud.firestore {
         || request.auth.token.get('super_admin', false) == true);
     }
     match /member_requests/{id} {
-      allow read, update, delete: if isAdmin();
+      allow read: if isAdmin();
+      // A linked member request cannot be removed and recreated by a client:
+      // coordinated unlink/retention handling is not available yet.
+      allow delete: if isAdmin() && !exists(/databases/$(database)/documents/member_account_links/$(id));
+      // Existing and legacy records remain editable, but the Firebase client
+      // cannot reassign the anonymous owner used as a linking proof.
+      // Admin SDK bypasses rules and still requires tightly scoped IAM.
+      allow update: if isAdmin() &&
+        request.resource.data.get('ownerUid', null) == resource.data.get('ownerUid', null);
       // 익명 사용자는 회원가입 요청 생성만 가능. 기존 데이터 읽기/수정은 불가.
       allow create: if request.auth != null &&
+        !exists(/databases/$(database)/documents/member_account_links/$(id)) &&
         request.auth.token.firebase.sign_in_provider == 'anonymous' &&
         request.resource.data.keys().hasOnly(['name','phone','area','free','ad','code','ref','joined','status','couponStatus','freeStatus','memo','points','grade','ownerUid']) &&
         request.resource.data.keys().hasAll(['name','phone','area','free','ad','code','ref','joined','status','couponStatus','freeStatus','memo','points','grade','ownerUid']) &&
@@ -33,3 +42,4 @@ service cloud.firestore {
     match /{document=**} { allow read, write: if false; }
   }
 }
+

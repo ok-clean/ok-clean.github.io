@@ -12,13 +12,17 @@ function key(source,id,action){return createHash('sha256').update(source).update
 function createDeletionLedger({ledgerDb,primaryProjectId,ledgerProjectId,clock=()=>new Date()}){
   if(!ledgerDb?.collection||!ledgerDb?.runTransaction||typeof primaryProjectId!=='string'||!primaryProjectId||typeof ledgerProjectId!=='string'||!ledgerProjectId||primaryProjectId===ledgerProjectId||ledgerDb.projectId!==ledgerProjectId)throw Error('INDEPENDENT_LEDGER_REQUIRED');
   const collection=ledgerDb.collection('deletion_ledger');
+  // Every change invalidates previously signed restore attestations atomically.
+  const head=ledgerDb.collection('deletion_ledger_meta').doc(primaryProjectId);
+  function nextRevision(snapshot){const n=snapshot.exists?snapshot.data()?.revision:0;if(!Number.isSafeInteger(n)||n<0||n>=Number.MAX_SAFE_INTEGER)throw Error('LEDGER_REVISION_INVALID');return n+1;}
   async function recordIntent(input){
     valid(input);const ref=collection.doc(key(primaryProjectId,input.id,input.action));
     return ledgerDb.runTransaction(async tx=>{
       const snap=await tx.get(ref);
       if(snap.exists){const row=snap.data();if(row.sourceProject!==primaryProjectId||row.id!==input.id||row.action!==input.action||row.expectedVersion!==input.expectedVersion||row.expectedHistoryVersion!==input.expectedHistoryVersion)throw Error('LEDGER_CONFLICT');if(!['pending','committed'].includes(row.state))throw Error('LEDGER_INVALID');return row.state;}
+      const revision=nextRevision(await tx.get(head));
       const at=clock();if(!(at instanceof Date)||!Number.isFinite(at.getTime()))throw Error('INVALID_CLOCK');
-      tx.create(ref,{sourceProject:primaryProjectId,id:input.id,action:input.action,expectedVersion:input.expectedVersion,expectedHistoryVersion:input.expectedHistoryVersion,state:'pending',recordedAt:at});return 'pending';
+      tx.create(ref,{sourceProject:primaryProjectId,id:input.id,action:input.action,expectedVersion:input.expectedVersion,expectedHistoryVersion:input.expectedHistoryVersion,state:'pending',recordedAt:at});tx.set(head,{revision});return 'pending';
     });
   }
   async function markCommitted(input){
@@ -27,7 +31,8 @@ function createDeletionLedger({ledgerDb,primaryProjectId,ledgerProjectId,clock=(
       const snap=await tx.get(ref);if(!snap.exists)throw Error('LEDGER_INTENT_REQUIRED');const row=snap.data();
       if(row.sourceProject!==primaryProjectId||row.id!==input.id||row.action!==input.action||row.expectedVersion!==input.expectedVersion||row.expectedHistoryVersion!==input.expectedHistoryVersion)throw Error('LEDGER_CONFLICT');
       if(row.state==='committed')return 'committed';if(row.state!=='pending')throw Error('LEDGER_INVALID');
-      const at=clock();if(!(at instanceof Date)||!Number.isFinite(at.getTime()))throw Error('INVALID_CLOCK');tx.update(ref,{state:'committed',committedAt:at});return 'committed';
+      const revision=nextRevision(await tx.get(head));
+      const at=clock();if(!(at instanceof Date)||!Number.isFinite(at.getTime()))throw Error('INVALID_CLOCK');tx.update(ref,{state:'committed',committedAt:at});tx.set(head,{revision});return 'committed';
     });
   }
   async function page({after,limit=50}={}){

@@ -1,6 +1,7 @@
 'use strict';
 // Read-only validation only. No network calls, no deploy, never print configuration values.
 const fs=require('node:fs');
+const crypto=require('node:crypto');
 const placeholders=/미정|미확정|확인\s*필요|설정\s*필요|TODO|TBD|PLACEHOLDER|REPLACE_ME/i;
 const projectPattern=/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
 const appPattern=/^1:[0-9]+:web:[a-fA-F0-9]+$/;
@@ -15,6 +16,14 @@ function validateRuntime(env){
   need(typeof env.CONSENT_VERSION==='string'&&/^[A-Za-z0-9._-]{1,80}$/.test(env.CONSENT_VERSION)&&!/^test[-_.]/i.test(env.CONSENT_VERSION),'CONSENT_VERSION_INVALID');
   need(env.ALLOWED_ORIGIN==='https://ok-clean.github.io','ALLOWED_ORIGIN_INVALID');
   need(typeof env.OKCLEAN_FIREBASE_WEB_APP_ID==='string'&&appPattern.test(env.OKCLEAN_FIREBASE_WEB_APP_ID),'WEB_APP_ID_INVALID');
+  if(env.OKCLEAN_MEMBER_LINK_ENABLED==='true'){
+    need(env.OKCLEAN_MEMBER_LINK_POLICY_REVIEWED==='true','MEMBER_LINK_POLICY_NOT_REVIEWED');
+    need(typeof env.OKCLEAN_MEMBER_LINK_POLICY_VERSION==='string'&&/^[A-Za-z0-9._-]{1,80}$/.test(env.OKCLEAN_MEMBER_LINK_POLICY_VERSION)&&!/^test[-_.]/i.test(env.OKCLEAN_MEMBER_LINK_POLICY_VERSION)&&!placeholders.test(env.OKCLEAN_MEMBER_LINK_POLICY_VERSION),'MEMBER_LINK_POLICY_VERSION_INVALID');
+  }
+  const ledger=env.OKCLEAN_LEDGER_PROJECT_ID;
+  need(typeof ledger==='string'&&projectPattern.test(ledger)&&! /^(demo|test|example)-/i.test(ledger)&&ledger!==project,'RESTORE_LEDGER_PROJECT_INVALID');
+  need(typeof env.OKCLEAN_RESTORE_EPOCH==='string'&&/^[A-Za-z0-9_-]{16,80}$/.test(env.OKCLEAN_RESTORE_EPOCH),'RESTORE_EPOCH_MISSING');
+  try{need(typeof env.OKCLEAN_RESTORE_PUBLIC_KEY==='string'&&/^-----BEGIN PUBLIC KEY-----\n/.test(env.OKCLEAN_RESTORE_PUBLIC_KEY)&&crypto.createPublicKey(env.OKCLEAN_RESTORE_PUBLIC_KEY).asymmetricKeyType==='ed25519','RESTORE_PUBLIC_KEY_INVALID');}catch{errors.push('RESTORE_PUBLIC_KEY_INVALID');}
   for(const name of ['FIREBASE_AUTH_EMULATOR_HOST','FIRESTORE_EMULATOR_HOST','FIREBASE_STORAGE_EMULATOR_HOST','FIREBASE_EMULATOR_HUB','FIREBASE_APP_CHECK_DEBUG_TOKEN','FIREBASE_APPCHECK_DEBUG_TOKEN','APP_CHECK_DEBUG_TOKEN','GOOGLE_APPLICATION_CREDENTIALS']){
     if(env[name])errors.push('FORBIDDEN_ENV_'+name);
   }
@@ -29,6 +38,10 @@ function validateConfig(c,env){
   need(typeof f.apiKey==='string'&&f.apiKey.trim().length>0&&!placeholders.test(f.apiKey),'WEB_API_CONFIG_MISSING');
   need(typeof f.appId==='string'&&appPattern.test(f.appId)&&f.appId===env.OKCLEAN_FIREBASE_WEB_APP_ID,'WEB_APP_ID_MISMATCH');
   need(r.enabled===true&&r.emulator!==true&&r.verifiedEmulator!==true,'RESERVATION_CONFIGURATION_NOT_PRODUCTION');
+  if(r.memberLinkEnabled===true){
+    need(r.memberLinkPolicyReviewed===true&&env.OKCLEAN_MEMBER_LINK_ENABLED==='true'&&env.OKCLEAN_MEMBER_LINK_POLICY_REVIEWED==='true','MEMBER_LINK_POLICY_NOT_REVIEWED');
+    need(typeof r.memberLinkPolicyVersion==='string'&&r.memberLinkPolicyVersion===env.OKCLEAN_MEMBER_LINK_POLICY_VERSION&&/^[A-Za-z0-9._-]{1,80}$/.test(r.memberLinkPolicyVersion),'MEMBER_LINK_POLICY_VERSION_MISMATCH');
+  }
   if(r.withdrawalEnabled===true){
     need(r.withdrawalPolicyReviewed===true && env.OKCLEAN_WITHDRAWAL_POLICY_REVIEWED==='true','WITHDRAWAL_POLICY_NOT_REVIEWED');
     need(typeof env.OKCLEAN_MEMBER_ADMIN_UID==='string'&&env.OKCLEAN_MEMBER_ADMIN_UID.length<=128&&!!env.OKCLEAN_MEMBER_ADMIN_UID.trim()&&!env.OKCLEAN_MEMBER_ADMIN_UID.includes('/')&&!placeholders.test(env.OKCLEAN_MEMBER_ADMIN_UID)&&env.OKCLEAN_MEMBER_ADMIN_UID!=='REPLACE_WITH_ADMIN_UID','PROTECTED_MEMBER_ADMIN_UID_MISSING');

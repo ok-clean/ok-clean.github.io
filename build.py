@@ -347,6 +347,12 @@ def index_page(c, cases=()):
         <button class="btn line" id="reserveRecover" type="button">접수 확인</button>
         <button class="btn line" id="reserveListMine" type="button" hidden>내 예약 목록</button>
         <div id="reserveOwnList" aria-live="polite"></div>
+        <div id="reserveMemberLink" hidden>
+          <p>이 화면에서 방금 접수한 회원가입 요청을 예약 계정에 연결합니다. 기존 가입 기록이나 다른 기기 자료는 상담으로 확인해 주세요.</p>
+          <label><input id="reserveMemberLinkConsent" type="checkbox"> 회원가입 요청과 예약 계정을 연결하는 데 동의합니다.</label>
+          <button class="btn line" id="reserveMemberLinkSubmit" type="button">회원 계정 연결</button>
+          <p id="reserveMemberLinkStatus" role="status" aria-live="polite"></p>
+        </div>
         <div id="reserveWithdrawal" hidden>
           <p>예약 계정 탈퇴를 요청합니다. 확인 후 처리되며 계정과 개인정보가 즉시 삭제되지는 않습니다. 기존 회원 혜택 데이터는 별도로 처리됩니다.</p>
           <label>재인증 비밀번호 <input id="withdrawPassword" type="password" autocomplete="off"></label>

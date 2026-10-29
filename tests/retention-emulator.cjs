@@ -36,6 +36,15 @@ async function main(){
   assert.equal((await ref.collection('status_history').get()).size,0);
   assert.equal((await later.processBatch(recoveryIds,{apply:true})).already_purged,1);
   const audit=await db.collection('retention_audit').get();assert.equal(audit.size,4);for(const d of audit.docs)assert.deepEqual(Object.keys(d.data()).sort(),['action','at']);
+  // Firestore orderBy('at') silently excludes this malformed child. All-child
+  // scanning must block both redaction and history cleanup instead.
+  const malformed=db.collection('quote_requests').doc('z-synthetic-malformed-history');
+  await malformed.create({status:'종료',legalHold:false,name:'가상보존'});
+  await malformed.collection('status_history').doc('valid').create({to:'종료',at:new Date('2030-01-01T00:00:00Z')});
+  await malformed.collection('status_history').doc('missing-time').create({to:'종료'});
+  assert.equal((await service.process(malformed.id,{apply:true})).result,'blocked_dependencies');
+  assert.equal((await malformed.get()).data().name,'가상보존');
+  assert.equal((await malformed.collection('status_history').get()).size,2);
   // Scheduler integration uses real demo Firestore; only the OIDC verifier is a test double.
   const scheduled=db.collection('quote_requests').doc('a-synthetic-scheduler');
   await scheduled.create({status:'종료',legalHold:false,name:'가상고객2'});

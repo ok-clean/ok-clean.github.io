@@ -9,12 +9,13 @@ async function main(){
  execFileSync('python3',['tests/build-generated-fixture.py'],{stdio:'ignore'});
  const root=fs.readFileSync('/tmp/okclean-generated-root.txt','utf8').trim();if(!root.startsWith('/tmp/okclean-generated-'))throw Error('Unexpected fixture');
  fs.copyFileSync('reservation-api.js',path.join(root,'reservation-api-real.js'));
+ fs.copyFileSync('member-sync.js',path.join(root,'member-sync.js'));
  fs.writeFileSync(path.join(root,'reservation-api.js'), `export * from './reservation-api-real.js'; import {login as realLogin} from './reservation-api-real.js'; export async function login(...args){try{return await realLogin(...args)}catch(e){console.log('TEST_LOGIN_ERROR', e?.code || e?.name || 'unknown');throw e}}`);fs.copyFileSync('/tmp/okclean-firebase-bundle.js',path.join(root,'firebase-bundle.js'));
  fs.mkdirSync(path.join(root,'admin'),{recursive:true});for(const name of ['admin.js','index.html'])fs.copyFileSync('admin/'+name,path.join(root,'admin',name));
  const configPath=path.join(root,'config.json'),cfg=JSON.parse(fs.readFileSync(configPath,'utf8'));
  cfg.services=JSON.parse(fs.readFileSync('config.json','utf8')).services;
  cfg.firebase={apiKey:'fake-test-identifier',authDomain:'localhost',projectId:project,appId:'1:123:web:fake'};
- cfg.reservation={enabled:true,withdrawalEnabled:true,withdrawalPolicyReviewed:true,apiUrl:api,appCheckSiteKey:'synthetic-test-site-key',consentText:'가상 시험 동의',consentVersion:'test-v1',privacy:{operator:'가상 사업자',officer:'가상 책임자',retention:'시험 후 삭제',policyUrl:'https://ok-clean.github.io/privacy-test',reviewed:true}};
+ cfg.reservation={enabled:true,withdrawalEnabled:true,withdrawalPolicyReviewed:true,memberLinkEnabled:true,memberLinkPolicyReviewed:true,memberLinkPolicyVersion:'test-member-v1',apiUrl:api,appCheckSiteKey:'synthetic-test-site-key',consentText:'가상 시험 동의',consentVersion:'test-v1',privacy:{operator:'가상 사업자',officer:'가상 책임자',retention:'시험 후 삭제',policyUrl:'https://ok-clean.github.io/privacy-test',reviewed:true}};
  fs.writeFileSync(configPath,JSON.stringify(cfg));execFileSync('python3',['-c','import build; build.run()'],{cwd:root,stdio:'ignore'});
  const fb=admin.initializeApp({projectId:project},'container-browser'),db=admin.firestore(fb);
  const browser=await chromium.launch({headless:true});
@@ -51,8 +52,15 @@ async function main(){
   page.on('pageerror',e=>console.log('TEST_PAGE_ERROR',e.name));
   page.on('requestfailed',r=>{const u=new URL(r.url());if(u.hostname==='127.0.0.1'||u.hostname==='www.gstatic.com')console.log('TEST_REQUEST_FAILED',u.hostname,u.port||'',r.failure()?.errorText||'unknown');});
   await page.goto(origin+'/',{waitUntil:'load'});
+  // Same-page member creation is the only way to obtain a candidate. Existing
+  // local membership data is never matched by phone or name.
+  await page.locator('[data-join]').first().click();await page.locator('#jName').fill('가상회원');await page.locator('#jPhone').fill('01000000009');await page.locator('#jAgree').check();await page.locator('#jSubmit').click();
+  await page.getByText('회원정보 접수 요청이 완료됐어요. 카톡으로 가입을 확인해 주세요.').waitFor({timeout:30000});await page.locator('#join [data-close]').click();
   await page.locator('#qArea').selectOption('춘천');await page.locator('#qDate').fill(new Date(Date.now()+7*86400000).toISOString().slice(0,10));await page.locator('#qReserve').click();
   await page.locator('#reserveEmail').fill('container-user@example.test');await page.locator('#reservePassword').fill('synthetic-test-password');await page.locator('#reserveLogin').click();try{await page.getByText('로그인했습니다.').waitFor({timeout:10000});}catch{throw Error('login failed: '+await page.locator('#reserveStatus').innerText()+' / '+await page.evaluate(()=>globalThis.__testAuthError||'no-auth-error'));}
+  await page.locator('#reserveMemberLinkSubmit').click();await page.getByText('회원 계정 연결에 동의해 주세요.').waitFor({timeout:10000});
+  await page.locator('#reserveMemberLinkConsent').check();await page.locator('#reserveMemberLinkSubmit').click();await page.getByText('회원가입 요청과 예약 계정이 연결되었습니다. 다른 저장 자료는 별도로 확인해 주세요.').waitFor({timeout:30000});
+  assert.equal((await db.collection('account_member_links').doc('container-customer').get()).exists,true);
   await page.locator('#reserveName').fill('가상브라우저');await page.locator('#reservePhone').fill('01000000006');await page.locator('#reserveSize').fill('20');await page.locator('#reserveNotes').fill('가상 요청');await page.locator('#reserveConsent').check();
   // Make the real server commit, then deliberately lose the response at browser boundary.
   await ctx.route(api+'/reservation/submit',async route=>{const response=await route.fetch({url:'http://127.0.0.1:8799/reservation/submit'});if(route.request().method()==='OPTIONS')return route.fulfill({response});await route.abort();});
@@ -61,6 +69,7 @@ async function main(){
   await page.reload({waitUntil:'load'});await page.locator('#qReserve').click();await page.locator('#reserveRecover').click();await page.getByText('예약 접수 완료 · 접수번호: '+id).waitFor({timeout:30000});
   const next=await context(),p=await next.newPage();await p.goto(origin+'/',{waitUntil:'load'});await p.locator('#qReserve').click();
   await p.locator('#reserveEmail').fill('container-user@example.test');await p.locator('#reservePassword').fill('synthetic-test-password');await p.locator('#reserveLogin').click();await p.getByText('로그인했습니다.').waitFor();
+  await p.locator('#reserveMemberLinkSubmit').click();await p.getByText('이 화면에서 방금 접수한 회원 기록이 없습니다. 기존 회원 기록은 상담으로 확인해 주세요.').waitFor({timeout:10000});
   await p.locator('#reserveReceipt').fill(id);await p.locator('#reserveRecover').click();await p.getByText('예약 접수 완료 · 접수번호: '+id).waitFor();
   assert.equal((await db.collection('quote_requests').doc(id).get()).exists,true);
   await p.locator('#reserveListMine').click();await p.locator('#reserveOwnList').getByText(id,{exact:false}).waitFor({timeout:30000});
@@ -68,7 +77,8 @@ async function main(){
   await p.locator('#withdrawPassword').fill('wrong-synthetic-password');await p.locator('#withdrawRequest').click();await p.getByText(/탈퇴 요청을 확인하지 못했습니다/).waitFor();
   assert.equal((await db.collection('account_lifecycle').doc('container-customer').get()).exists,false);
   await p.locator('#withdrawPassword').fill('synthetic-test-password');await p.locator('#withdrawRequest').click();await p.getByText(/예약 계정 탈퇴 요청이 접수되었습니다/).waitFor({timeout:30000});
-  assert.equal((await db.collection('account_lifecycle').doc('container-customer').get()).data().status,'withdrawal_requested');
+  const withdrawalLife=(await db.collection('account_lifecycle').doc('container-customer').get()).data();assert.equal(withdrawalLife.status,'withdrawal_requested');assert.equal(withdrawalLife.sessionRevocation,'revoked');
+  assert.equal(await p.evaluate(async()=>{const f=await import('/firebase-bundle.js');return f.getAuth(f.getApp('production-reservation')).currentUser===null;}),true,'customer browser signs out after accepted request');
   assert.ok((await db.collection('quote_requests').doc(id).get()).exists,'request must not delete reservations or auth account');
   assert.equal(await p.locator('#reserveListMine').isDisabled(),true);
   await p.reload({waitUntil:'load'});await p.locator('#qReserve').click();

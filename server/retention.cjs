@@ -56,9 +56,13 @@ function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new
         // Retention cannot proceed until a trusted operator explicitly rules out
         // a legal hold. Missing or malformed flags are not treated as clearance.
         if(value.legalHold !== false)return {result:'blocked_legal_hold'};
-        const historyQuery=ref.collection('status_history').orderBy('at','desc').limit(201);
+        // Do not order by `at`: Firestore omits documents without that field
+        // from ordered results. A malformed child must block deletion, not be
+        // silently left behind with possibly identifying data.
+        const historyQuery=ref.collection('status_history').limit(201);
         const history=await tx.get(historyQuery);
         if(history.size>200)return {result:'blocked_dependencies'};
+        if(history.docs.some(doc=>!Number.isFinite(toMs(doc.data()?.at))))return {result:'blocked_dependencies'};
         const versions=history.docs.map(doc=>[doc.id||doc.ref?.id,version(doc.updateTime)]);
         if(versions.some(([id,v])=>typeof id!=='string'||!v))return {result:'retry_needed'};
         versions.sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0);
@@ -67,7 +71,9 @@ function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new
         if(expectedAction!==null && expectedAction!==(value.retentionRedacted?'history_purged':'redacted'))return {result:'changed'};
         if(!value.retentionRedacted){
           if(!TERMINAL.has(value.status)||!history.docs.length)return {result:'preserved'};
-          const latest=history.docs[0].data(),terminalAt=toMs(latest.at);
+          const sorted=history.docs.map(doc=>doc.data()).sort((a,b)=>toMs(b.at)-toMs(a.at));
+          const latest=sorted[0],terminalAt=toMs(latest.at);
+          if(sorted.some((entry,index)=>index>0&&toMs(entry.at)===terminalAt&&entry.to!==latest.to))return {result:'blocked_dependencies'};
           if(latest.to!==value.status||!Number.isFinite(terminalAt)||terminalAt>at.getTime()-policy.reservationDays*DAY)return {result:'preserved'};
           if(!apply)return {result:'would_redact',version:version(snap.updateTime),historyVersion};
           // Full replacement removes name, phone, notes, UID, fingerprint and other request fields.

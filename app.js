@@ -26,6 +26,8 @@ const BLOGS = [].concat(C.blog || []).filter(Boolean);
 const phoneDigits = (C.phone || "").replace(/[^0-9+]/g, "");
 const M = C.member || null;
 let MEMBER = store.get("member", null);
+// Retained in memory only after a new membership request is saved.
+let memberLinkCandidate = null;
 // 메모리에만 있는 회원정보와 마지막 기기 저장 결과를 구분합니다.
 let memberSaved = !!MEMBER;
 const memberStorageWarning = "최근 회원정보를 이 기기에 저장하지 못했어요. 새로고침하거나 창을 닫으면 쿠폰 정보가 사라질 수 있어요. 쿠폰번호를 확인한 뒤 카톡으로 가입을 완료해 주세요.";
@@ -427,6 +429,7 @@ if(((reservationTest && C.reservation?.verifiedEmulator) || reservationProductio
   $("qReserve").onclick=()=>{form.hidden=false;};
   $("reserveSubmit").disabled=busy||!!pending;
   if(reservationProduction)$("reserveListMine").hidden=false;
+  if(reservationProduction && C.reservation.memberLinkEnabled===true && C.reservation.memberLinkPolicyReviewed===true && typeof C.reservation.memberLinkPolicyVersion==='string' && /^[A-Za-z0-9._-]{1,80}$/.test(C.reservation.memberLinkPolicyVersion) && $("reserveMemberLink"))$("reserveMemberLink").hidden=false;
   if(reservationProduction && C.reservation.withdrawalEnabled===true && C.reservation.withdrawalPolicyReviewed===true)$("reserveWithdrawal").hidden=false;
   if(pending){$("reserveReceipt").value=pending;status.textContent='이전 접수 확인이 필요합니다. 로그인 후 접수를 확인해 주세요.';}
   async function recover(id){
@@ -461,6 +464,16 @@ if(((reservationTest && C.reservation?.verifiedEmulator) || reservationProductio
     }catch(_){$("reservePassword").value='';if(reservationProduction){withdrawalPending=true;$("reserveSubmit").disabled=true;}status.textContent=reservationProduction?'계정 인증 또는 상태를 확인해 주세요.':'시험 계정 인증을 확인해 주세요.';}
   };
   $("reserveRecover").onclick=()=>recover($("reserveReceipt").value.trim());
+  if($("reserveMemberLinkSubmit"))$("reserveMemberLinkSubmit").onclick=async()=>{
+    if(!reservationProduction || busy || withdrawalPending || C.reservation.memberLinkEnabled!==true || C.reservation.memberLinkPolicyReviewed!==true)return;
+    const notice=$("reserveMemberLinkStatus");
+    if(!memberLinkCandidate){notice.textContent='이 화면에서 방금 접수한 회원 기록이 없습니다. 기존 회원 기록은 상담으로 확인해 주세요.';return;}
+    if(!$("reserveMemberLinkConsent").checked){notice.textContent='회원 계정 연결에 동의해 주세요.';return;}
+    busy=true;$("reserveMemberLinkSubmit").disabled=true;
+    try{const client=await getClient();await client.linkMember(C.firebase,memberLinkCandidate,true,C.reservation);notice.textContent='회원가입 요청과 예약 계정이 연결되었습니다. 다른 저장 자료는 별도로 확인해 주세요.';}
+    catch(_){notice.textContent='연결하지 못했습니다. 다시 로그인하거나 상담으로 확인해 주세요.';}
+    finally{busy=false;$("reserveMemberLinkSubmit").disabled=false;}
+  };
   $("reserveListMine").onclick=async()=>{
     if(!reservationProduction || busy)return;
     const list=$("reserveOwnList");list.replaceChildren();busy=true;
@@ -484,9 +497,9 @@ if(((reservationTest && C.reservation?.verifiedEmulator) || reservationProductio
   $("withdrawRequest").onclick=async()=>{
     if(!reservationProduction || busy || C.reservation.withdrawalEnabled!==true || C.reservation.withdrawalPolicyReviewed!==true)return;
     busy=true;$("withdrawRequest").disabled=true;
-    try{const client=await getClient();const password=$("withdrawPassword").value;await client.requestWithdrawal(C.firebase,password,C.reservation);
+    try{const client=await getClient();const password=$("withdrawPassword").value;const result=await client.requestWithdrawal(C.firebase,password,C.reservation);
       withdrawalPending=true;$("reserveNew").hidden=true;$("reserveOwnList").replaceChildren();$("reserveSubmit").disabled=true;$("reserveListMine").disabled=true;$("reserveRecover").disabled=true;
-      status.textContent='예약 계정 탈퇴 요청이 접수되었습니다. 계정과 개인정보 삭제는 확인 후 별도 처리됩니다.';
+      status.textContent='예약 계정 탈퇴 요청이 접수되었습니다. 계정과 개인정보 삭제는 확인 후 별도 처리됩니다.'+(result.signedOut?'':' 로그아웃을 확인하지 못했습니다.');
     }catch(_){withdrawalPending=true;$("reserveSubmit").disabled=true;$("reserveNew").hidden=true;status.textContent='탈퇴 요청을 확인하지 못했습니다. 다시 로그인하여 상태를 확인하거나 관리자에게 문의해 주세요.';}
     finally{$("withdrawPassword").value='';busy=false;$("withdrawRequest").disabled=false;}
   };
@@ -654,7 +667,7 @@ function joinDone(){
       localStorage.removeItem("member");
       if(localStorage.getItem("member") !== null) throw new Error("Member data remains");
     } catch(e) { toast("기기 정보 삭제에 실패했어요. 브라우저 설정을 확인해 주세요."); return; }
-    MEMBER = null; memberSaved = false;
+    MEMBER = null; memberSaved = false; memberLinkCandidate = null;
     if(typeof window.clearHiddenMemberSheet === "function") window.clearHiddenMemberSheet();
     else {
       // 예전 공통 스크립트가 남긴 회원 안내는 제목과 내용으로 확인한 경우만 지웁니다.
@@ -713,6 +726,7 @@ if(M){
     if(!$("jAgree").checked) return err("개인정보 수집·이용에 동의해 주세요.");
     const abc = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     const code = "OK-" + Array.from({length: 6}, () => abc[Math.floor(Math.random() * abc.length)]).join("");
+    memberLinkCandidate = null;
     MEMBER = {name, phone, area: $("jArea").value, free: (document.querySelector('input[name="jFree"]:checked') || {}).value || M.freeServices[0],
               ad: $("jAgree").checked && $("jAd").checked, code, ref: REF && REF !== code ? REF : "", joined: new Date().toISOString().slice(0, 10)};
     memberSaved = store.set("member", MEMBER);
@@ -721,7 +735,7 @@ if(M){
     if(C.firebase && C.firebase.apiKey && C.firebase.projectId){
       const submittedMember = MEMBER;
       import('./member-sync.js').then(mod => mod.submitMember(C.firebase, submittedMember))
-        .then(() => { if(MEMBER === submittedMember) toast('회원정보 접수 요청이 완료됐어요. 카톡으로 가입을 확인해 주세요.'); })
+        .then((saved) => { if(MEMBER === submittedMember){if(typeof saved?.memberId==='string' && /^[A-Za-z0-9_-]{1,128}$/.test(saved.memberId))memberLinkCandidate=saved.memberId;toast('회원정보 접수 요청이 완료됐어요. 카톡으로 가입을 확인해 주세요.');} })
         .catch(err => { console.warn('회원 접수 실패', err); if(MEMBER === submittedMember) toast('자동 접수가 되지 않았어요. 카톡으로 가입을 완료해 주세요.'); });
     }
     // 관리자 대장 연결이 설정된 경우 가입 정보를 접수합니다.
