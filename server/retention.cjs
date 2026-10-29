@@ -35,6 +35,9 @@ function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new
       return await db.runTransaction(async tx=>{
         const snap=await tx.get(ref);if(!snap.exists)return {result:'absent'};
         const value=snap.data();
+        // Retention cannot proceed until a trusted operator explicitly rules out
+        // a legal hold. Missing or malformed flags are not treated as clearance.
+        if(value.legalHold !== false)return {result:'blocked_legal_hold'};
         const historyQuery=ref.collection('status_history').orderBy('at','desc').limit(201);
         const history=await tx.get(historyQuery);
         if(history.size>200)return {result:'blocked_dependencies'};
@@ -45,7 +48,7 @@ function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new
           if(!apply)return {result:'would_redact'};
           // Full replacement removes name, phone, notes, UID, fingerprint and other request fields.
           // Keep a receipt tombstone to prevent reuse and preserve separately retained history.
-          tx.set(ref,{retentionRedacted:true,status:'보유기간만료',terminalAt:new Date(terminalAt),redactedAt:at});
+          tx.set(ref,{retentionRedacted:true,status:'보유기간만료',terminalAt:new Date(terminalAt),redactedAt:at,legalHold:false});
           tx.create(db.collection('retention_audit').doc(),{action:'redacted',at});
           return {result:'redacted'};
         }
@@ -60,11 +63,21 @@ function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new
       });
     }catch{return {result:'retry_needed'};}
   }
+  // Scan only document IDs in bounded batches. A trusted caller must keep the
+  // cursor private; receipt IDs can be linkable and must not be logged.
+  async function scan({limit=50,after=null}={}){
+    if(!Number.isInteger(limit)||limit<1||limit>100 || (after!==null && (typeof after!=='string'||!/^[A-Za-z0-9_-]{1,80}$/.test(after))))throw Error('INVALID_SCAN');
+    let q=db.collection('quote_requests').orderBy('__name__');
+    if(after!==null)q=q.startAfter(after);
+    const snapshot=await q.limit(limit+1).get();
+    const ids=snapshot.docs.slice(0,limit).map(d=>d.id);
+    return {ids,next: snapshot.docs.length>limit ? ids[ids.length-1] : null};
+  }
   // Caller selects explicit IDs and retains per-run counts; never log IDs or personal data.
   async function processBatch(ids,options){
     if(!Array.isArray(ids)||ids.length>100)throw Error('INVALID_BATCH');
     const counts={};for(const id of ids){const {result}=await process(id,options);counts[result]=(counts[result]||0)+1;}return counts;
   }
-  return {process,processBatch};
+  return {process,processBatch,scan};
 }
 module.exports={createRetentionService};

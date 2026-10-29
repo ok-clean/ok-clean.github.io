@@ -48,3 +48,7 @@ gcloud run deploy SERVICE_NAME \
 5. 요청 제한 문서의 만료 삭제 정책과 고객정보·상태이력 보유/삭제 절차를 수립한다. 현재 단순 로컬 검사는 삭제가 실행되는지 보장하지 않는다.
 
 참고: [Cloud Run 리비전·트래픽 관리](https://cloud.google.com/run/docs/rollouts-rollbacks-traffic-migration), [서비스 아이덴티티와 환경변수](https://cloud.google.com/run/docs/configuring/services/environment-variables), [App Check 서버 검증](https://firebase.google.com/docs/app-check/custom-resource-backend), [예산 알림](https://cloud.google.com/billing/docs/how-to/budgets).
+
+## 예약 계정 탈퇴 요청 차단 조건
+
+탈퇴 요청은 예약 API 접근을 보류하는 대기 상태만 기록하며 Firebase Auth 계정이나 기존 회원 정보·예약 데이터를 삭제하지 않는다. 운영 전 관련 보존·삭제 정책과 사업자 검토가 끝나야 하며, 별도 승인 없이 화면 설정을 활성화하지 않는다. 화면의 정책 검토 설정과 서버의 `OKCLEAN_WITHDRAWAL_POLICY_REVIEWED=true`, 기존 회원 관리자 보호 UID가 모두 명시되지 않으면 탈퇴 요청은 차단된다. 기존 Auth 자체 삭제 및 기존 회원 로컬 저장·외부 연동, 운영 관리자 권한 변경과 탈퇴의 동시성은 별도 검증이 필요하다.

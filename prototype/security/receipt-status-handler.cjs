@@ -20,7 +20,7 @@ function createReceiptStatusHandler({verifyIdToken, loadRequest, enforceRateLimi
     if (typeof auth?.uid !== 'string' || !auth.uid || !verified) return response(403, 'unavailable');
     try {
       if (await enforceRateLimit(auth.uid) !== true) return response(429, 'unavailable');
-      const record = await loadRequest(requestId);
+      const record = await loadRequest(requestId,auth.uid);
       // Missing and someone else's record have the same response; return no contact details.
       if (!record || record.ownerUid !== auth.uid) return response(404, 'unavailable');
       return response(200, 'confirmed');

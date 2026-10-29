@@ -14,7 +14,7 @@ async function main(){
  const configPath=path.join(root,'config.json'),cfg=JSON.parse(fs.readFileSync(configPath,'utf8'));
  cfg.services=JSON.parse(fs.readFileSync('config.json','utf8')).services;
  cfg.firebase={apiKey:'fake-test-identifier',authDomain:'localhost',projectId:project,appId:'1:123:web:fake'};
- cfg.reservation={enabled:true,apiUrl:api,appCheckSiteKey:'synthetic-test-site-key',consentText:'가상 시험 동의',consentVersion:'test-v1',privacy:{operator:'가상 사업자',officer:'가상 책임자',retention:'시험 후 삭제',policyUrl:'https://ok-clean.github.io/privacy-test',reviewed:true}};
+ cfg.reservation={enabled:true,withdrawalEnabled:true,withdrawalPolicyReviewed:true,apiUrl:api,appCheckSiteKey:'synthetic-test-site-key',consentText:'가상 시험 동의',consentVersion:'test-v1',privacy:{operator:'가상 사업자',officer:'가상 책임자',retention:'시험 후 삭제',policyUrl:'https://ok-clean.github.io/privacy-test',reviewed:true}};
  fs.writeFileSync(configPath,JSON.stringify(cfg));execFileSync('python3',['-c','import build; build.run()'],{cwd:root,stdio:'ignore'});
  const fb=admin.initializeApp({projectId:project},'container-browser'),db=admin.firestore(fb);
  const browser=await chromium.launch({headless:true});
@@ -65,6 +65,15 @@ async function main(){
   assert.equal((await db.collection('quote_requests').doc(id).get()).exists,true);
   await p.locator('#reserveListMine').click();await p.locator('#reserveOwnList').getByText(id,{exact:false}).waitFor({timeout:30000});
   assert.doesNotMatch(await p.locator('#reserveOwnList').innerText(),/01000000006|가상 요청/,'list must not display contact details or notes');
+  await p.locator('#withdrawPassword').fill('wrong-synthetic-password');await p.locator('#withdrawRequest').click();await p.getByText(/탈퇴 요청을 확인하지 못했습니다/).waitFor();
+  assert.equal((await db.collection('account_lifecycle').doc('container-customer').get()).exists,false);
+  await p.locator('#withdrawPassword').fill('synthetic-test-password');await p.locator('#withdrawRequest').click();await p.getByText(/예약 계정 탈퇴 요청이 접수되었습니다/).waitFor({timeout:30000});
+  assert.equal((await db.collection('account_lifecycle').doc('container-customer').get()).data().status,'withdrawal_requested');
+  assert.ok((await db.collection('quote_requests').doc(id).get()).exists,'request must not delete reservations or auth account');
+  assert.equal(await p.locator('#reserveListMine').isDisabled(),true);
+  await p.reload({waitUntil:'load'});await p.locator('#qReserve').click();
+  await p.locator('#reserveEmail').fill('container-user@example.test');await p.locator('#reservePassword').fill('synthetic-test-password');await p.locator('#reserveLogin').click();
+  await p.getByText(/예약 계정 탈퇴 요청을 처리 중입니다/).waitFor({timeout:30000});assert.equal(await p.locator('#reserveSubmit').isDisabled(),true);
   await p.evaluate(async()=>{const f=await import('/firebase-bundle.js');await f.signOut(f.getAuth(f.getApp('production-reservation')));});
   await p.waitForFunction(()=>document.querySelector('#reserveOwnList').textContent==='');
   const outsider=await context(),op=await outsider.newPage();await op.goto(origin+'/',{waitUntil:'load'});await op.locator('#qReserve').click();

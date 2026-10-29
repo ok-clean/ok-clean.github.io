@@ -11,12 +11,13 @@ function verifiedCaller(caller){
 }
 const result=(httpStatus,status,extra={})=>({httpStatus,body:{status,...extra}});
 function createCustomerReservationsHandler({db,rateLimit}){
- if(typeof db?.collection!=='function'||typeof rateLimit!=='function')throw TypeError('Database and rate limit required');
+ if(typeof db?.collection!=='function'||typeof db?.runTransaction!=='function'||typeof rateLimit!=='function')throw TypeError('Database and rate limit required');
  return async function list(caller){
   if(!verifiedCaller(caller))return result(403,'unavailable');
   try{
    if(await rateLimit(caller.uid,'status')!==true)return result(429,'unavailable');
-   const snapshot=await db.collection('quote_requests').where('ownerUid','==',caller.uid).limit(LIMIT+1).get();
+   const snapshot=await db.runTransaction(async tx=>{const gate=await tx.get(db.collection('account_lifecycle').doc(caller.uid));if(gate.exists)return null;return tx.get(db.collection('quote_requests').where('ownerUid','==',caller.uid).limit(LIMIT+1));});
+   if(!snapshot)return result(403,'unavailable');
    const rows=[];
    for(const doc of snapshot.docs){
     if(rows.length===LIMIT)break;

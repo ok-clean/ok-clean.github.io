@@ -347,6 +347,11 @@ def index_page(c, cases=()):
         <button class="btn line" id="reserveRecover" type="button">접수 확인</button>
         <button class="btn line" id="reserveListMine" type="button" hidden>내 예약 목록</button>
         <div id="reserveOwnList" aria-live="polite"></div>
+        <div id="reserveWithdrawal" hidden>
+          <p>예약 계정 탈퇴를 요청합니다. 확인 후 처리되며 계정과 개인정보가 즉시 삭제되지는 않습니다. 기존 회원 혜택 데이터는 별도로 처리됩니다.</p>
+          <label>재인증 비밀번호 <input id="withdrawPassword" type="password" autocomplete="off"></label>
+          <button class="btn line" id="withdrawRequest" type="button">예약 계정 탈퇴 요청</button>
+        </div>
       </div>
       <div class="field"><label for="reserveName">이름</label><input id="reserveName" maxlength="30" required autocomplete="off"></div>
       <div class="field"><label for="reservePhone">휴대폰 번호</label><input id="reservePhone" type="tel" required autocomplete="off"></div>

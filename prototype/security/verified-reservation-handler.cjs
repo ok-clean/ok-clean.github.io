@@ -40,6 +40,8 @@ function createVerifiedReservationHandler({verifyIdToken, db, enforceRateLimit, 
       const ref=db.collection('quote_requests').doc(requestId);
       const fingerprint=crypto.createHash('sha256').update(JSON.stringify(valid)).digest('hex');
       const result=await db.runTransaction(async tx => {
+        const lifecycle=await tx.get(db.collection('account_lifecycle').doc(auth.uid));
+        if(lifecycle.exists)return 'unavailable';
         const snap=await tx.get(ref);
         if (snap.exists) {
           const record=snap.data();

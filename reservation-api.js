@@ -1,6 +1,6 @@
 // Reservation API client. Enable only with an approved HTTPS endpoint and App Check site key.
 import {initializeApp,getApps} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
-import {getAuth,setPersistence,browserSessionPersistence,signInWithEmailAndPassword,onAuthStateChanged} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
+import {getAuth,setPersistence,browserSessionPersistence,signInWithEmailAndPassword,onAuthStateChanged,reauthenticateWithCredential,EmailAuthProvider} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 import {initializeAppCheck,ReCaptchaV3Provider,getToken} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app-check.js';
 let instance;
 function endpoint(settings){
@@ -29,10 +29,20 @@ async function call(config,path,body,settings){
   if(typeof idToken!=='string'||!idToken||typeof attestation?.token!=='string'||!attestation.token)throw Error('접수 여부를 확인하지 못했습니다.');
   const res=await fetch(base+'/reservation/'+path,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+idToken,'X-Firebase-AppCheck':attestation.token},body:JSON.stringify(body),cache:'no-store',credentials:'omit',redirect:'error'});
   let data;try{data=await res.json();}catch{throw Error('접수 여부를 확인하지 못했습니다.');}
-  if(auth.currentUser!==current||auth.currentUser?.uid!==uid||!res.ok||data?.status!==(path==='list'?'ok':'confirmed'))throw Error('접수 여부를 확인하지 못했습니다.');return data;
+  if(auth.currentUser!==current||auth.currentUser?.uid!==uid||!res.ok||data?.status!==((path==='list'||path==='account-status')?'ok':path==='withdraw'?'pending':'confirmed'))throw Error('접수 여부를 확인하지 못했습니다.');return data;
 }
 export async function submit(config,requestId,form,settings){return call(config,'submit',{requestId,form},settings);}
 export async function recover(config,requestId,settings){return call(config,'status',{requestId},settings);}
 
+export async function accountStatus(config,settings){return call(config,'account-status',{},settings);}
 export async function listOwn(config,settings){return call(config,'list',{},settings);}
 export async function watchUser(config,settings,onChange){const {auth}=await setup(config,settings);return onAuthStateChanged(auth,onChange);}
+
+// A fresh sign-in is required; this queues a request and never deletes the Auth account.
+export async function requestWithdrawal(config,password,settings){
+ const {auth}=await setup(config,settings);const current=auth.currentUser;
+ if(settings?.withdrawalEnabled!==true||settings?.withdrawalPolicyReviewed!==true||!current?.emailVerified||typeof current.email!=='string'||typeof password!=='string'||!password)throw Error('재인증이 필요합니다.');
+ await reauthenticateWithCredential(current,EmailAuthProvider.credential(current.email,password));
+ if(auth.currentUser!==current)throw Error('인증이 변경되었습니다.');
+ await current.getIdToken(true);return call(config,'withdraw',{},settings);
+}

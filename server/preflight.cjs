@@ -29,6 +29,10 @@ function validateConfig(c,env){
   need(typeof f.apiKey==='string'&&f.apiKey.trim().length>0&&!placeholders.test(f.apiKey),'WEB_API_CONFIG_MISSING');
   need(typeof f.appId==='string'&&appPattern.test(f.appId)&&f.appId===env.OKCLEAN_FIREBASE_WEB_APP_ID,'WEB_APP_ID_MISMATCH');
   need(r.enabled===true&&r.emulator!==true&&r.verifiedEmulator!==true,'RESERVATION_CONFIGURATION_NOT_PRODUCTION');
+  if(r.withdrawalEnabled===true){
+    need(r.withdrawalPolicyReviewed===true && env.OKCLEAN_WITHDRAWAL_POLICY_REVIEWED==='true','WITHDRAWAL_POLICY_NOT_REVIEWED');
+    need(typeof env.OKCLEAN_MEMBER_ADMIN_UID==='string'&&env.OKCLEAN_MEMBER_ADMIN_UID.length<=128&&!!env.OKCLEAN_MEMBER_ADMIN_UID.trim()&&!env.OKCLEAN_MEMBER_ADMIN_UID.includes('/')&&!placeholders.test(env.OKCLEAN_MEMBER_ADMIN_UID)&&env.OKCLEAN_MEMBER_ADMIN_UID!=='REPLACE_WITH_ADMIN_UID','PROTECTED_MEMBER_ADMIN_UID_MISSING');
+  }
   let apiUrl;try{apiUrl=new URL(r.apiUrl);}catch{}
   need(!!apiUrl&&apiUrl.protocol==='https:'&&!apiUrl.username&&!apiUrl.password&&!apiUrl.port&&apiUrl.pathname==='/'&&!apiUrl.search&&!apiUrl.hash&&apiUrl.hostname.endsWith('.run.app'),'API_URL_INVALID');
   need(typeof r.appCheckSiteKey==='string'&&r.appCheckSiteKey.trim().length>0&&!placeholders.test(r.appCheckSiteKey),'APP_CHECK_CONFIGURATION_MISSING');

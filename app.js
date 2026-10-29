@@ -421,12 +421,13 @@ if(((reservationTest && C.reservation?.verifiedEmulator) || reservationProductio
   const getClient=()=>reservationProduction ? import('./reservation-api.js') : import('./verified-reservation-emulator.js');
   const receiptPrefix=reservationProduction?'예약 접수 완료 · 접수번호: ':'시험 접수 완료 · 접수번호: ';
   if(reservationProduction){$("reserveIntro").textContent='예상 견적은 현장 확인 후 달라질 수 있습니다.';$("reserveConsentDetails").hidden=false;$("reserveConsentDetails").textContent=reservationConsent.text;$("reservePolicyLink").href=reservationConsent.policyUrl;$("reservePolicyLink").hidden=false;$("reserveConsentText").textContent='위 개인정보 수집·이용에 동의합니다.';$("reserveLogin").textContent='로그인';$("reserveEmailLabel").textContent='이메일';$("reservePasswordLabel").textContent='비밀번호';}
-  let busy=false, pending=null, userWatcher=null;
+  let busy=false, pending=null, userWatcher=null, withdrawalPending=false;
   try{pending=sessionStorage.getItem(key);}catch(_){busy=true;}
   $("qReserve").hidden=false;$("reserveVerified").hidden=false;
   $("qReserve").onclick=()=>{form.hidden=false;};
   $("reserveSubmit").disabled=busy||!!pending;
   if(reservationProduction)$("reserveListMine").hidden=false;
+  if(reservationProduction && C.reservation.withdrawalEnabled===true && C.reservation.withdrawalPolicyReviewed===true)$("reserveWithdrawal").hidden=false;
   if(pending){$("reserveReceipt").value=pending;status.textContent='이전 접수 확인이 필요합니다. 로그인 후 접수를 확인해 주세요.';}
   async function recover(id){
     if(busy || !/^[A-Za-z0-9_-]{1,80}$/.test(id))return;
@@ -441,14 +442,23 @@ if(((reservationTest && C.reservation?.verifiedEmulator) || reservationProductio
     }catch(_){status.textContent='접수 여부를 확인하지 못했습니다. 관리자에게 확인해 주세요.';}
     finally{busy=false;}
   }
+  async function refreshAccount(client){
+    const result=await client.accountStatus(C.firebase,C.reservation);
+    if(typeof result?.withdrawalPending!=='boolean')throw Error('계정 상태 확인 필요');
+    withdrawalPending=result.withdrawalPending;
+    if(withdrawalPending){$("reserveNew").hidden=true;$("reserveOwnList").replaceChildren();$("reserveSubmit").disabled=true;$("reserveListMine").disabled=true;$("reserveRecover").disabled=true;status.textContent='예약 계정 탈퇴 요청을 처리 중입니다. 관리자에게 문의해 주세요.';}
+    else {$("reserveListMine").disabled=false;$("reserveRecover").disabled=false;if(!pending)$("reserveSubmit").disabled=false;}
+    return !withdrawalPending;
+  }
   $("reserveLogin").onclick=async()=>{
     $("reserveOwnList").replaceChildren();
     try{const client=await getClient();
       const ok=await client.login(C.firebase,$("reserveEmail").value,$("reservePassword").value,C.reservation);
       $("reservePassword").value='';if(!ok)throw Error();
+      if(reservationProduction && !await refreshAccount(client))return;
       if(reservationProduction && !userWatcher)userWatcher=await client.watchUser(C.firebase,C.reservation,()=>$("reserveOwnList").replaceChildren());
       status.textContent=reservationProduction?'로그인했습니다.':'시험 계정으로 로그인했습니다.';if(pending)await recover(pending);
-    }catch(_){$("reservePassword").value='';status.textContent=reservationProduction?'계정 인증을 확인해 주세요.':'시험 계정 인증을 확인해 주세요.';}
+    }catch(_){$("reservePassword").value='';if(reservationProduction){withdrawalPending=true;$("reserveSubmit").disabled=true;}status.textContent=reservationProduction?'계정 인증 또는 상태를 확인해 주세요.':'시험 계정 인증을 확인해 주세요.';}
   };
   $("reserveRecover").onclick=()=>recover($("reserveReceipt").value.trim());
   $("reserveListMine").onclick=async()=>{
@@ -471,9 +481,18 @@ if(((reservationTest && C.reservation?.verifiedEmulator) || reservationProductio
     }catch(_){list.textContent='예약을 확인하지 못했습니다. 로그인 상태를 확인해 주세요.';}
     finally{busy=false;}
   };
-  $("reserveNew").onclick=()=>{if(busy||pending)return;form.reset();$("reserveNew").hidden=true;$("reserveSubmit").disabled=false;status.textContent='';};
+  $("withdrawRequest").onclick=async()=>{
+    if(!reservationProduction || busy || C.reservation.withdrawalEnabled!==true || C.reservation.withdrawalPolicyReviewed!==true)return;
+    busy=true;$("withdrawRequest").disabled=true;
+    try{const client=await getClient();const password=$("withdrawPassword").value;await client.requestWithdrawal(C.firebase,password,C.reservation);
+      withdrawalPending=true;$("reserveNew").hidden=true;$("reserveOwnList").replaceChildren();$("reserveSubmit").disabled=true;$("reserveListMine").disabled=true;$("reserveRecover").disabled=true;
+      status.textContent='예약 계정 탈퇴 요청이 접수되었습니다. 계정과 개인정보 삭제는 확인 후 별도 처리됩니다.';
+    }catch(_){withdrawalPending=true;$("reserveSubmit").disabled=true;$("reserveNew").hidden=true;status.textContent='탈퇴 요청을 확인하지 못했습니다. 다시 로그인하여 상태를 확인하거나 관리자에게 문의해 주세요.';}
+    finally{$("withdrawPassword").value='';busy=false;$("withdrawRequest").disabled=false;}
+  };
+  $("reserveNew").onclick=()=>{if(busy||pending||withdrawalPending)return;form.reset();$("reserveNew").hidden=true;$("reserveSubmit").disabled=false;status.textContent='';};
   form.onsubmit=async e=>{
-    e.preventDefault();if(busy||pending)return;
+    e.preventDefault();if(busy||pending||withdrawalPending)return;
     if(!validateQuoteDateBeforeSend()||!$("qArea").value||!$("qDate").value||!form.reportValidity())return;
     const names={'move-in':'입주·이사 청소',regular:'거주·정기 청소',office:'사무실·상가 청소',clinic:'사무실·상가 청소',aircon:'에어컨 청소'};
     const allowed=['춘천','화천','양구','인제','철원','홍천','횡성','가평'], result=estimate();
@@ -483,12 +502,12 @@ if(((reservationTest && C.reservation?.verifiedEmulator) || reservationProductio
     if(reservationProduction){
       busy=true;$("reserveSubmit").disabled=true;
       try{
-        const client=await getClient();await client.ready(C.firebase,C.reservation);
+        const client=await getClient();await client.ready(C.firebase,C.reservation);if(!await refreshAccount(client))return;
         const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(C.services)));
         const policyVersion=[...new Uint8Array(digest)].map(x=>x.toString(16).padStart(2,'0')).join('');
         payload.pricing={...priceSelection,policyVersion};
         payload.consentVersion=C.reservation.consentVersion;
-      }catch(_){busy=false;$("reserveSubmit").disabled=false;status.textContent='로그인 상태 또는 견적 정보를 확인해 주세요.';return;}
+      }catch(_){busy=false;withdrawalPending=true;$("reserveSubmit").disabled=true;status.textContent='로그인 또는 계정 상태를 확인해 주세요.';return;}
     }
     try{sessionStorage.setItem(key,id);if(sessionStorage.getItem(key)!==id)throw Error();}catch(_){busy=true;$("reserveSubmit").disabled=true;status.textContent='안전하게 접수를 보관할 수 없습니다.';return;}
     pending=id;busy=true;$("reserveSubmit").disabled=true;status.textContent='접수 확인 중입니다.';
