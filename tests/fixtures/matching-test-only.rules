@@ -6,6 +6,7 @@ service cloud.firestore {
     function verifiedCustomer() {
       return request.auth != null
         && request.auth.token.get('email_verified', false) == true
+        && request.auth.token.get('customer', false) == true
         && request.auth.token.firebase.sign_in_provider in ['password', 'google.com'];
     }
     function safeId(id) { return id is string && id.matches('^[A-Za-z0-9_-]{1,80}$'); }
