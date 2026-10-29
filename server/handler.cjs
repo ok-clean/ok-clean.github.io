@@ -53,6 +53,13 @@ function createHttpHandler({auth,appCheck,db,rateLimit,allowedOrigin,services,co
       }
       if(!canManageReservations(caller))return send(403,{status:'unavailable'});
       if(!await rateLimit(caller.uid,'admin'))return send(429,{status:'unavailable'});
+      // Auth ID-token claims can remain valid after a custom role is removed.
+      // Check the current Auth user as well; an unavailable lookup fails closed.
+      // This narrows, but cannot eliminate, the race between an Auth change and
+      // the subsequent Firestore transaction. Provisioning needs its own fence.
+      if(typeof auth.getUser!=='function')return send(503,{status:'unavailable'});
+      const account=await auth.getUser(caller.uid);
+      if(account?.uid!==caller.uid||account.disabled!==false||!canManageReservations(account.customClaims))return send(403,{status:'unavailable'});
       // Admin claims can outlive a role change or withdrawal request. Read the
       // actor lifecycle inside each data transaction so a request cannot race
       // a newly recorded withdrawal marker and continue with those claims.

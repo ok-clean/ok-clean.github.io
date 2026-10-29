@@ -42,6 +42,12 @@ async function main(){
    assert.equal((await send('/admin/list',customer,{})).code,403);
    assert.equal((await send('/admin/list',member,{})).code,403);
    assert.equal((await send('/admin/list',reservation,{})).code,200);
+   // The same still-valid token must lose access when current Auth claims are removed.
+   await auth.setCustomUserClaims('container-reservation',{});
+   assert.equal((await send('/admin/list',reservation,{})).code,403);
+   assert.equal((await send('/admin/history',reservation,{requestId:req.requestId})).code,403);
+   assert.equal((await send('/admin/status',reservation,{requestId:req.requestId,status:'상담중'})).code,403);
+   await auth.setCustomUserClaims('container-reservation',{reservation_admin:true});
    assert.equal((await send('/admin/list',manager,{})).body.items.length,1);
    assert.equal((await send('/admin/status',manager,{requestId:req.requestId,status:'상담중'})).code,200);
    assert.equal((await db.collection('quote_requests').doc(req.requestId).get()).data().status,'상담중');

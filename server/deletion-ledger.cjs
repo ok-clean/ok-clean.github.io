@@ -35,8 +35,14 @@ function createDeletionLedger({ledgerDb,primaryProjectId,ledgerProjectId,clock=(
       tx.create(ref,{sourceProject:primaryProjectId,id:input.id,action:input.action,expectedVersion:input.expectedVersion,expectedHistoryVersion:input.expectedHistoryVersion,state:'pending',recordedAt:at});tx.set(head,{revision});return 'pending';
     });
   }
-  async function markCommitted(input){
-    valid(input);const ref=collection.doc(key(primaryProjectId,input.id,input.action));
+  async function markCommitted(input,completionPermit){
+    valid(input);
+    // An intent is not evidence of deletion. A pending record must never be
+    // made complete by directly calling the public ledger object; only the
+    // guarded worker may finalise the exact operation after an accepted result.
+    const proof=completionPermit&&issued.get(completionPermit);
+    if(!proof||proof.ledger!==ledger||proof.completed!==true||proof.sourceProjectId!==primaryProjectId||proof.id!==input.id||proof.action!==input.action||proof.expectedVersion!==input.expectedVersion||proof.expectedHistoryVersion!==input.expectedHistoryVersion)throw Error('LEDGER_COMPLETION_PROOF_REQUIRED');
+    const ref=collection.doc(key(primaryProjectId,input.id,input.action));
     return ledgerDb.runTransaction(async tx=>{
       const snap=await tx.get(ref);if(!snap.exists)throw Error('LEDGER_INTENT_REQUIRED');const row=snap.data();
       if(row.sourceProject!==primaryProjectId||row.id!==input.id||row.action!==input.action||row.expectedVersion!==input.expectedVersion||row.expectedHistoryVersion!==input.expectedHistoryVersion)throw Error('LEDGER_CONFLICT');
@@ -105,10 +111,14 @@ async function processWithLedger({ledger,service,id,action,expectedVersion,expec
   if(!ledgers.has(ledger)||!service?.process||typeof transactionFence!=='function'||(service.schedulerSafety && service.schedulerSafety.projectId!==ledger.safety.sourceProjectId))throw Error('INCOMPLETE_DELETION_GUARD');
   const input={id,action,expectedVersion,expectedHistoryVersion};valid(input);
   if(await ledger.recordIntent(input)==='committed')throw Error('LEDGER_ALREADY_COMMITTED');
-  const ledgerPermit=issuePermit({...input,sourceProjectId:ledger.safety.sourceProjectId,service});
+  const ledgerPermit=issuePermit({...input,sourceProjectId:ledger.safety.sourceProjectId,service,ledger});
   try {
     const result=await service.process(id,{apply:true,expectedAction:action,expectedVersion,expectedHistoryVersion,transactionFence,ledgerPermit});
-    if(result?.result===action || (action==='history_purged'&&result?.result==='already_purged'))await ledger.markCommitted(input);
+    if(result?.result===action || (action==='history_purged'&&result?.result==='already_purged')){
+      // Only processWithLedger can set this flag, after the worker returned.
+      issued.get(ledgerPermit).completed=true;
+      await ledger.markCommitted(input,ledgerPermit);
+    }
     return result;
   } finally {issued.delete(ledgerPermit);}
 }

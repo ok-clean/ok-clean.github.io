@@ -2,7 +2,8 @@
 // Synthetic Firestore projects only. OIDC, external validation and KMS are test
 // doubles; this does not establish IAM, checkpoint independence or isolation.
 const assert=require('node:assert/strict'),crypto=require('node:crypto'),http=require('node:http'),admin=require('firebase-admin');
-const {createDeletionLedger}=require('../server/deletion-ledger.cjs');
+const {createDeletionLedger,processWithLedger}=require('../server/deletion-ledger.cjs');
+const {getFirestore}=require('firebase-admin/firestore');
 const {createRestoreIssuer,validationMessage,recordBytes,auditRestoredDeletionState}=require('../server/restore-issuer.cjs');
 const {createRestoreGate,startRestoreHealthMonitor}=require('../server/restore-gate.cjs');
 const {createRestoreRenewer}=require('../server/restore-renewal.cjs');
@@ -11,13 +12,16 @@ if(process.env.GCLOUD_PROJECT!==source||process.env.FIRESTORE_EMULATOR_HOST!=='1
 async function main(){
  const app=admin.initializeApp({projectId:project},'restore-issuer-test'),db=admin.firestore(app),ledger=createDeletionLedger({ledgerDb:db,primaryProjectId:source,ledgerProjectId:project});
  const controlApp=admin.initializeApp({projectId:'demo-okclean-control'},'restore-renew-control'),controlDb=admin.firestore(controlApp);
- const restoredApp=admin.initializeApp({projectId:source},'restore-audit-test'),restoredDb=admin.firestore(restoredApp);let server,monitor;
+ const restoredApp=admin.initializeApp({projectId:source},'restore-audit-test'),sourceDb=admin.firestore(restoredApp),restoredDatabaseId='restore-audit-test',restoredDb=getFirestore(restoredApp,restoredDatabaseId);let server,monitor;
  let now=Date.now();const verifier=crypto.generateKeyPairSync('ed25519'),signer=crypto.generateKeyPairSync('ed25519'),pem=k=>k.export({format:'pem',type:'spki'}),aud='https://synthetic.run.app',email='issuer@demo-okclean.iam.gserviceaccount.com';
  try{
   const input={id:'synthetic-issuer',action:'redacted',expectedVersion:'1:0',expectedHistoryVersion:'a'.repeat(64)};
-  await ledger.recordIntent(input);await ledger.markCommitted(input);
+  // This fixture simulates the source worker; the independent ledger is real
+  // emulator storage but the worker does not delete customer data.
+  await processWithLedger({ledger,service:{process:async()=>({result:input.action})},...input,transactionFence:async()=>true});
   const record={sourceProject:source,...input,state:'committed'},proof={sourceProject:source,ledgerProject:project,restoreId,checkpoint:crypto.createHash('sha256').update(recordBytes(record)).digest('hex'),ledgerRevision:2,recordCount:1,issuedAt:now,expiresAt:now+540000,isolated:true,replayed:true,state:'verified'};
-  const audit={ledgerDb:db,restoredDb,sourceProject:source,ledgerProject:project,checkpoint:proof.checkpoint,ledgerRevision:proof.ledgerRevision,recordCount:1};
+  const audit={ledgerDb:db,sourceDb,restoredDb,restoredDatabaseId,sourceProject:source,ledgerProject:project,checkpoint:proof.checkpoint,ledgerRevision:proof.ledgerRevision,recordCount:1};
+  await assert.rejects(auditRestoredDeletionState({...audit,restoredDb:sourceDb,restoredDatabaseId:'(default)'}),/RESTORE_AUDIT_CONFIGURATION_INVALID/);
   const parent=restoredDb.collection('quote_requests').doc(input.id);
   await parent.set({name:'synthetic personal data'});
   await assert.rejects(auditRestoredDeletionState(audit),/RESTORE_REAPPLICATION_REQUIRED/);

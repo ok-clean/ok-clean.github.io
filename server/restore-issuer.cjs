@@ -69,8 +69,14 @@ module.exports={createRestoreIssuer,validationMessage,recordBytes};
 // isolation, checkpoint completeness, or authorization and never signs proof.
 // An independent authority must verify those properties and keep all writers
 // fenced from the start of this scan until the restored service is released.
-async function auditRestoredDeletionState({ledgerDb,restoredDb,sourceProject,ledgerProject,checkpoint,ledgerRevision,recordCount}){
- if(!proj.test(sourceProject||'')||!proj.test(ledgerProject||'')||sourceProject===ledgerProject||ledgerDb?.projectId!==ledgerProject||restoredDb?.projectId!==sourceProject||!ledgerDb?.collection||!ledgerDb?.runTransaction||!restoredDb?.collection||!hex.test(checkpoint||'')||!Number.isSafeInteger(ledgerRevision)||ledgerRevision<0||!Number.isSafeInteger(recordCount)||recordCount<0||recordCount>100000)throw Error('RESTORE_AUDIT_CONFIGURATION_INVALID');
+async function auditRestoredDeletionState({ledgerDb,sourceDb,restoredDb,restoredDatabaseId,sourceProject,ledgerProject,checkpoint,ledgerRevision,recordCount}){
+ // Firestore native backups restore to a different database in the same project.
+ // Project ID alone therefore cannot distinguish the live database from the
+ // restored one. Bind the audit to the named database configured by the
+ // trusted operator, and reject the currently serving database. A database ID
+ // is not a restore-generation proof or an IAM/network isolation guarantee.
+ const databaseId=x=>x==='(default)'||typeof x==='string'&&/^[a-z][a-z0-9-]{2,61}[a-z0-9]$/.test(x);
+ if(!proj.test(sourceProject||'')||!proj.test(ledgerProject||'')||sourceProject===ledgerProject||ledgerDb?.projectId!==ledgerProject||sourceDb?.projectId!==sourceProject||restoredDb?.projectId!==sourceProject||!databaseId(sourceDb.databaseId)||!databaseId(restoredDb.databaseId)||restoredDb.databaseId!==restoredDatabaseId||sourceDb.databaseId===restoredDatabaseId||!ledgerDb?.collection||!ledgerDb?.runTransaction||!restoredDb?.collection||!hex.test(checkpoint||'')||!Number.isSafeInteger(ledgerRevision)||ledgerRevision<0||!Number.isSafeInteger(recordCount)||recordCount<0||recordCount>100000)throw Error('RESTORE_AUDIT_CONFIGURATION_INVALID');
  const entries=ledgerDb.collection('deletion_ledger'),head=ledgerDb.collection('deletion_ledger_meta').doc(sourceProject);
  async function stable(){return ledgerDb.runTransaction(async tx=>{
   const h=await tx.get(head),pending=await tx.get(entries.where('state','==','pending').limit(1));
@@ -109,6 +115,6 @@ async function auditRestoredDeletionState({ledgerDb,restoredDb,sourceProject,led
  }
  if(count!==recordCount||digest.digest('hex')!==checkpoint)throw Error('RESTORE_CHECKPOINT_MISMATCH');
  await stable();
- return {recordCount:count,checkpoint,ledgerRevision};
+ return {recordCount:count,checkpoint,ledgerRevision,restoredDatabaseId};
 }
 module.exports.auditRestoredDeletionState=auditRestoredDeletionState;
