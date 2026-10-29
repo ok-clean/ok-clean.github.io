@@ -341,9 +341,21 @@ const reservationTest = C.reservation?.emulator === true &&
   /^demo-[a-z0-9-]+$/.test(C.firebase?.projectId || '');
 if(reservationTest && $("qReserve") && $("reservationForm")){
   const button=$("qReserve"), form=$("reservationForm"), status=$("reserveStatus");
-  let locked=false;
+  const pendingKey='okclean-reservation-attempt-v1';
+  let locked=false, pending=null, storageReady=true;
+  try{pending=sessionStorage.getItem(pendingKey);}catch(_){storageReady=false;}
+  if(!storageReady || pending !== null){
+    locked=true;$("reserveSubmit").disabled=true;
+    status.textContent=storageReady
+      ? "이전 접수 결과가 확인되지 않았어요. 중복을 막기 위해 관리자에게 확인해 주세요."
+      : "이 브라우저에서 접수 상태를 안전하게 보관할 수 없어 예약을 진행할 수 없어요.";
+  }
   button.hidden=false;
   button.onclick=()=>{form.hidden=false;$("reserveName").focus();};
+  $("reserveNew").onclick=()=>{
+    if(locked)return;
+    form.reset();$("reserveNew").hidden=true;$("reserveSubmit").disabled=false;status.textContent='';$("reserveName").focus();
+  };
   form.onsubmit=async e=>{
     e.preventDefault();
     if(locked)return;
@@ -357,6 +369,15 @@ if(reservationTest && $("qReserve") && $("reservationForm")){
     const names={'move-in':'입주·이사 청소',regular:'거주·정기 청소',office:'사무실·상가 청소',clinic:'사무실·상가 청소',aircon:'에어컨 청소'};
     const allowed=['춘천','화천','양구','인제','철원','홍천','횡성','가평'];
     const result=estimate(), id=crypto.randomUUID();
+    // Only a random attempt ID is stored; customer details remain in memory.
+    try{
+      sessionStorage.setItem(pendingKey,id);
+      if(sessionStorage.getItem(pendingKey)!==id)throw new Error('storage failed');
+    }catch(_){
+      locked=true;$("reserveSubmit").disabled=true;
+      status.textContent="접수 상태를 안전하게 보관할 수 없어 예약을 진행할 수 없어요.";
+      return;
+    }
     const payload={name,phone,size,notes,service:names[cur.svc]||'그 외 청소',area:allowed.includes($("qArea").value)?$("qArea").value:'그 외 지역',date:$("qDate").value,
       estimateMin:result?.lo ?? null,estimateMax:result?.hi ?? null};
     locked=true;$("reserveSubmit").disabled=true;status.textContent="접수 확인 중입니다.";
@@ -364,7 +385,11 @@ if(reservationTest && $("qReserve") && $("reservationForm")){
     try{
       const client=await import('./reservation-emulator.js');
       const saved=await client.submitReservation(C.firebase,id,payload);
-      form.reset();status.textContent="시험 접수 완료 · 접수번호: "+saved;
+      form.reset();
+      try{sessionStorage.removeItem(pendingKey);if(sessionStorage.getItem(pendingKey)!==null)throw new Error('storage failed');}
+      catch(_){status.textContent="시험 접수 완료 · 접수번호: "+saved+" · 이 창에서는 새 신청을 진행할 수 없어요.";return;}
+      status.textContent="시험 접수 완료 · 접수번호: "+saved;
+      locked=false;$("reserveNew").hidden=false;
     }catch(_){
       status.textContent="접수를 확인하지 못했습니다. 중복을 막기 위해 다시 제출하지 말고 관리자에게 확인해 주세요.";
     }finally{clearTimeout(timer);}

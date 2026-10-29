@@ -345,6 +345,7 @@ def index_page(c, cases=()):
       <div class="field"><label for="reserveNotes">요청사항</label><textarea id="reserveNotes" maxlength="500" autocomplete="off"></textarea></div>
       <label><input id="reserveConsent" type="checkbox" required> 예약 접수 시험에 동의합니다.</label>
       <button class="btn glove" id="reserveSubmit" type="submit">예약 접수</button>
+      <button class="btn line" id="reserveNew" type="button" hidden>새 예약 작성</button>
       <p id="reserveStatus" role="status" aria-live="polite"></p>
     </form>
   </div>

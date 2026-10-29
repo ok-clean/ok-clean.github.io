@@ -112,6 +112,18 @@ async function main(){
     assert.equal(otherReplay,true,'new session cannot overwrite an existing request ID');
     assert.equal((await db.collection('quote_requests').get()).size,1,'replays do not create a second request');
     await other.close();
+    assert.equal(await page.evaluate(()=>sessionStorage.getItem('okclean-reservation-attempt-v1')),null,'acknowledged ID is removed');
+    await page.locator('#reserveNew').click();
+    await page.locator('#reserveName').fill('가상두번째');
+    await page.locator('#reservePhone').fill('01000000001');
+    await page.locator('#reserveSize').fill('20');
+    await page.locator('#reserveNotes').fill('가상 두번째 요청');
+    await page.locator('#reserveConsent').check();
+    await page.locator('#reserveSubmit').click();
+    await page.waitForFunction(()=>document.querySelector('#reserveStatus').textContent.includes('시험 접수 완료'),null,{timeout:30000});
+    const second=(await page.locator('#reserveStatus').innerText()).match(/접수번호: ([a-f0-9-]+)/)?.[1];
+    assert.ok(second && second!==id,'a deliberate new reservation gets a new ID');
+    assert.equal((await db.collection('quote_requests').get()).size,2);
     const denied=await page.evaluate(async()=>{
       const f=await import('/firebase-bundle.js'), app=f.getApp('reservation-emulator');
       try{await f.getDocs(f.collection(f.getFirestore(app),'quote_requests'));return false;}catch(e){return e.code==='permission-denied';}
@@ -138,6 +150,30 @@ async function main(){
     assert.equal(await restored.locator('select').inputValue(),'상담중');
     assert.deepEqual(adminErrors,[]);
     await manager.close();await customer.close();
+    // A write with its Firestore network blocked remains uncertain across reload.
+    const interrupted=await context(), interruptedPage=await interrupted.newPage();
+    await interruptedPage.goto(base+'/',{waitUntil:'load'});
+    await interruptedPage.locator('#qArea').selectOption('춘천');
+    await interruptedPage.locator('#qDate').fill(date);
+    await interruptedPage.locator('#qReserve').click();
+    await interruptedPage.locator('#reserveName').fill('가상대기');
+    await interruptedPage.locator('#reservePhone').fill('01000000002');
+    await interruptedPage.locator('#reserveSize').fill('15');
+    await interruptedPage.locator('#reserveNotes').fill('가상 대기 요청');
+    await interruptedPage.locator('#reserveConsent').check();
+    await interrupted.route('http://127.0.0.1:8085/**',route=>route.abort());
+    await interruptedPage.locator('#reserveSubmit').click();
+    const pending=await interruptedPage.evaluate(()=>sessionStorage.getItem('okclean-reservation-attempt-v1'));
+    assert.match(pending,/^[a-f0-9-]{36}$/);
+    const storage=await interruptedPage.evaluate(()=>JSON.stringify({...sessionStorage}));
+    assert.doesNotMatch(storage,/가상대기|01000000002|가상 대기 요청/);
+    await interruptedPage.reload({waitUntil:'load'});
+    await interruptedPage.locator('#qReserve').click();
+    assert.equal(await interruptedPage.locator('#reserveSubmit').isDisabled(),true);
+    assert.match(await interruptedPage.locator('#reserveStatus').innerText(),/확인되지 않았어요/);
+    assert.equal(await interruptedPage.evaluate(()=>sessionStorage.getItem('okclean-reservation-attempt-v1')),pending);
+    assert.equal((await db.collection('quote_requests').get()).size,2,'blocked in-flight attempt did not create another document');
+    await interrupted.close();
     console.log('PASS: real browser reservation -> emulators -> admin status -> reload');
   }finally{
     await browser.close();await new Promise(resolve=>server.close(resolve));await app.delete();
