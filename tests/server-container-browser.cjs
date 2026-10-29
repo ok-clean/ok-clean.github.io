@@ -2,6 +2,7 @@
 // Real production client in a browser, a locally built server container and Auth/Firestore emulators.
 // App Check and network routing are test-only; no calls to production are allowed.
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+const http=require('node:http');
 const {execFileSync}=require('node:child_process');const {chromium}=require('playwright');const admin=require('firebase-admin');
 const project='demo-okclean-integration',origin='https://ok-clean.github.io',api='https://reservation-integration.run.app';
 if(process.env.FIREBASE_AUTH_EMULATOR_HOST!=='127.0.0.1:9099'||process.env.FIRESTORE_EMULATOR_HOST!=='127.0.0.1:8085'||process.env.GCLOUD_PROJECT!==project)throw Error('Loopback demo emulators required');
@@ -18,6 +19,22 @@ async function main(){
  cfg.reservation={enabled:true,withdrawalEnabled:true,withdrawalPolicyReviewed:true,memberLinkEnabled:true,memberLinkPolicyReviewed:true,memberLinkPolicyVersion:'test-member-v1',apiUrl:api,appCheckSiteKey:'synthetic-test-site-key',consentText:'가상 시험 동의',consentVersion:'test-v1',privacy:{operator:'가상 사업자',officer:'가상 책임자',retention:'시험 후 삭제',policyUrl:'https://ok-clean.github.io/privacy-test',reviewed:true}};
  fs.writeFileSync(configPath,JSON.stringify(cfg));execFileSync('python3',['-c','import build; build.run()'],{cwd:root,stdio:'ignore'});
  const fb=admin.initializeApp({projectId:project},'container-browser'),db=admin.firestore(fb);
+ // Test-only streaming proxy: forward the real browser SDK traffic to the real
+ // loopback Firestore emulator while supplying CORS/PNA headers for the virtual
+ // HTTPS site. Requests and replies are piped; no Firestore responses are faked.
+ let firestoreProxyRequests=0;
+ const firestoreProxy=http.createServer((req,res)=>{
+  if(req.headers.origin && req.headers.origin!==origin){res.writeHead(403);return res.end();}
+  const cors={'access-control-allow-origin':origin,'access-control-allow-methods':'GET, POST, OPTIONS','access-control-allow-headers':req.headers['access-control-request-headers']||'content-type, authorization, x-goog-api-client, x-firebase-appcheck','access-control-allow-private-network':'true','access-control-allow-credentials':'true'};
+  if(req.method==='OPTIONS'){res.writeHead(204,cors);return res.end();}
+  if(!['GET','POST'].includes(req.method)){res.writeHead(405,cors);return res.end();}
+  firestoreProxyRequests++;
+  const upstream=http.request({host:'127.0.0.1',port:8085,path:req.url,method:req.method,headers:{...req.headers,host:'127.0.0.1:8085'}},reply=>{res.writeHead(reply.statusCode||502,{...reply.headers,...cors});reply.pipe(res);});
+  upstream.on('error',()=>{if(!res.headersSent)res.writeHead(502,cors);res.end();});
+  req.on('aborted',()=>upstream.destroy());res.on('close',()=>upstream.destroy());req.pipe(upstream);
+ });
+ await new Promise((resolve,reject)=>{firestoreProxy.once('error',reject);firestoreProxy.listen(0,'127.0.0.1',resolve);});
+ const firestoreProxyPort=firestoreProxy.address().port;
  const browser=await chromium.launch({headless:true});
  const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css','.json':'application/json'};
  async function context({simulateMemberDenial=false}={}){
@@ -35,12 +52,12 @@ async function main(){
     if(route.request().method()==='OPTIONS')return route.fulfill({status:204,headers,body:''});
     const response=await route.fetch();return route.fulfill({response,headers:{...response.headers(),...headers}});
    }
-   if(u.hostname==='127.0.0.1'&&u.port==='8085')return route.continue();
+   if(u.hostname==='127.0.0.1'&&u.port===String(firestoreProxyPort))return route.continue();
    if(u.origin==='https://www.gstatic.com'&&u.pathname==='/firebasejs/10.14.1/firebase-app-check.js')return route.fulfill({status:200,contentType:'text/javascript',headers:{'Access-Control-Allow-Origin':'*'},body:'export class ReCaptchaV3Provider {constructor(key){}} export function initializeAppCheck(){return {}} export async function getToken(){return {token:"test-app-check"}}'});
    if(u.origin==='https://www.gstatic.com'&&u.pathname==='/firebasejs/10.14.1/firebase-auth.js')return route.fulfill({status:200,contentType:'text/javascript',headers:{'Access-Control-Allow-Origin':'*'},body:`export * from '${origin}/firebase-bundle.js'; import {getAuth as real,connectAuthEmulator} from '${origin}/firebase-bundle.js'; const seen=new WeakSet(); export function getAuth(...args){const a=real(...args);if(!seen.has(a)){connectAuthEmulator(a,'http://127.0.0.1:9099',{disableWarnings:true});seen.add(a)}return a}`});
    if(u.origin==='https://www.gstatic.com'&&u.pathname==='/firebasejs/10.14.1/firebase-firestore.js'){
     const memberDenial=simulateMemberDenial ? `export function onSnapshot(...args){const fail=args[args.length-1];setTimeout(()=>fail({code:'permission-denied'}),0);return ()=>{};}` : '';
-    return route.fulfill({status:200,contentType:'text/javascript',headers:{'Access-Control-Allow-Origin':'*'},body:`export * from '${origin}/firebase-bundle.js'; import {getFirestore as real,connectFirestoreEmulator} from '${origin}/firebase-bundle.js'; const seen=new WeakSet(); export function getFirestore(...args){const d=real(...args);if(!seen.has(d)){connectFirestoreEmulator(d,'127.0.0.1',8085);seen.add(d)}return d} ${memberDenial}`});
+    return route.fulfill({status:200,contentType:'text/javascript',headers:{'Access-Control-Allow-Origin':'*'},body:`export * from '${origin}/firebase-bundle.js'; import {getFirestore as real,connectFirestoreEmulator} from '${origin}/firebase-bundle.js'; const seen=new WeakSet(); export function getFirestore(...args){const d=real(...args);if(!seen.has(d)){connectFirestoreEmulator(d,'127.0.0.1',${firestoreProxyPort});seen.add(d)}return d} ${memberDenial}`});
    }
    if(u.origin==='https://www.gstatic.com'&&u.pathname==='/firebasejs/10.14.1/firebase-app.js')return route.fulfill({status:200,contentType:'text/javascript',headers:{'Access-Control-Allow-Origin':'*'},body:`export * from '${origin}/firebase-bundle.js'`});
    return route.abort();
@@ -55,7 +72,10 @@ async function main(){
   // Same-page member creation is the only way to obtain a candidate. Existing
   // local membership data is never matched by phone or name.
   await page.locator('[data-join]').first().click();await page.locator('#jName').fill('가상회원');await page.locator('#jPhone').fill('01000000009');await page.locator('#jAgree').check();await page.locator('#jSubmit').click();
-  await page.getByText('회원정보 접수 요청이 완료됐어요. 카톡으로 가입을 확인해 주세요.').waitFor({timeout:30000});await page.locator('#join [data-close]').click();
+  await page.getByText('회원정보 접수 요청이 완료됐어요. 카톡으로 가입을 확인해 주세요.').waitFor({timeout:30000});
+  assert.ok(firestoreProxyRequests>0,'browser must send real SDK traffic to Firestore emulator');
+  assert.ok((await db.collection('member_requests').get()).size>0,'membership must exist in Firestore emulator');
+  await page.locator('#join [data-close]').click();
   await page.locator('#qArea').selectOption('춘천');await page.locator('#qDate').fill(new Date(Date.now()+7*86400000).toISOString().slice(0,10));await page.locator('#qReserve').click();
   await page.locator('#reserveEmail').fill('container-user@example.test');await page.locator('#reservePassword').fill('synthetic-test-password');await page.locator('#reserveLogin').click();try{await page.getByText('로그인했습니다.').waitFor({timeout:10000});}catch{throw Error('login failed: '+await page.locator('#reserveStatus').innerText()+' / '+await page.evaluate(()=>globalThis.__testAuthError||'no-auth-error'));}
   await page.locator('#reserveMemberLinkSubmit').click();await page.getByText('회원 계정 연결에 동의해 주세요.').waitFor({timeout:10000});
@@ -108,6 +128,6 @@ async function main(){
   await reserveCard.locator('select').selectOption('예약확정');await reserveCard.getByRole('button',{name:'상태 저장'}).click();await rp.getByText('상태가 저장되었습니다.').waitFor();
   assert.equal((await db.collection('quote_requests').doc(id).get()).data().status,'예약확정');
   await reserveOnly.close();await manager.close();await next.close();await ctx.close();console.log('PASS production client -> container server -> Firebase emulators, App Check test double');
- }finally{await browser.close();await fb.delete();}
+ }finally{await browser.close();firestoreProxy.closeAllConnections();await new Promise(resolve=>firestoreProxy.close(resolve));await fb.delete();}
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});
