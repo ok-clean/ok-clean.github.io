@@ -1,0 +1,91 @@
+name: 견적 변경 테스트
+on:
+  pull_request:
+    paths:
+      - 'app.js'
+      - 'site.js'
+      - 'sw.js'
+      - 'style.css'
+      - 'index.html'
+      - 'build.py'
+      - 'update.py'
+      - 'area/**'
+      - 'admin/**'
+      - 'privacy.html'
+      - 'sitemap.xml'
+      - 'config.json'
+      - 'tests/**'
+      - 'scripts/stage_pages.py'
+      - '.github/workflows/update.yml'
+      - '.github/workflows/quote-tests.yml'
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node tests/estimate.test.cjs
+      - run: node tests/case-cache.test.cjs
+      - run: node tests/sw-cache-lifetime.test.cjs
+      - run: python3 tests/test_pages_staging.py
+      - run: python3 tests/test_pages_publish_guard.py
+      - run: python3 tests/test_privacy_page.py
+      - run: python3 tests/test_sitemap.py
+      - run: python3 tests/test_region_pages.py
+      - run: python3 tests/test_case_links.py
+      - run: python3 tests/test_case_notice.py
+      - run: python3 tests/test_case_archive.py
+      - run: npm install --no-save --no-package-lock playwright@1.56.1
+      - run: npx playwright install --with-deps chromium
+      - name: Start local test server
+        run: python3 -m http.server 8765 --bind 127.0.0.1 > /tmp/okclean-test-server.log 2>&1 &
+      - run: node tests/browser-smoke.cjs
+      - run: node tests/region-browser.cjs
+      - run: node tests/service-browser.cjs
+      - run: node tests/case-loading-browser.cjs
+      - run: node tests/offline-browser.cjs
+      - run: node tests/mobile-nav-browser.cjs
+      - run: node tests/member-storage-browser.cjs
+      - run: node tests/join-prompt-browser.cjs
+      - run: node tests/quote-focus-browser.cjs
+      - run: node tests/referral-browser.cjs
+      - run: node tests/quote-empty-quantity-browser.cjs
+      - run: node tests/quote-storage-recovery-browser.cjs
+      - run: node tests/kakao-copy-retry-browser.cjs
+      - run: node tests/member-delete-async-browser.cjs
+      - run: node tests/admin-session-browser.cjs
+      - run: node tests/minimum-notice-browser.cjs
+      - name: Generate an isolated site with fake settings and RSS
+        run: python3 tests/build-generated-fixture.py
+      - name: Start generated fixture server
+        run: python3 -m http.server 8766 --bind 127.0.0.1 --directory "$(cat /tmp/okclean-generated-root.txt)" > /tmp/okclean-generated-server.log 2>&1 &
+      - run: node tests/generated-pages-browser.cjs
+      - run: OKCLEAN_TEST_BASE=http://127.0.0.1:8766 node tests/region-browser.cjs
+      - run: OKCLEAN_TEST_BASE=http://127.0.0.1:8766 node tests/service-browser.cjs
+      - run: OKCLEAN_TEST_BASE=http://127.0.0.1:8766 node tests/quote-focus-browser.cjs
+      - name: Stage synthetic generated Pages output
+        run: python3 scripts/stage_pages.py "$(cat /tmp/okclean-generated-root.txt)" "$RUNNER_TEMP/okclean-pages-test"
+      - name: Start staged fixture server
+        run: python3 -m http.server 8767 --bind 127.0.0.1 --directory "$RUNNER_TEMP/okclean-pages-test" > /tmp/okclean-staged-server.log 2>&1 &
+      - run: OKCLEAN_TEST_BASE=http://127.0.0.1:8767 node tests/generated-pages-browser.cjs
+      - run: OKCLEAN_TEST_BASE=http://127.0.0.1:8767 node tests/region-browser.cjs
+      - run: OKCLEAN_TEST_BASE=http://127.0.0.1:8767 node tests/service-browser.cjs
+      - run: OKCLEAN_TEST_BASE=http://127.0.0.1:8767 node tests/quote-focus-browser.cjs
+      - name: Save member screen captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: member-privacy-screens
+          path: |
+            /tmp/okclean-member-privacy-*.png
+            /tmp/okclean-privacy-notice-*.png
+            /tmp/okclean-mobile-nav-*.png
+            /tmp/okclean-member-storage-*.png
+            /tmp/okclean-member-sheet-*.png
+            /tmp/okclean-minimum-notice-*.png
+          if-no-files-found: ignore
