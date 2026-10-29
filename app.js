@@ -339,7 +339,7 @@ $("qKakao").onclick = async () => {
 const reservationTest = C.reservation?.emulator === true &&
   ['localhost','127.0.0.1'].includes(location.hostname) &&
   /^demo-[a-z0-9-]+$/.test(C.firebase?.projectId || '');
-if(reservationTest && $("qReserve") && $("reservationForm")){
+if(reservationTest && !C.reservation?.verifiedEmulator && $("qReserve") && $("reservationForm")){
   const button=$("qReserve"), form=$("reservationForm"), status=$("reserveStatus");
   const pendingKey='okclean-reservation-attempt-v1';
   let locked=false, pending=null, storageReady=true;
@@ -395,6 +395,53 @@ if(reservationTest && $("qReserve") && $("reservationForm")){
     }finally{clearTimeout(timer);}
   };
 }
+
+// Verified-account recovery is available only against the local test server.
+if(reservationTest && C.reservation?.verifiedEmulator && $("qReserve") && $("reservationForm")){
+  const form=$("reservationForm"), status=$("reserveStatus"), key='okclean-reservation-attempt-v1';
+  let busy=false, pending=null;
+  try{pending=sessionStorage.getItem(key);}catch(_){busy=true;}
+  $("qReserve").hidden=false;$("reserveVerified").hidden=false;
+  $("qReserve").onclick=()=>{form.hidden=false;};
+  $("reserveSubmit").disabled=busy||!!pending;
+  if(pending){$("reserveReceipt").value=pending;status.textContent='이전 접수 확인이 필요합니다. 로그인 후 접수를 확인해 주세요.';}
+  async function recover(id){
+    if(busy || !/^[A-Za-z0-9_-]{1,80}$/.test(id))return;
+    busy=true;status.textContent='접수를 확인하고 있습니다.';
+    try{
+      const client=await import('./verified-reservation-emulator.js');
+      await client.recover(C.firebase,id);
+      if(sessionStorage.getItem(key)===id)sessionStorage.removeItem(key);
+      pending=null;status.textContent='시험 접수 완료 · 접수번호: '+id;
+      $("reserveNew").hidden=false;$("reserveSubmit").disabled=true;
+    }catch(_){status.textContent='접수 여부를 확인하지 못했습니다. 관리자에게 확인해 주세요.';}
+    finally{busy=false;}
+  }
+  $("reserveLogin").onclick=async()=>{
+    try{const client=await import('./verified-reservation-emulator.js');
+      const ok=await client.login(C.firebase,$("reserveEmail").value,$("reservePassword").value);
+      $("reservePassword").value='';if(!ok)throw Error();
+      status.textContent='시험 계정으로 로그인했습니다.';if(pending)await recover(pending);
+    }catch(_){$("reservePassword").value='';status.textContent='시험 계정 인증을 확인해 주세요.';}
+  };
+  $("reserveRecover").onclick=()=>recover($("reserveReceipt").value.trim());
+  $("reserveNew").onclick=()=>{if(busy||pending)return;form.reset();$("reserveNew").hidden=true;$("reserveSubmit").disabled=false;status.textContent='';};
+  form.onsubmit=async e=>{
+    e.preventDefault();if(busy||pending)return;
+    if(!validateQuoteDateBeforeSend()||!$("qArea").value||!$("qDate").value||!form.reportValidity())return;
+    const names={'move-in':'입주·이사 청소',regular:'거주·정기 청소',office:'사무실·상가 청소',clinic:'사무실·상가 청소',aircon:'에어컨 청소'};
+    const allowed=['춘천','화천','양구','인제','철원','홍천','횡성','가평'], result=estimate();
+    const id=crypto.randomUUID(), payload={name:$("reserveName").value.trim(),phone:$("reservePhone").value.trim(),size:Number($("reserveSize").value),notes:$("reserveNotes").value,service:names[cur.svc]||'그 외 청소',area:allowed.includes($("qArea").value)?$("qArea").value:'그 외 지역',date:$("qDate").value,consent:$("reserveConsent").checked};
+    if(result?.lo!=null)payload.estimateMin=result.lo;if(result?.hi!=null)payload.estimateMax=result.hi;
+    try{sessionStorage.setItem(key,id);if(sessionStorage.getItem(key)!==id)throw Error();}catch(_){status.textContent='안전하게 접수를 보관할 수 없습니다.';return;}
+    pending=id;busy=true;$("reserveSubmit").disabled=true;status.textContent='접수 확인 중입니다.';
+    try{const client=await import('./verified-reservation-emulator.js');await client.submit(C.firebase,id,payload);
+      sessionStorage.removeItem(key);pending=null;form.reset();$("reserveNew").hidden=false;status.textContent='시험 접수 완료 · 접수번호: '+id;
+    }catch(_){$("reserveReceipt").value=id;status.textContent='접수 결과를 확인하지 못했습니다. 로그인 후 접수를 확인하거나 관리자에게 문의해 주세요.';}
+    finally{busy=false;}
+  };
+}
+
 drawForm();
 
 // ── 서비스 분류 칩 ──

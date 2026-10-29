@@ -339,6 +339,13 @@ def index_page(c, cases=()):
     </div>
     <form id="reservationForm" hidden>
       <p>예약 접수 시험입니다. 가상 정보만 입력해 주세요.</p>
+      <div id="reserveVerified" hidden>
+        <label>시험 계정 이메일 <input id="reserveEmail" type="email" autocomplete="off"></label>
+        <label>시험 계정 비밀번호 <input id="reservePassword" type="password" autocomplete="off"></label>
+        <button class="btn line" id="reserveLogin" type="button">시험 계정 로그인</button>
+        <label>기존 접수번호 <input id="reserveReceipt" autocomplete="off" maxlength="80"></label>
+        <button class="btn line" id="reserveRecover" type="button">접수 확인</button>
+      </div>
       <div class="field"><label for="reserveName">이름</label><input id="reserveName" maxlength="30" required autocomplete="off"></div>
       <div class="field"><label for="reservePhone">휴대폰 번호</label><input id="reservePhone" type="tel" required autocomplete="off"></div>
       <div class="field"><label for="reserveSize">규모</label><input id="reserveSize" type="number" min="1" max="999" step="1" required></div>

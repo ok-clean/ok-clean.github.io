@@ -7,6 +7,8 @@ const path=require('node:path');
 const {execFileSync}=require('node:child_process');
 const {chromium}=require('playwright');
 const admin=require('firebase-admin');
+const {createVerifiedReservationHandler}=require('../prototype/security/verified-reservation-handler.cjs');
+const {createReceiptStatusHandler}=require('../prototype/security/receipt-status-handler.cjs');
 const project='demo-okclean-integration';
 if(process.env.FIREBASE_AUTH_EMULATOR_HOST!=='127.0.0.1:9099' ||
    process.env.FIRESTORE_EMULATOR_HOST!=='127.0.0.1:8085' ||
@@ -16,7 +18,7 @@ async function main(){
   execFileSync('python3',['tests/build-generated-fixture.py'],{stdio:'ignore'});
   const root=fs.readFileSync('/tmp/okclean-generated-root.txt','utf8').trim();
   if(!root.startsWith('/tmp/okclean-generated-'))throw new Error('Unexpected fixture directory');
-  for(const name of ['reservation-emulator.js','admin/admin.js','admin/index.html']){
+  for(const name of ['reservation-emulator.js','verified-reservation-emulator.js','admin/admin.js','admin/index.html']){
     const dest=path.join(root,name);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(name,dest);
   }
   fs.copyFileSync('reservation-emulator.js',path.join(root,'reservation-real.js'));
@@ -33,10 +35,24 @@ async function main(){
   const uid='REPLACE_WITH_ADMIN_UID', email='admin@example.test', password='test-password-123';
   await auth.createUser({uid,email,password,emailVerified:true});
   await auth.setCustomUserClaims(uid,{admin:true});
+  const verifiedCustomer='customer@example.test', otherCustomer='other@example.test', customerPassword='test-password-123';
+  await auth.createUser({uid:'verified-customer',email:verifiedCustomer,password:customerPassword,emailVerified:true});
+  await auth.createUser({uid:'verified-other',email:otherCustomer,password:customerPassword,emailVerified:true});
+  const verifyIdToken=token=>auth.verifyIdToken(token,true);
+  const submitVerified=createVerifiedReservationHandler({verifyIdToken,db,enforceRateLimit:async()=>true});
+  const receiptStatus=createReceiptStatusHandler({verifyIdToken,loadRequest:async id=>{const s=await db.collection('quote_requests').doc(id).get();return s.exists?s.data():null;},enforceRateLimit:async()=>true});
   const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css','.json':'application/json'};
   const server=http.createServer((req,res)=>{
     let pathname;
     try {pathname=decodeURIComponent(new URL(req.url,'http://127.0.0.1').pathname);}catch{res.writeHead(400);return res.end();}
+    if(req.method==='POST' && ['/emulator/reservation/submit','/emulator/reservation/status'].includes(pathname)){
+      let body='';req.on('data',chunk=>{body+=chunk;if(body.length>8192)req.destroy();});req.on('end',async()=>{
+        try{const data=JSON.parse(body), idToken=(req.headers.authorization||'').replace(/^Bearer /,'');
+          const result=pathname.endsWith('/submit')?await submitVerified({idToken,requestId:data.requestId,form:data.form}):await receiptStatus({idToken,requestId:data.requestId});
+          res.writeHead(result.httpStatus,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(result.body));
+        }catch{res.writeHead(400);res.end();}
+      });return;
+    }
     const file=path.resolve(root,'.'+(pathname==='/'?'/index.html':pathname));
     if(!file.startsWith(root+path.sep)){res.writeHead(403);return res.end();}
     fs.readFile(file,(err,data)=>{
@@ -209,6 +225,36 @@ async function main(){
     assert.equal(await lostPage.evaluate(()=>sessionStorage.getItem('okclean-reservation-attempt-v1')),lostId);
     assert.equal((await db.collection('quote_requests').get()).size,3,'lost response plus reload must not duplicate');
     await lost.close();
+
+    // Verified flow: real Auth/Firestore emulators and actual website form.
+    cfg.reservation.verifiedEmulator=true;fs.writeFileSync(configPath,JSON.stringify(cfg));
+    const verified=await context(), vp=await verified.newPage();
+    await vp.goto(base+'/',{waitUntil:'load'});await vp.locator('#qArea').selectOption('춘천');await vp.locator('#qDate').fill(date);await vp.locator('#qReserve').click();
+    await vp.locator('#reserveEmail').fill(verifiedCustomer);await vp.locator('#reservePassword').fill(customerPassword);await vp.locator('#reserveLogin').click();
+    await vp.getByText('시험 계정으로 로그인했습니다.').waitFor();
+    await vp.locator('#reserveName').fill('검증고객');await vp.locator('#reservePhone').fill('01000000004');await vp.locator('#reserveSize').fill('25');await vp.locator('#reserveNotes').fill('검증 예약');await vp.locator('#reserveConsent').check();
+    let capturedForm;await verified.route('**/emulator/reservation/submit',async route=>{capturedForm=route.request().postDataJSON().form;await route.fetch();await route.abort();});
+    await vp.locator('#reserveSubmit').click();await vp.getByText(/접수 결과를 확인하지 못했습니다/).waitFor({timeout:30000});
+    const verifiedId=await vp.evaluate(()=>sessionStorage.getItem('okclean-reservation-attempt-v1'));
+    assert.ok((await db.collection('quote_requests').doc(verifiedId).get()).exists);
+    await vp.reload({waitUntil:'load'});await vp.locator('#qReserve').click();await vp.locator('#reserveRecover').click();
+    await vp.getByText('시험 접수 완료 · 접수번호: '+verifiedId).waitFor({timeout:30000});
+    const newSession=await context(), np=await newSession.newPage();await np.goto(base+'/',{waitUntil:'load'});await np.locator('#qReserve').click();
+    await np.locator('#reserveEmail').fill(verifiedCustomer);await np.locator('#reservePassword').fill(customerPassword);await np.locator('#reserveLogin').click();await np.getByText('시험 계정으로 로그인했습니다.').waitFor();
+    await np.locator('#reserveReceipt').fill(verifiedId);await np.locator('#reserveRecover').click();await np.getByText('시험 접수 완료 · 접수번호: '+verifiedId).waitFor();
+    const retry=await np.evaluate(async ({id,form})=>{const f=await import('/firebase-bundle.js'),a=f.getAuth(f.getApp('verified-reservation-emulator'));const token=await a.currentUser.getIdToken();const send=body=>fetch('/emulator/reservation/submit',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(body)}).then(r=>r.status);return [await send({requestId:id,form}),await send({requestId:id,form:{...form,notes:'변경'}})];},{id:verifiedId,form:capturedForm});
+    assert.deepEqual(retry,[200,409],'same request succeeds; changed payload is rejected');
+    const bad=await context(), bp=await bad.newPage();await bp.goto(base+'/',{waitUntil:'load'});await bp.locator('#qReserve').click();
+    await bp.locator('#reserveEmail').fill(otherCustomer);await bp.locator('#reservePassword').fill(customerPassword);await bp.locator('#reserveLogin').click();await bp.getByText('시험 계정으로 로그인했습니다.').waitFor();
+    await bp.locator('#reserveReceipt').fill(verifiedId);await bp.locator('#reserveRecover').click();await bp.getByText(/접수 여부를 확인하지 못했습니다/).waitFor();
+    assert.equal((await db.collection('quote_requests').get()).size,4,'verified lost response recovered without duplicate');
+    const manager2=await context(), mp=await manager2.newPage();await mp.goto(base+'/admin/index.html',{waitUntil:'load'});
+    await mp.waitForFunction(async()=>{const f=await import('/firebase-bundle.js');return f.getApps().some(a=>a.name==='[DEFAULT]');});
+    await mp.evaluate(async ({email,password})=>{const f=await import('/firebase-bundle.js');await f.signInWithEmailAndPassword(f.getAuth(),email,password);},{email,password});
+    const vc=mp.locator('#reservationList article').filter({hasText:'검증고객'});await vc.waitFor({timeout:30000});await vc.locator('select').selectOption('상담중');await vc.getByRole('button',{name:'상태 저장'}).click();await mp.getByText('상태가 저장되었습니다.').waitFor();
+    assert.equal((await db.collection('quote_requests').doc(verifiedId).get()).data().status,'상담중');
+    await manager2.close();await bad.close();await newSession.close();await verified.close();
+    console.log('PASS: verified server, lost response, reload, new session, access isolation and manager');
     console.log('PASS: real browser reservation -> emulators -> admin status -> reload');
   }finally{
     await browser.close();await new Promise(resolve=>server.close(resolve));await app.delete();
