@@ -25,6 +25,14 @@ attachDemoRetentionRoute({app,db,createLedgerDb:()=>getFirestore(initializeApp({
 const restoreLedger=getFirestore(initializeApp({credential:applicationDefault(),projectId:process.env.OKCLEAN_LEDGER_PROJECT_ID},'restore-gate-ledger'));
 const restoreGate=createRestoreGate({ledgerDb:restoreLedger,sourceProject:process.env.OKCLEAN_PROJECT_ID,ledgerProject:process.env.OKCLEAN_LEDGER_PROJECT_ID,restoreId:process.env.OKCLEAN_RESTORE_EPOCH,publicKey:process.env.OKCLEAN_RESTORE_PUBLIC_KEY});
 app.use(restoreGate.middleware);
+// Separate Scheduler identity; token recovery does not delete accounts.
+// This route remains absent unless explicitly enabled after policy review.
+if(process.env.OKCLEAN_WITHDRAWAL_RECOVERY_ENABLED==='true'){
+  const {createWithdrawalRecoveryHandler}=require('./account-withdrawal.cjs');
+  const {createGoogleOidcVerifier}=require('./demo-retention-route.cjs');
+  const recover=createWithdrawalRecoveryHandler({db,auth:getAuth(),verifyOidc:createGoogleOidcVerifier(),config:{enabled:true,policyReviewed:process.env.OKCLEAN_WITHDRAWAL_POLICY_REVIEWED==='true',projectId:process.env.OKCLEAN_PROJECT_ID,audience:process.env.OKCLEAN_WITHDRAWAL_RECOVERY_AUDIENCE,serviceAccount:process.env.OKCLEAN_WITHDRAWAL_RECOVERY_ACCOUNT,protectedMemberAdminUid:process.env.OKCLEAN_MEMBER_ADMIN_UID}});
+  app.post('/_internal/withdrawal/recover',recover);
+}
 app.use(createHttpHandler({auth:getAuth(),appCheck:restrictedAppCheck(getAppCheck(),process.env.OKCLEAN_FIREBASE_WEB_APP_ID),db,rateLimit:createRateLimit(db),allowedOrigin:process.env.ALLOWED_ORIGIN,services,consentVersion:process.env.CONSENT_VERSION,protectedMemberAdminUid:process.env.OKCLEAN_MEMBER_ADMIN_UID,withdrawalPolicyReviewed:process.env.OKCLEAN_WITHDRAWAL_POLICY_REVIEWED==='true',memberLinkEnabled:process.env.OKCLEAN_MEMBER_LINK_ENABLED==='true'&&process.env.OKCLEAN_MEMBER_LINK_POLICY_REVIEWED==='true',memberLinkPolicyVersion:process.env.OKCLEAN_MEMBER_LINK_POLICY_VERSION}));
 app.use((err,req,res,next)=>{res.status(400).set('Cache-Control','no-store').json({status:'unavailable'});});
 app.listen(Number(process.env.PORT)||8080,'0.0.0.0');

@@ -736,7 +736,7 @@ if(M){
       const submittedMember = MEMBER;
       import('./member-sync.js').then(mod => mod.submitMember(C.firebase, submittedMember))
         .then((saved) => { if(MEMBER === submittedMember){if(typeof saved?.memberId==='string' && /^[A-Za-z0-9_-]{1,128}$/.test(saved.memberId))memberLinkCandidate=saved.memberId;toast('회원정보 접수 요청이 완료됐어요. 카톡으로 가입을 확인해 주세요.');} })
-        .catch(err => { console.warn('회원 접수 실패', err); if(MEMBER === submittedMember) toast('자동 접수가 되지 않았어요. 카톡으로 가입을 완료해 주세요.'); });
+        .catch(() => { console.warn('회원 접수 실패'); if(MEMBER === submittedMember) toast('자동 접수가 되지 않았어요. 카톡으로 가입을 완료해 주세요.'); });
     }
     // 관리자 대장 연결이 설정된 경우 가입 정보를 접수합니다.
     // Google Apps Script 웹앱은 교차 출처 응답을 브라우저에서 검증할 수 없으므로
@@ -755,7 +755,7 @@ if(M){
         if(!frame){frame=document.createElement("iframe");frame.name="okclean_member_sink";
           frame.id="okclean_member_sink";frame.hidden=true;document.body.appendChild(frame);}
         document.body.appendChild(form);form.submit();setTimeout(()=>form.remove(),1500);
-      }catch(err){console.warn("회원 대장 접수 요청 실패",err);}
+      }catch{console.warn("회원 대장 접수 요청 실패");}
     }
     joinDone(); calc();
   };

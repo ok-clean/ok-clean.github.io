@@ -55,8 +55,16 @@ gcloud run deploy SERVICE_NAME \
 
 ### 복원 읽기 차단 및 원장 IAM — 배포 전 필수
 
-- 서버는 별도 프로젝트 `OKCLEAN_LEDGER_PROJECT_ID`, 복원 세대 식별자 `OKCLEAN_RESTORE_EPOCH` 및 Ed25519 공개키 `OKCLEAN_RESTORE_PUBLIC_KEY`가 모두 유효해야 시작합니다. 서명 키의 비밀키를 저장소나 서버 환경변수에 넣지 마세요. 독립 서명자·체크포인트 검증 서비스는 **아직 구현되지 않았고**, 필수 증명이 없으면 예약 API는 503입니다.
+- 서버는 별도 프로젝트 `OKCLEAN_LEDGER_PROJECT_ID`, 복원 세대 식별자 `OKCLEAN_RESTORE_EPOCH` 및 Ed25519 공개키 `OKCLEAN_RESTORE_PUBLIC_KEY`가 모두 유효해야 시작합니다. 서명 키의 비밀키를 저장소나 서버 환경변수에 넣지 마세요. 서명 발급 코드는 준비됐으나 독립 격리·복원 검증자가 미완성이라 발급 진입점은 코드상 차단되어 있습니다. 필수 증명이 없거나 갱신되지 않으면 예약 API는 503입니다.
 - 서버는 각 요청 전에 원장 프로젝트의 서명된 증명·원장 revision·미확정 이력을 읽습니다. 신규 삭제 의도나 완료 이력이 기록되면 revision이 변경되어 이전 증명을 거부합니다. 다만 증명의 체크포인트 내용이 전체 원장과 일치하는지는 독립 검증자가 확인하고 서명해야 합니다. 서버에서 이 사실을 자체 검증한 것으로 간주하지 마세요.
 - 예약 서버의 런타임 서비스 계정에는 **원장 프로젝트 읽기 전용** 권한만 부여하고, 원장 기록자 및 복원 검증·서명자는 각각 다른 서비스 계정으로 분리하세요. 최소 권한은 실제 데이터베이스·쿼리·트랜잭션 사용에 따라 검토하고, 프로젝트 전체 Owner/Editor나 일반 관리자에게 원장 수정 권한을 부여하지 마세요. 원장 기록·revision 변경의 우회 가능성, 역할 상속과 서비스 계정 가장 권한까지 점검해야 합니다. Firestore Admin SDK는 보안 규칙을 우회하므로 IAM으로 보호해야 합니다: https://firebase.google.com/docs/firestore/security/iam
 - 복원 준비부터 독립 검증 완료 및 새 증명 발급까지 실제 서비스와 모든 직접 Firestore 읽기·쓰기(기존 회원 관리자 포함)를 네트워크/IAM 수준에서 격리해야 합니다. 서버 게이트는 이미 진행 중인 요청이나 SDK·콘솔 직접 접근을 중단하지 못합니다. 복원 세대 식별자 교체, 서명 재발급, 외부 격리 해제는 모두 운영 승인과 별도 검증 후 수행합니다.
 - 증명 갱신 실패·원장 권한 부족·미확정 삭제·복원 재적용 실패 시 503을 유지합니다. 운영 IAM, 스케줄, 복원, 데이터 삭제는 이번 변경으로 자동 실행되지 않습니다.
+
+## 보유기간 읽기 전용 점검 서비스 (미배포)
+
+`node server/retention-preview-entry.cjs`는 별도 Cloud Run 서비스의 진입점이며 실제 삭제 기능이 없다. 스케줄이나 서비스를 아직 생성하지 않는다. 운영 정책 확정 및 사용자 승인 전에는 활성화하지 않는다.
+
+- 고객 프로젝트는 읽기 전용, 독립 삭제 원장 프로젝트는 읽기 전용, 제어 프로젝트만 작업 커서와 실행 결과 쓰기를 허용하는 **별도 서비스 계정**을 사용한다. 세 프로젝트는 서로 달라야 한다. 환경변수로 이름이 일치하는 것만으로 실제 IAM 권한이 증명되지는 않는다.
+- `OKCLEAN_RETENTION_PREVIEW_ENABLED`, `OKCLEAN_RETENTION_POLICY_REVIEWED`, `OKCLEAN_RETENTION_RESERVATION_DAYS`, `OKCLEAN_RETENTION_HISTORY_DAYS`, `OKCLEAN_RETENTION_POLICY_VERSION`, `OKCLEAN_RETENTION_CONTROL_PROJECT_ID`, `OKCLEAN_RETENTION_PREVIEW_AUDIENCE`, `OKCLEAN_RETENTION_SCHEDULER_ACCOUNT`, `OKCLEAN_RETENTION_PREVIEW_IDENTITY`와 기존 프로젝트·복원 게이트 설정이 모두 필요하다. 운영자·정책 검토 전 허용값을 입력하지 않는다.
+- 제어 프로젝트의 커서와 실패 해시는 접수 건과 연결될 수 있으므로 접근 권한 및 보유·삭제 정책을 따로 검토한다. 원장 접근 불가, 복원 증명 부재 또는 인증 실패 시 점검을 차단한다. 운영 IAM·복원 격리·실제 OIDC는 검증되지 않았다.

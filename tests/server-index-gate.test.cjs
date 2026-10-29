@@ -14,7 +14,7 @@ test('production index refuses missing gate settings and places verified gate ah
   const originalLoad=Module._load,originalEnv={...process.env},stack=[];
   const pair=crypto.generateKeyPairSync('ed25519');
   const pub=pair.publicKey.export({type:'spki',format:'pem'});
-  let called=0,listened=0,attestation=null,headRevision=1,pending=false;
+  let called=0,listened=0,attestation=null,headRevision=1,pending=false;const posted=[];
   const tags={control:{type:'control'},head:{type:'head'},query:{type:'query'}};
   const ledger={projectId:'sample-ledger-prod',collection(name){
     if(name==='restore_control')return {doc:()=>tags.control};
@@ -27,7 +27,7 @@ test('production index refuses missing gate settings and places verified gate ah
     if(ref===tags.query)return {empty:!pending};
     throw Error('Unexpected read');
   }});}};
-  const app={disable(){},use(fn){stack.push(fn)},post(){},listen(){listened++}};
+  const app={disable(){},use(fn){stack.push(fn)},post(path,handler){posted.push({path,handler,after:stack.length})},listen(){listened++}};
   function express(){return app} express.json=()=>async(req,res,next)=>next();
   const passthrough=async(req,res)=>{called++;res.statusCode=204;res.end('')};
   const fake={
@@ -39,7 +39,8 @@ test('production index refuses missing gate settings and places verified gate ah
     './services.json':[{id:'synthetic'}],
     './handler.cjs':{createHttpHandler:()=>passthrough},
     './rate-limit.cjs':{createRateLimit:()=>async()=>true},
-    './demo-retention-route.cjs':{attachDemoRetentionRoute:()=>false}
+    './demo-retention-route.cjs':{attachDemoRetentionRoute:()=>false,createGoogleOidcVerifier:()=>async()=>({})},
+    './account-withdrawal.cjs':{createWithdrawalRecoveryHandler:()=>async()=>{}}
   };
   Module._load=function(request,parent,isMain){
     if(parent?.filename===indexPath && Object.prototype.hasOwnProperty.call(fake,request))return fake[request];
@@ -63,5 +64,6 @@ test('production index refuses missing gate settings and places verified gate ah
     attestation.signature=signed;res=await send();assert.equal(res.statusCode,204);assert.equal(called,1);
     headRevision=2;res=await send();assert.equal(res.statusCode,503);assert.equal(called,1);
     headRevision=1;pending=true;res=await send();assert.equal(res.statusCode,503);assert.equal(called,1);
+    process.env.OKCLEAN_WITHDRAWAL_RECOVERY_ENABLED='true';stack.length=0;delete require.cache[indexPath];require(indexPath);assert.equal(posted.length,1);assert.equal(posted[0].path,'/_internal/withdrawal/recover');assert.equal(posted[0].after,2,'recovery route must be registered after restore gate');
   }finally{Module._load=originalLoad;delete require.cache[indexPath];for(const k of Object.keys(process.env))if(!(k in originalEnv))delete process.env[k];Object.assign(process.env,originalEnv);}
 });

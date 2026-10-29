@@ -1,7 +1,7 @@
 'use strict';
 const {createHash}=require('node:crypto');
-// Emulator-only retention execution. Not a deployable worker and not exposed through HTTP.
-// No real project or customer data may be accessed by this module.
+// Destructive retention remains emulator-only. The optional production preview
+// is strictly read-only and cannot execute the apply branch.
 const TERMINAL=new Set(['작업완료','종료','취소']);
 const DAY=86400000;
 const toMs=x=>x instanceof Date?x.getTime():typeof x?.toDate==='function'?x.toDate().getTime():NaN;
@@ -12,10 +12,20 @@ function policyCheck(p){
 function ensureEmulator(projectId,host){
   if(typeof projectId!=='string'||!/^demo-[a-z0-9-]+$/.test(projectId)||host!=='127.0.0.1:8085')throw Error('DEMO_FIRESTORE_EMULATOR_REQUIRED');
 }
-function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new Date(),authorize=async()=>false}){
-  policyCheck(policy);policy=Object.freeze({reservationDays:policy.reservationDays,historyDays:policy.historyDays});ensureEmulator(projectId,firestoreHost);
-  // Never trust only caller-supplied emulator strings when destructive operations are available.
-  if(require('node:process').env.FIRESTORE_EMULATOR_HOST!==firestoreHost || require('node:process').env.GCLOUD_PROJECT!==projectId || db?.projectId!==projectId)throw Error('DEMO_FIRESTORE_EMULATOR_REQUIRED');
+function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new Date(),authorize=async()=>false,previewOnly=false}){
+  policyCheck(policy);policy=Object.freeze({reservationDays:policy.reservationDays,historyDays:policy.historyDays});
+  if(previewOnly===true){
+    const env=require('node:process').env;
+    if(typeof projectId!=='string'||!/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(projectId)||db?.projectId!==projectId)throw Error('PREVIEW_PROJECT_MISMATCH');
+    if(/^demo-/.test(projectId)){
+      ensureEmulator(projectId,firestoreHost);
+      if(env.FIRESTORE_EMULATOR_HOST!==firestoreHost||env.GCLOUD_PROJECT!==projectId)throw Error('PREVIEW_PROJECT_MISMATCH');
+    }else if(/^(test|example)-/.test(projectId)||env.OKCLEAN_PROJECT_ID!==projectId||firestoreHost||env.FIRESTORE_EMULATOR_HOST||env.FIREBASE_AUTH_EMULATOR_HOST)throw Error('PREVIEW_PROJECT_MISMATCH');
+  }else{
+    ensureEmulator(projectId,firestoreHost);
+    // Never trust only caller-supplied emulator strings when destructive operations are available.
+    if(require('node:process').env.FIRESTORE_EMULATOR_HOST!==firestoreHost || require('node:process').env.GCLOUD_PROJECT!==projectId || db?.projectId!==projectId)throw Error('DEMO_FIRESTORE_EMULATOR_REQUIRED');
+  }
   if(!db?.collection||!db?.runTransaction||typeof authorize!=='function')throw Error('INVALID_DEPENDENCIES');
   async function inspectChildren(ref){
     const cols=await ref.listCollections();
@@ -28,6 +38,7 @@ function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new
   async function process(requestId,{apply=false,transactionFence=null,expectedVersion=null,expectedHistoryVersion=null,expectedAction=null}={}){
     if(typeof requestId!=='string'||!/^[A-Za-z0-9_-]{1,80}$/.test(requestId))throw Error('INVALID_REQUEST_ID');
     if(typeof apply!=='boolean')throw Error('INVALID_MODE');
+    if(apply&&previewOnly===true)throw Error('PREVIEW_READ_ONLY');
     if(transactionFence!==null && typeof transactionFence!=='function')throw Error('INVALID_FENCE');
     if(expectedVersion!==null && (typeof expectedVersion!=='string'||!/^\d+:\d{1,9}$/.test(expectedVersion)))throw Error('INVALID_VERSION');
     if(expectedHistoryVersion!==null && (typeof expectedHistoryVersion!=='string'||!/^[0-9a-f]{64}$/.test(expectedHistoryVersion)))throw Error('INVALID_HISTORY_VERSION');
@@ -91,7 +102,7 @@ function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new
         // Keep the irreversible, non-owner tombstone to prevent replay of a deleted ID.
         // A later policy/implementation must establish when this tombstone may be deleted.
         return {result:history.size?'history_purged':'already_purged'};
-      });
+      },previewOnly===true?{readOnly:true}:undefined);
     }catch{return {result:'retry_needed'};}
   }
   // Scan only document IDs in bounded batches. A trusted caller must keep the
@@ -109,6 +120,6 @@ function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new
     if(!Array.isArray(ids)||ids.length>100)throw Error('INVALID_BATCH');
     const counts={};for(const id of ids){const {result}=await process(id,options);counts[result]=(counts[result]||0)+1;}return counts;
   }
-  return {process,processBatch,scan,schedulerSafety:Object.freeze({projectId,firestoreHost,reservationDays:policy.reservationDays,historyDays:policy.historyDays})};
+  return {process,processBatch,scan,schedulerSafety:Object.freeze({projectId,firestoreHost,reservationDays:policy.reservationDays,historyDays:policy.historyDays,previewOnly})};
 }
 module.exports={createRetentionService};
