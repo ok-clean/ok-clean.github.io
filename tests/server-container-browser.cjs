@@ -41,6 +41,8 @@ async function main(){
  const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css','.json':'application/json'};
  async function context({simulateMemberDenial=false}={}){
   const ctx=await browser.newContext({viewport:{width:390,height:844},serviceWorkers:'block'});
+  // Test-only permission for the virtual site to reach local emulators.
+  await ctx.grantPermissions(['local-network-access'],{origin});
   await ctx.addInitScript(()=>{if(location.origin==='https://ok-clean.github.io')localStorage.setItem('joinLater',JSON.stringify(Date.now()));});
   await ctx.route('**/*',async route=>{
    const u=new URL(route.request().url());
