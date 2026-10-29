@@ -6,6 +6,9 @@ on:
       - 'build.py'
       - 'reservation-emulator.js'
       - 'admin/**'
+      - 'server/**'
+      - 'prototype/security/*handler.cjs'
+      - 'tests/server-handler.test.cjs'
       - 'firestore.rules'
       - 'prototype/security/firestore.rules'
       - 'tests/build-generated-fixture.py'
@@ -24,6 +27,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - run: node --test tests/server-handler.test.cjs tests/verified-reservation-handler.test.cjs
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
