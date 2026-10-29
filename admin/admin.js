@@ -3,7 +3,7 @@ import {getAuth,GoogleAuthProvider,signInWithPopup,signInWithRedirect,getRedirec
 import {getFirestore,collection,query,orderBy,limit,onSnapshot,doc,updateDoc,connectFirestoreEmulator} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 const $=id=>document.getElementById(id), esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const msg=s=>$('message').textContent=s;
-let db,auth,unsub,reservationUnsub,records=[],session=0,viewVersion=0,currentUser=null,serverReady=false;
+let db,auth,unsub,reservationUnsub,records=[],session=0,viewVersion=0,currentUser=null,serverReady=false,productionAppCheck=null;
 function clearReservations(){
  if(reservationUnsub){reservationUnsub();reservationUnsub=null;}
  $('reservationDashboard').hidden=true;$('reservationList').replaceChildren();$('reservationMessage').textContent='';
@@ -27,6 +27,16 @@ function hasAccess(){return !!(serverReady&&currentUser&&validAuth(session,curre
 const settings=await fetch('../config.json',{cache:'no-store'}).then(r=>r.json()).catch(()=>null);
 const config=settings?.firebase;
 const localReservation=settings?.reservation?.emulator===true && ['localhost','127.0.0.1'].includes(location.hostname) && /^demo-[a-z0-9-]+$/.test(config?.projectId||'');
+// An explicit, complete production configuration is mandatory. Never send an ID token to an arbitrary origin.
+function reservationApiUrl(settings){
+ try{
+  const r=settings?.reservation;if(r?.enabled!==true||typeof r.appCheckSiteKey!=='string'||!r.appCheckSiteKey.trim()||typeof r.apiUrl!=='string')return null;
+  const u=new URL(r.apiUrl);
+  if(u.protocol!=='https:'||!/^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.run\.app$/i.test(u.hostname)||u.username||u.password||u.port||u.pathname!=='/'||u.search||u.hash)return null;
+  return u.origin;
+ }catch(_){return null;}
+}
+const productionReservation=localReservation?null:reservationApiUrl(settings);
 if(!config?.apiKey||!config?.projectId){msg('Firebase 연결 전입니다. 설치방법에 따라 config.json의 firebase 설정을 입력해 주세요.');$('loginBtn').disabled=true;}
 else{
  const app=initializeApp(config);auth=getAuth(app);
@@ -43,6 +53,7 @@ else{
   $('login').hidden=!!user;$('logout').hidden=!user;
   if(!user){msg('');return;}
   if(localReservation) startReservationView(started,user);
+  else if(productionReservation) startProductionReservationView(started,user,app);
   msg('서버에서 회원정보 접근을 확인하는 중…');
   const isCurrent=()=>validAuth(started,user);
   try{
@@ -91,6 +102,49 @@ async function startReservationView(started,user){
    $('reservationDashboard').hidden=false;
   },()=>{if(validAuth(started,user)){clearReservations();$('reservationMessage').textContent='예약 권한을 확인할 수 없습니다.';}});
  }catch(_){if(validAuth(started,user))clearReservations();}
+}
+
+// The server is the authority for every list, history, and update request.
+async function startProductionReservationView(started,user,app){
+ let appCheck,getAppCheckToken;
+ try{
+  const claim=await user.getIdTokenResult();if(!validAuth(started,user)||claim.claims.admin!==true)return;
+  const sdk=await import('https://www.gstatic.com/firebasejs/10.14.1/firebase-app-check.js');
+  if(!validAuth(started,user))return;
+  if(!productionAppCheck)productionAppCheck=sdk.initializeAppCheck(app,{provider:new sdk.ReCaptchaV3Provider(settings.reservation.appCheckSiteKey),isTokenAutoRefreshEnabled:true});
+  appCheck=productionAppCheck;getAppCheckToken=sdk.getToken;
+ }catch(_){if(validAuth(started,user))clearReservations();return;}
+ async function call(endpoint,payload){
+  if(!validAuth(started,user))throw Error('session ended');
+  const [idToken,check]=await Promise.all([user.getIdToken(),getAppCheckToken(appCheck)]);
+  if(!validAuth(started,user))throw Error('session ended');
+  const response=await fetch(productionReservation+endpoint,{method:'POST',credentials:'omit',cache:'no-store',referrerPolicy:'no-referrer',redirect:'error',headers:{'Content-Type':'application/json','Authorization':'Bearer '+idToken,'X-Firebase-AppCheck':check.token},body:JSON.stringify(payload)});
+  if(!response.ok)throw Error('server rejected');const result=await response.json();
+  if(result.status!=='ok'||!validAuth(started,user))throw Error('invalid response');return result;
+ }
+ const dashboard=$('reservationDashboard'),list=$('reservationList'),message=$('reservationMessage');
+ async function refresh(){
+  list.replaceChildren();dashboard.hidden=true;message.textContent='서버에서 예약을 확인하는 중입니다.';
+  try{
+   const result=await call('/admin/list',{});if(!Array.isArray(result.items))throw Error();
+   const fragment=document.createDocumentFragment();
+   for(const data of result.items){
+    if(typeof data.id!=='string'||!/^[A-Za-z0-9_-]{1,80}$/.test(data.id))continue;
+    const card=document.createElement('article'),title=document.createElement('h3'),detail=document.createElement('p');
+    title.textContent=(data.service||'청소')+' · '+(data.status||'신규');
+    detail.textContent=[data.name,data.phone,data.area,data.notes].filter(Boolean).join(' · ');
+    const select=document.createElement('select');
+    for(const value of ['신규','검토중','상담중','예약확정','작업완료','종료','취소']){const option=document.createElement('option');option.value=value;option.textContent=value;option.selected=value===data.status;select.append(option);}
+    const save=document.createElement('button');save.type='button';save.textContent='상태 저장';
+    save.onclick=async()=>{save.disabled=true;try{await call('/admin/status',{requestId:data.id,status:select.value});await refresh();if(validAuth(started,user))message.textContent='상태가 저장되었습니다.';}catch(_){if(validAuth(started,user))message.textContent='상태를 저장하지 못했습니다.';}finally{if(save.isConnected)save.disabled=false;}};
+    const historyButton=document.createElement('button'),history=document.createElement('div');historyButton.type='button';historyButton.textContent='처리 이력';
+    historyButton.onclick=async()=>{historyButton.disabled=true;history.replaceChildren();try{const result=await call('/admin/history',{requestId:data.id});if(!Array.isArray(result.items))throw Error();for(const entry of result.items){const p=document.createElement('p');p.textContent=String(entry.from||'')+' → '+String(entry.to||'');history.append(p);}if(!result.items.length)history.textContent='처리 이력이 없습니다.';}catch(_){if(validAuth(started,user))history.textContent='이력을 확인하지 못했습니다.';}finally{if(historyButton.isConnected)historyButton.disabled=false;}};
+    card.append(title,detail,select,save,historyButton,history);fragment.append(card);
+   }
+   if(!validAuth(started,user))return;list.append(fragment);dashboard.querySelector('h2').textContent='예약 관리';dashboard.querySelector('p').textContent='서버에서 확인한 최근 예약입니다.';dashboard.hidden=false;message.textContent='최근 50건까지 표시됩니다.';
+  }catch(_){if(validAuth(started,user)){clearReservations();message.textContent='예약 목록을 확인할 수 없습니다.';}}
+ }
+ await refresh();
 }
 const option=(arr,value)=>arr.map(x=>`<option ${x===value?'selected':''}>${esc(x)}</option>`).join('');
 function render(){

@@ -396,9 +396,18 @@ if(reservationTest && !C.reservation?.verifiedEmulator && $("qReserve") && $("re
   };
 }
 
-// Verified-account recovery is available only against the local test server.
-if(reservationTest && C.reservation?.verifiedEmulator && $("qReserve") && $("reservationForm")){
+// Production stays disabled unless the endpoint, App Check and a reviewed consent policy are configured.
+const reservationProduction = !reservationTest && C.reservation?.enabled === true &&
+  typeof C.reservation.apiUrl === 'string' && /^https:\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)*\.run\.app\/?$/i.test(C.reservation.apiUrl) &&
+  typeof C.reservation.appCheckSiteKey === 'string' && !!C.reservation.appCheckSiteKey.trim() &&
+  typeof C.reservation.consentText === 'string' && !!C.reservation.consentText.trim() &&
+  typeof C.reservation.consentVersion === 'string' && !!C.reservation.consentVersion.trim() &&
+  !!C.firebase?.apiKey && !!C.firebase?.projectId && !!C.firebase?.appId;
+if(((reservationTest && C.reservation?.verifiedEmulator) || reservationProduction) && $("qReserve") && $("reservationForm")){
   const form=$("reservationForm"), status=$("reserveStatus"), key='okclean-reservation-attempt-v1';
+  const getClient=()=>reservationProduction ? import('./reservation-api.js') : import('./verified-reservation-emulator.js');
+  const receiptPrefix=reservationProduction?'예약 접수 완료 · 접수번호: ':'시험 접수 완료 · 접수번호: ';
+  if(reservationProduction){$("reserveIntro").textContent='예상 견적은 현장 확인 후 달라질 수 있습니다.';$("reserveConsentText").textContent=C.reservation.consentText;$("reserveLogin").textContent='로그인';$("reserveEmailLabel").textContent='이메일';$("reservePasswordLabel").textContent='비밀번호';}
   let busy=false, pending=null;
   try{pending=sessionStorage.getItem(key);}catch(_){busy=true;}
   $("qReserve").hidden=false;$("reserveVerified").hidden=false;
@@ -410,20 +419,20 @@ if(reservationTest && C.reservation?.verifiedEmulator && $("qReserve") && $("res
     if(pending && pending!==id){status.textContent='이전에 제출한 접수부터 확인해 주세요.';return;}
     busy=true;status.textContent='접수를 확인하고 있습니다.';
     try{
-      const client=await import('./verified-reservation-emulator.js');
-      await client.recover(C.firebase,id);
+      const client=await getClient();
+      await client.recover(C.firebase,id,C.reservation);
       if(sessionStorage.getItem(key)===id)sessionStorage.removeItem(key);
-      pending=null;status.textContent='시험 접수 완료 · 접수번호: '+id;
+      pending=null;status.textContent=receiptPrefix+id;
       $("reserveNew").hidden=false;$("reserveSubmit").disabled=true;
     }catch(_){status.textContent='접수 여부를 확인하지 못했습니다. 관리자에게 확인해 주세요.';}
     finally{busy=false;}
   }
   $("reserveLogin").onclick=async()=>{
-    try{const client=await import('./verified-reservation-emulator.js');
-      const ok=await client.login(C.firebase,$("reserveEmail").value,$("reservePassword").value);
+    try{const client=await getClient();
+      const ok=await client.login(C.firebase,$("reserveEmail").value,$("reservePassword").value,C.reservation);
       $("reservePassword").value='';if(!ok)throw Error();
-      status.textContent='시험 계정으로 로그인했습니다.';if(pending)await recover(pending);
-    }catch(_){$("reservePassword").value='';status.textContent='시험 계정 인증을 확인해 주세요.';}
+      status.textContent=reservationProduction?'로그인했습니다.':'시험 계정으로 로그인했습니다.';if(pending)await recover(pending);
+    }catch(_){$("reservePassword").value='';status.textContent=reservationProduction?'계정 인증을 확인해 주세요.':'시험 계정 인증을 확인해 주세요.';}
   };
   $("reserveRecover").onclick=()=>recover($("reserveReceipt").value.trim());
   $("reserveNew").onclick=()=>{if(busy||pending)return;form.reset();$("reserveNew").hidden=true;$("reserveSubmit").disabled=false;status.textContent='';};
@@ -434,10 +443,21 @@ if(reservationTest && C.reservation?.verifiedEmulator && $("qReserve") && $("res
     const allowed=['춘천','화천','양구','인제','철원','홍천','횡성','가평'], result=estimate();
     const id=crypto.randomUUID(), payload={name:$("reserveName").value.trim(),phone:$("reservePhone").value.trim(),size:Number($("reserveSize").value),notes:$("reserveNotes").value,service:names[cur.svc]||'그 외 청소',area:allowed.includes($("qArea").value)?$("qArea").value:'그 외 지역',date:$("qDate").value,consent:$("reserveConsent").checked};
     if(result?.lo!=null)payload.estimateMin=result.lo;if(result?.hi!=null)payload.estimateMax=result.hi;
-    try{sessionStorage.setItem(key,id);if(sessionStorage.getItem(key)!==id)throw Error();}catch(_){status.textContent='안전하게 접수를 보관할 수 없습니다.';return;}
+    const priceSelection={serviceId:cur.svc,variant:cur.v,tier:cur.t,quantity:cur.qty,options:[...cur.opts]};
+    if(reservationProduction){
+      busy=true;$("reserveSubmit").disabled=true;
+      try{
+        const client=await getClient();await client.ready(C.firebase,C.reservation);
+        const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(C.services)));
+        const policyVersion=[...new Uint8Array(digest)].map(x=>x.toString(16).padStart(2,'0')).join('');
+        payload.pricing={...priceSelection,policyVersion};
+        payload.consentVersion=C.reservation.consentVersion;
+      }catch(_){busy=false;$("reserveSubmit").disabled=false;status.textContent='로그인 상태 또는 견적 정보를 확인해 주세요.';return;}
+    }
+    try{sessionStorage.setItem(key,id);if(sessionStorage.getItem(key)!==id)throw Error();}catch(_){busy=true;$("reserveSubmit").disabled=true;status.textContent='안전하게 접수를 보관할 수 없습니다.';return;}
     pending=id;busy=true;$("reserveSubmit").disabled=true;status.textContent='접수 확인 중입니다.';
-    try{const client=await import('./verified-reservation-emulator.js');await client.submit(C.firebase,id,payload);
-      sessionStorage.removeItem(key);pending=null;form.reset();$("reserveNew").hidden=false;status.textContent='시험 접수 완료 · 접수번호: '+id;
+    try{const client=await getClient();await client.submit(C.firebase,id,payload,C.reservation);
+      sessionStorage.removeItem(key);pending=null;form.reset();$("reserveNew").hidden=false;status.textContent=receiptPrefix+id;
     }catch(_){$("reserveReceipt").value=id;status.textContent='접수 결과를 확인하지 못했습니다. 로그인 후 접수를 확인하거나 관리자에게 문의해 주세요.';}
     finally{busy=false;}
   };

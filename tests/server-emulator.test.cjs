@@ -4,6 +4,7 @@ const assert=require('node:assert/strict');
 const admin=require('firebase-admin');
 const {createHttpHandler}=require('../server/handler.cjs');
 const {createRateLimit}=require('../server/rate-limit.cjs');
+const {version}=require('../server/pricing.cjs');const services=require('../config.json').services;
 const project='demo-okclean-integration';
 if(process.env.FIREBASE_AUTH_EMULATOR_HOST!=='127.0.0.1:9099'||process.env.FIRESTORE_EMULATOR_HOST!=='127.0.0.1:8085'||process.env.GCLOUD_PROJECT!==project)throw Error('Test emulators required');
 async function main(){
@@ -13,10 +14,10 @@ async function main(){
  await auth.setCustomUserClaims('server-admin',{admin:true});
  async function token(email){const r=await fetch('http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=fake',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email,password:pass,returnSecureToken:true})});const data=await r.json();assert.ok(data.idToken);return data.idToken;}
  const [userToken,otherToken,adminToken]=await Promise.all([token(user),token(other),token(manager)]);
- const create=()=>createHttpHandler({auth,db,appCheck:{verifyToken:async v=>{if(v!=='emulator-app-check')throw Error();}},rateLimit:createRateLimit(db),allowedOrigin:'https://ok-clean.github.io'});
+ const create=()=>createHttpHandler({auth,db,appCheck:{verifyToken:async v=>{if(v!=='emulator-app-check')throw Error();}},rateLimit:createRateLimit(db),allowedOrigin:'https://ok-clean.github.io',services,consentVersion:'test-v1'});
  let handler=create();
  async function call(path,t,body){const req={path,method:'POST',headers:{origin:'https://ok-clean.github.io',authorization:'Bearer '+t,'x-firebase-appcheck':'emulator-app-check'},body};let text;const res={statusCode:200,setHeader(){},end(v){text=v;}};await handler(req,res);return {code:res.statusCode,body:JSON.parse(text)};}
- const date=new Date(Date.now()+7*86400000).toISOString().slice(0,10),form={service:'입주·이사 청소',area:'춘천',size:20,date,name:'시험고객',phone:'01000000005',notes:'시험',consent:true};
+ const date=new Date(Date.now()+7*86400000).toISOString().slice(0,10),form={service:'입주·이사 청소',area:'춘천',size:20,date,name:'시험고객',phone:'01000000005',notes:'시험',consent:true,consentVersion:'test-v1',pricing:{serviceId:'move-in',variant:0,tier:0,quantity:null,options:[],policyVersion:version(services)},estimateMin:services.find(s=>s.id==='move-in').tiers[0].price,estimateMax:services.find(s=>s.id==='move-in').tiers[0].price};
  try{
   assert.equal((await call('/reservation/submit',userToken,{requestId:'server-emulator-test',form})).code,200);
   assert.equal((await call('/reservation/submit',userToken,{requestId:'server-emulator-test',form})).code,200);
@@ -28,6 +29,8 @@ async function main(){
   assert.equal((await call('/admin/list',adminToken,{})).body.items.length,1);
   assert.equal((await call('/admin/status',adminToken,{requestId:'server-emulator-test',status:'상담중'})).code,200);
   assert.equal((await db.collection('quote_requests').doc('server-emulator-test').get()).data().status,'상담중');
+  const history=await call('/admin/history',adminToken,{requestId:'server-emulator-test'});assert.equal(history.code,200);assert.equal(history.body.items.length,1);assert.equal(history.body.items[0].from,'신규');assert.equal(history.body.items[0].to,'상담중');assert.equal((await call('/admin/history',userToken,{requestId:'server-emulator-test'})).code,403);
+  assert.equal((await db.collection('quote_requests').doc('server-emulator-test').collection('status_history').get()).size,1);
   console.log('PASS: real Auth/Firestore emulators with Cloud Run HTTP adapter; App Check stubbed');
  }finally{await app.delete();}
 }

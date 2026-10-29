@@ -7,6 +7,12 @@ on:
       - 'reservation-emulator.js'
       - 'admin/**'
       - 'server/**'
+      - 'reservation-api.js'
+      - 'config.json'
+      - 'tests/*container*'
+      - 'tests/pricing.test.cjs'
+      - 'tests/reservation-api.test.cjs'
+      - 'tests/admin-reservation-config.test.cjs'
       - 'prototype/security/*handler.cjs'
       - 'tests/server-handler.test.cjs'
       - 'tests/server-emulator.test.cjs'
@@ -28,7 +34,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: node --test tests/server-handler.test.cjs tests/verified-reservation-handler.test.cjs
+      - run: node --test tests/server-handler.test.cjs tests/verified-reservation-handler.test.cjs tests/pricing.test.cjs tests/reservation-api.test.cjs tests/admin-reservation-config.test.cjs
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -45,6 +51,12 @@ jobs:
           GCLOUD_PROJECT: demo-okclean-integration
       - name: Server adapter with real Auth and Firestore emulators
         run: npx firebase emulators:exec --project demo-okclean-integration --only auth,firestore --config tests/fixtures/.reservation-e2e.json 'node tests/server-emulator.test.cjs'
+        env:
+          FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085
+          GCLOUD_PROJECT: demo-okclean-integration
+      - name: Production client and container with loopback emulators
+        run: npx firebase emulators:exec --project demo-okclean-integration --only auth,firestore --config tests/fixtures/.reservation-e2e.json 'bash tests/server-container-integration.sh'
         env:
           FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
           FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085

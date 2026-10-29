@@ -8,9 +8,9 @@ const areas = new Set(['춘천','화천','양구','인제','철원','홍천','�
 const reply = (code, status) => ({httpStatus:code, body:{status}});
 function validate(input, now) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
-  const keys = ['service','area','size','date','name','phone','notes','estimateMin','estimateMax','consent'];
+  const keys = ['service','area','size','date','name','phone','notes','estimateMin','estimateMax','consent','pricing'];
   if (Object.keys(input).some(k => !keys.includes(k))) return null;
-  const {service,area,size,date,name,phone,notes='',estimateMin,estimateMax,consent} = input;
+  const {service,area,size,date,name,phone,notes='',estimateMin,estimateMax,consent,pricing} = input;
   if (!services.has(service) || !areas.has(area) || !Number.isInteger(size) || size < 1 || size > 999 ||
       typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
       typeof name !== 'string' || !name.trim() || name.length > 30 ||
@@ -20,9 +20,11 @@ function validate(input, now) {
   if (!Number.isFinite(dateObj.getTime()) || dateObj.toISOString().slice(0,10) !== date || dateObj < now || dateObj.getTime() > now.getTime()+366*86400000) return null;
   if (estimateMin !== undefined && (!Number.isInteger(estimateMin) || estimateMin < 0 || estimateMin > 1e9)) return null;
   if (estimateMax !== undefined && (!Number.isInteger(estimateMax) || estimateMin === undefined || estimateMax < estimateMin || estimateMax > 1e9)) return null;
-  return {service,area,size,date,name:name.trim(),phone,notes, ...(estimateMin !== undefined ? {estimateMin} : {}), ...(estimateMax !== undefined ? {estimateMax} : {}),consent:true};
+  if (pricing !== undefined && (!pricing || typeof pricing !== 'object' || Array.isArray(pricing))) return null;
+  return {service,area,size,date,name:name.trim(),phone,notes, ...(pricing !== undefined ? {pricing} : {}), ...(estimateMin !== undefined ? {estimateMin} : {}), ...(estimateMax !== undefined ? {estimateMax} : {}),consent:true};
 }
-function createVerifiedReservationHandler({verifyIdToken, db, enforceRateLimit, now = () => new Date()}) {
+function createVerifiedReservationHandler({verifyIdToken, db, enforceRateLimit, now = () => new Date(), consentVersion = 'test-v1'}) {
+  if (typeof consentVersion !== 'string' || !/^[A-Za-z0-9._-]{1,80}$/.test(consentVersion)) throw new TypeError('Consent version required');
   if (typeof verifyIdToken !== 'function' || typeof enforceRateLimit !== 'function' || typeof db?.runTransaction !== 'function' || typeof db?.collection !== 'function') throw new TypeError('Trusted authentication, database and rate limit are required');
   return async function submit({idToken,requestId,form} = {}) {
     if (typeof requestId !== 'string' || !ID.test(requestId)) return reply(400,'unavailable');
@@ -44,7 +46,7 @@ function createVerifiedReservationHandler({verifyIdToken, db, enforceRateLimit, 
           return record.ownerUid === auth.uid && record.requestFingerprint === fingerprint ? 'confirmed' : 'unavailable';
         }
         const {date,consent,...data}=valid;
-        tx.create(ref,{...data,date:new Date(date+'T14:59:59.999Z'),ownerUid:auth.uid,status:'신규',consentVersion:'test-v1',consentAt:timestamp,createdAt:timestamp,requestFingerprint:fingerprint});
+        tx.create(ref,{...data,date:new Date(date+'T14:59:59.999Z'),ownerUid:auth.uid,status:'신규',consentVersion,consentAt:timestamp,createdAt:timestamp,requestFingerprint:fingerprint});
         return 'confirmed';
       });
       return result === 'confirmed' ? reply(200,'confirmed') : reply(409,'unavailable');

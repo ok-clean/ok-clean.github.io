@@ -338,10 +338,10 @@ def index_page(c, cases=()):
       <button class="btn line" id="qReserve" type="button" hidden>예약 신청</button>
     </div>
     <form id="reservationForm" hidden>
-      <p>예약 접수 시험입니다. 가상 정보만 입력해 주세요.</p>
+      <p id="reserveIntro">예약 접수 시험입니다. 가상 정보만 입력해 주세요.</p>
       <div id="reserveVerified" hidden>
-        <label>시험 계정 이메일 <input id="reserveEmail" type="email" autocomplete="off"></label>
-        <label>시험 계정 비밀번호 <input id="reservePassword" type="password" autocomplete="off"></label>
+        <label><span id="reserveEmailLabel">시험 계정 이메일</span> <input id="reserveEmail" type="email" autocomplete="off"></label>
+        <label><span id="reservePasswordLabel">시험 계정 비밀번호</span> <input id="reservePassword" type="password" autocomplete="off"></label>
         <button class="btn line" id="reserveLogin" type="button">시험 계정 로그인</button>
         <label>기존 접수번호 <input id="reserveReceipt" autocomplete="off" maxlength="80"></label>
         <button class="btn line" id="reserveRecover" type="button">접수 확인</button>
@@ -350,7 +350,7 @@ def index_page(c, cases=()):
       <div class="field"><label for="reservePhone">휴대폰 번호</label><input id="reservePhone" type="tel" required autocomplete="off"></div>
       <div class="field"><label for="reserveSize">규모</label><input id="reserveSize" type="number" min="1" max="999" step="1" required></div>
       <div class="field"><label for="reserveNotes">요청사항</label><textarea id="reserveNotes" maxlength="500" autocomplete="off"></textarea></div>
-      <label><input id="reserveConsent" type="checkbox" required> 예약 접수 시험에 동의합니다.</label>
+      <label><input id="reserveConsent" type="checkbox" required> <span id="reserveConsentText">예약 접수 시험에 동의합니다.</span></label>
       <button class="btn glove" id="reserveSubmit" type="submit">예약 접수</button>
       <button class="btn line" id="reserveNew" type="button" hidden>새 예약 작성</button>
       <p id="reserveStatus" role="status" aria-live="polite"></p>

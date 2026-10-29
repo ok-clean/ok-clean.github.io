@@ -1,0 +1,3 @@
+# Test-only layer on the exact built production image; never use for deployment.
+FROM okclean-reservation:integration
+COPY tests/server-container-entry.cjs /app/tests/server-container-entry.cjs
