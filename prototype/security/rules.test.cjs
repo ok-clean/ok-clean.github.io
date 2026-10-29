@@ -10,6 +10,9 @@ const {reviewPartnerAsAdmin,assignPartnerAsAdmin,revokeAssignmentAsAdmin,readAss
   await env.clearFirestore();
   const anon=env.authenticatedContext('customer-1',{firebase:{sign_in_provider:'anonymous'}}).firestore();
   const other=env.authenticatedContext('customer-2',{firebase:{sign_in_provider:'anonymous'}}).firestore();
+  const verified=env.authenticatedContext('verified-customer',{email_verified:true,firebase:{sign_in_provider:'password'}}).firestore();
+  const verifiedOther=env.authenticatedContext('verified-other',{email_verified:true,firebase:{sign_in_provider:'google.com'}}).firestore();
+  const unverifiedCustomer=env.authenticatedContext('not-verified',{email_verified:false,firebase:{sign_in_provider:'password'}}).firestore();
   const admin=env.authenticatedContext('admin-test',{admin:true}).firestore();
   const stranger=env.unauthenticatedContext().firestore();
   const partner=env.authenticatedContext('partner-1',{email_verified:true,firebase:{sign_in_provider:'password'}}).firestore();
@@ -63,6 +66,13 @@ const {reviewPartnerAsAdmin,assignPartnerAsAdmin,revokeAssignmentAsAdmin,readAss
   await assertFails(updateDoc(doc(admin,'quote_requests','a'),{phone:'01011112222'}));
   await assertFails(deleteDoc(doc(admin,'quote_requests','a')));
   const form={service:'입주·이사 청소',area:'춘천',size:25,date:new Date(Date.now()+86400000),name:'가상고객',phone:'01000000000',consent:true};
+  await assertSucceeds(createQuote(verified,'verified-customer','verified-request',form));
+  await assertSucceeds(getDoc(doc(verified,'quote_requests','verified-request')));
+  await assertFails(getDoc(doc(verifiedOther,'quote_requests','verified-request')));
+  await assertFails(getDoc(doc(anon,'quote_requests','verified-request')));
+  await assertFails(getDocs(collection(verified,'quote_requests')));
+  await assertFails(updateDoc(doc(verified,'quote_requests','verified-request'),{status:'예약확정'}));
+  await assertFails(createQuote(unverifiedCustomer,'not-verified','unverified-request',form));
   await assert.rejects(createQuote(anon,'customer-1','invalid-notes',{...form,notes:'x'.repeat(501)}));
   await assert.rejects(createQuote(anon,'customer-1','invalid-estimate',{...form,estimateMin:100,estimateMax:50}));
   await assertFails(setDoc(doc(anon,'quote_requests','too-long-notes'),{...payload,notes:'x'.repeat(501)}));
