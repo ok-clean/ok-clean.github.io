@@ -23,7 +23,7 @@ const PINNED = {
   // Updated alongside the auth initialization fix; the VM runs this exact client.
   memberClient: '0bd219f10ddd43e5a0a0a0152d805383e0c22023c86f22d26590770c7d2c51a3',
   // Updated test-only matching policy including optional notes and indicative estimates.
-  matchingRules: 'ea00f147ef55ae16d446a43cf44d6f230b2c26fbc5778d20182b2e849821f719',
+  matchingRules: '6ad02c5ab44f4031b5b97589ea51064d2c0e5a6b923e4d36ebbe126d5bcd4a9b',
 };
 function pinned(path, expected) {
   const text = readFileSync(path, 'utf8');
@@ -59,9 +59,9 @@ const roles = {
   partner:password('fake-partner-a'), partnerOther:password('fake-partner-b'), partnerPending:password('fake-partner-c'),
   unverified:password('fake-partner-a',false), google:google('fake-google-user'),
   claim:claimAdmin, memberAdmin, dual:dualAdmin,
-  verifiedCustomer:password('fake-verified-customer'),
-  verifiedOther:password('fake-verified-other'),
-  unverifiedCustomer:password('fake-verified-customer',false),
+  verifiedCustomer:{uid:'fake-verified-customer',claims:{customer:true,email_verified:true,firebase:{sign_in_provider:'password'}}},
+  verifiedOther:{uid:'fake-verified-other',claims:{customer:true,email_verified:true,firebase:{sign_in_provider:'password'}}},
+  unverifiedCustomer:{uid:'fake-verified-customer',claims:{customer:true,email_verified:false,firebase:{sign_in_provider:'password'}}},
 };
 const fakeMember = {
   name:'가상고객',phone:'01000000000',area:'춘천',free:'가상 서비스',ad:false,code:'OK-ABC234',ref:'',
