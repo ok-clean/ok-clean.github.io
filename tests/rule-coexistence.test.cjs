@@ -23,7 +23,7 @@ const PINNED = {
   // Updated alongside the auth initialization fix; the VM runs this exact client.
   memberClient: '0bd219f10ddd43e5a0a0a0152d805383e0c22023c86f22d26590770c7d2c51a3',
   // Updated test-only matching policy including optional notes and indicative estimates.
-  matchingRules: 'c678d29472071d7f645592e1c659d9f9a6624d22b9ef0c5ead65b4e206fe3d84',
+  matchingRules: 'ea00f147ef55ae16d446a43cf44d6f230b2c26fbc5778d20182b2e849821f719',
 };
 function pinned(path, expected) {
   const text = readFileSync(path, 'utf8');
@@ -59,6 +59,9 @@ const roles = {
   partner:password('fake-partner-a'), partnerOther:password('fake-partner-b'), partnerPending:password('fake-partner-c'),
   unverified:password('fake-partner-a',false), google:google('fake-google-user'),
   claim:claimAdmin, memberAdmin, dual:dualAdmin,
+  verifiedCustomer:password('fake-verified-customer'),
+  verifiedOther:password('fake-verified-other'),
+  unverifiedCustomer:password('fake-verified-customer',false),
 };
 const fakeMember = {
   name:'가상고객',phone:'01000000000',area:'춘천',free:'가상 서비스',ad:false,code:'OK-ABC234',ref:'',
@@ -75,6 +78,7 @@ async function seed(env) {
     await Promise.all([
       setDoc(doc(db,'member_requests','sample'),fakeMember),
       setDoc(doc(db,'quote_requests','sample'),fakeQuote),
+      setDoc(doc(db,'quote_requests','verified-owned'),{...fakeQuote,ownerUid:'fake-verified-customer'}),
       setDoc(doc(db,'quote_requests','new-offer'),fakeQuote),
       setDoc(doc(db,'quote_requests','pending-offer'),fakeQuote),
       setDoc(doc(db,'quote_requests','batch-good'),fakeQuote),
@@ -133,6 +137,11 @@ add('member create google account','member','google',false,db=>setDoc(doc(db,'me
 add('member privileged update uid admin','member','memberAdmin',true,db=>updateDoc(doc(db,'member_requests','sample'),{memo:'가상 변경'}));
 add('member privileged update claim admin','member','claim',false,db=>updateDoc(doc(db,'member_requests','sample'),{memo:'가상 금지'}));
 add('quote create anonymous','matching','anon',true,db=>setDoc(doc(db,'quote_requests','new-anon'),quotePayload('fake-customer-a')));
+add('verified customer creates own request','matching','verifiedCustomer',true,db=>setDoc(doc(db,'quote_requests','verified-new'),quotePayload('fake-verified-customer')));
+add('verified customer reads own request','matching','verifiedCustomer',true,db=>getDoc(doc(db,'quote_requests','verified-owned')));
+add('other verified customer cannot read request','matching','verifiedOther',false,db=>getDoc(doc(db,'quote_requests','verified-owned')));
+add('unverified customer cannot read request','matching','unverifiedCustomer',false,db=>getDoc(doc(db,'quote_requests','verified-owned')));
+add('verified customer cannot list all requests','matching','verifiedCustomer',false,db=>getDocs(collection(db,'quote_requests')));
 add('quote create with valid details','matching','anon',true,db=>setDoc(doc(db,'quote_requests','new-details'),{...quotePayload('fake-customer-a'),notes:'가상 요청',estimateMin:100,estimateMax:200}));
 add('quote rejects invalid estimate','matching','anon',false,db=>setDoc(doc(db,'quote_requests','bad-details'),{...quotePayload('fake-customer-a'),estimateMin:200,estimateMax:100}));
 add('quote create owner mismatch','matching','anon',false,db=>setDoc(doc(db,'quote_requests','wrong-owner'),quotePayload('fake-customer-b')));
