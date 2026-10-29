@@ -3,14 +3,18 @@ import {getAuth,GoogleAuthProvider,signInWithPopup,signInWithRedirect,getRedirec
 import {getFirestore,collection,query,orderBy,limit,onSnapshot,doc,updateDoc} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 const $=id=>document.getElementById(id), esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const msg=s=>$('message').textContent=s;
-let db,auth,unsub,records=[],session=0,viewVersion=0,currentUser=null,serverReady=false;
+let db,auth,unsub,reservationUnsub,records=[],session=0,viewVersion=0,currentUser=null,serverReady=false;
+function clearReservations(){
+ if(reservationUnsub){reservationUnsub();reservationUnsub=null;}
+ $('reservationDashboard').hidden=true;$('reservationList').replaceChildren();$('reservationMessage').textContent='';
+}
 // 인증 세대가 바뀌거나 서버 확인이 불가능할 때 화면과 메모리를 즉시 비웁니다.
 function clearMembers(){
  ++viewVersion;records=[];serverReady=false;$('dashboard').hidden=true;
  $('members').replaceChildren();$('stats').replaceChildren();$('search').value='';$('statusFilter').value='';
 }
 function resetSession(){
- ++session;currentUser=null;clearMembers();
+ ++session;currentUser=null;clearMembers();clearReservations();
  if(unsub){const stop=unsub;unsub=null;stop();}
  return session;
 }
@@ -20,10 +24,17 @@ function validAuth(started,user){
  resetSession();msg('인증 상태를 확인하는 중이에요.');return false;
 }
 function hasAccess(){return !!(serverReady&&currentUser&&validAuth(session,currentUser));}
-const config=await fetch('../config.json',{cache:'no-store'}).then(r=>r.json()).then(c=>c.firebase).catch(()=>null);
+const settings=await fetch('../config.json',{cache:'no-store'}).then(r=>r.json()).catch(()=>null);
+const config=settings?.firebase;
+const localReservation=settings?.reservation?.emulator===true && ['localhost','127.0.0.1'].includes(location.hostname) && /^demo-[a-z0-9-]+$/.test(config?.projectId||'');
 if(!config?.apiKey||!config?.projectId){msg('Firebase 연결 전입니다. 설치방법에 따라 config.json의 firebase 설정을 입력해 주세요.');$('loginBtn').disabled=true;}
 else{
  const app=initializeApp(config);auth=getAuth(app);db=getFirestore(app);
+ if(localReservation){
+  const {connectAuthEmulator}=await import('https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js');
+  const {connectFirestoreEmulator}=await import('https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js');
+  connectAuthEmulator(auth,'http://127.0.0.1:9099',{disableWarnings:true});connectFirestoreEmulator(db,'127.0.0.1',8085);
+ }
  $('loginBtn').onclick=async()=>{const started=session;try{await signInWithPopup(auth,new GoogleAuthProvider())}catch(e){if(started!==session)return;if(e.code==='auth/popup-blocked'){try{await signInWithRedirect(auth,new GoogleAuthProvider())}catch(err){if(started===session)msg('로그인 실패: '+err.message)}}else msg('로그인 실패: '+e.message)}};
  $('logout').onclick=async()=>{const started=resetSession();msg('로그아웃 중…');try{await signOut(auth)}catch(e){if(started===session)msg('로그아웃하지 못했어요. 다시 시도해 주세요.')}};
  getRedirectResult(auth).catch(e=>{if(session<=1&&!currentUser&&!$('login').hidden)msg('로그인 실패: '+e.message)});
@@ -31,6 +42,7 @@ else{
   const started=resetSession();currentUser=user;
   $('login').hidden=!!user;$('logout').hidden=!user;
   if(!user){msg('');return;}
+  if(localReservation) startReservationView(started,user);
   msg('서버에서 회원정보 접근을 확인하는 중…');
   const isCurrent=()=>validAuth(started,user);
   try{
@@ -51,6 +63,34 @@ else{
    },e=>{if(!isCurrent())return;resetSession();msg('회원 목록에 접근할 수 없습니다. Firebase 관리자 UID 등록과 보안 규칙을 확인해 주세요. ('+e.code+')');});
   }catch(e){if(isCurrent()){clearMembers();msg('회원 목록을 불러오지 못했어요. 연결과 권한을 확인해 주세요.');}}
  });
+}
+async function startReservationView(started,user){
+ try{
+  const token=await user.getIdTokenResult();
+  if(!validAuth(started,user) || token.claims.admin!==true)return;
+  reservationUnsub=onSnapshot(query(collection(db,'quote_requests'),orderBy('createdAt','desc'),limit(100)),{includeMetadataChanges:true},snapshot=>{
+   if(!validAuth(started,user))return;
+   if(snapshot.metadata?.fromCache!==false || snapshot.metadata?.hasPendingWrites!==false){$('reservationDashboard').hidden=true;$('reservationList').replaceChildren();return;}
+   const list=$('reservationList');list.replaceChildren();
+   for(const record of snapshot.docs){
+    const data=record.data(), card=document.createElement('article'), title=document.createElement('h3'), detail=document.createElement('p');
+    title.textContent=(data.service||'청소')+' · '+(data.status||'신규');
+    detail.textContent=[data.name,data.phone,data.area,data.notes].filter(Boolean).join(' · ');
+    const select=document.createElement('select');
+    for(const value of ['신규','검토중','상담중','예약확정','작업완료','종료','취소']){
+     const option=document.createElement('option');option.value=value;option.textContent=value;option.selected=value===data.status;select.append(option);
+    }
+    const save=document.createElement('button');save.type='button';save.textContent='상태 저장';
+    save.onclick=async()=>{if(!validAuth(started,user))return;save.disabled=true;try{
+     await updateDoc(doc(db,'quote_requests',record.id),{status:select.value});
+     if(validAuth(started,user))$('reservationMessage').textContent='상태가 저장되었습니다.';
+    }catch(_){if(validAuth(started,user))$('reservationMessage').textContent='상태를 저장하지 못했습니다.';}
+    finally{if(save.isConnected)save.disabled=false;}};
+    card.append(title,detail,select,save);list.append(card);
+   }
+   $('reservationDashboard').hidden=false;
+  },()=>{if(validAuth(started,user)){clearReservations();$('reservationMessage').textContent='예약 권한을 확인할 수 없습니다.';}});
+ }catch(_){if(validAuth(started,user))clearReservations();}
 }
 const option=(arr,value)=>arr.map(x=>`<option ${x===value?'selected':''}>${esc(x)}</option>`).join('');
 function render(){
