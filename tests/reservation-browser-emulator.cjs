@@ -238,7 +238,9 @@ async function main(){
     await vp.locator('#reserveSubmit').click();await vp.getByText(/접수 결과를 확인하지 못했습니다/).waitFor({timeout:30000});
     const verifiedId=await vp.evaluate(()=>sessionStorage.getItem('okclean-reservation-attempt-v1'));
     assert.ok((await db.collection('quote_requests').doc(verifiedId).get()).exists);
-    await vp.reload({waitUntil:'load'});await vp.locator('#qReserve').click();await vp.locator('#reserveRecover').click();
+    await vp.reload({waitUntil:'load'});await vp.locator('#qReserve').click();
+    await vp.locator('#reserveReceipt').fill('other-id');await vp.locator('#reserveRecover').click();await vp.getByText('이전에 제출한 접수부터 확인해 주세요.').waitFor();assert.equal(await vp.locator('#reserveSubmit').isDisabled(),true);
+    await vp.locator('#reserveReceipt').fill(verifiedId);await vp.locator('#reserveRecover').click();
     await vp.getByText('시험 접수 완료 · 접수번호: '+verifiedId).waitFor({timeout:30000});
     const newSession=await context(), np=await newSession.newPage();await np.goto(base+'/',{waitUntil:'load'});await np.locator('#qReserve').click();
     await np.locator('#reserveEmail').fill(verifiedCustomer);await np.locator('#reservePassword').fill(customerPassword);await np.locator('#reserveLogin').click();await np.getByText('시험 계정으로 로그인했습니다.').waitFor();

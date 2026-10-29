@@ -407,6 +407,7 @@ if(reservationTest && C.reservation?.verifiedEmulator && $("qReserve") && $("res
   if(pending){$("reserveReceipt").value=pending;status.textContent='이전 접수 확인이 필요합니다. 로그인 후 접수를 확인해 주세요.';}
   async function recover(id){
     if(busy || !/^[A-Za-z0-9_-]{1,80}$/.test(id))return;
+    if(pending && pending!==id){status.textContent='이전에 제출한 접수부터 확인해 주세요.';return;}
     busy=true;status.textContent='접수를 확인하고 있습니다.';
     try{
       const client=await import('./verified-reservation-emulator.js');
