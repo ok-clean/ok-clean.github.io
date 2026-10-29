@@ -2,17 +2,18 @@
 const test=require('node:test'),assert=require('node:assert/strict'),crypto=require('node:crypto');
 const {createRestoreIssuer,validationMessage,recordBytes}=require('../server/restore-issuer.cjs');
 const {message,createRestoreGate,startRestoreHealthMonitor}=require('../server/restore-gate.cjs');
+const databaseId='restore-test',databaseUid='123e4567-e89b-42d3-a456-426614174000';
 const src='demo-source',lp='demo-ledger',rid='restore_epoch_123456',aud='https://issuer.example.test',email='issuer@demo-ledger.iam.gserviceaccount.com';
 function setup(){
  const authority=crypto.generateKeyPairSync('ed25519'),gate=crypto.generateKeyPairSync('ed25519');const pem=k=>k.export({format:'pem',type:'spki'});
  const rec={sourceProject:src,id:'synthetic-id',action:'redacted',state:'committed',expectedVersion:'1:0',expectedHistoryVersion:'a'.repeat(64)};
  let tick=1000000,pending=false,revision=5,gateDoc=null,beforeCommit=null;
- const proof={sourceProject:src,ledgerProject:lp,restoreId:rid,checkpoint:crypto.createHash('sha256').update(recordBytes(rec)).digest('hex'),ledgerRevision:revision,recordCount:1,issuedAt:tick-1000,expiresAt:tick+60000,isolated:true,replayed:true,state:'verified'};
+ const proof={sourceProject:src,ledgerProject:lp,restoreId:rid,servedDatabaseId:databaseId,servedDatabaseUid:databaseUid,checkpoint:crypto.createHash('sha256').update(recordBytes(rec)).digest('hex'),ledgerRevision:revision,recordCount:1,issuedAt:tick-1000,expiresAt:tick+60000,isolated:true,replayed:true,state:'verified'};
  function resign(){proof.signature=crypto.sign(null,validationMessage(proof),authority.privateKey).toString('base64url');}resign();
  const refs={restore_validation:{id:'validation',get:async()=>({exists:true,data:()=>({...proof})})},deletion_ledger_meta:{id:'head',get:async()=>({exists:true,data:()=>({revision})})},restore_control:{id:'gate',get:async()=>({exists:!!gateDoc,data:()=>gateDoc})},deletion_ledger:{where:()=>({limit:()=>({id:'pending'})}),orderBy:()=>({limit:()=>({get:async()=>({docs:[{id:crypto.createHash('sha256').update(src).update('\0').update(rec.action).update('\0').update(rec.id).digest('hex'),data:()=>rec}]})})})}};
  const db={projectId:lp,collection:n=>n==='deletion_ledger'?refs[n]:{doc:()=>refs[n]},runTransaction:async f=>{if(beforeCommit)await beforeCommit();const staged=[];const tx={get:async ref=>ref.id==='pending'?{empty:!pending}:ref.get(),set:(ref,v)=>staged.push(v)};const result=await f(tx);for(const v of staged)gateDoc=v;return result;}};
  const ledger={safety:{sourceProjectId:src,ledgerProjectId:lp},assertNoPending:async()=>{if(pending)throw Error('pending');},page:async()=>({records:[rec],next:null})};
- const config={ledgerDb:db,ledger,sourceProject:src,ledgerProject:lp,restoreId:rid,authorityPublicKey:pem(authority.publicKey),gatePublicKey:pem(gate.publicKey),callerEmail:email,audience:aud,verifyOidc:async()=>({aud,iss:'https://accounts.google.com',email,email_verified:true}),sign:async msg=>crypto.sign(null,msg,gate.privateKey),now:()=>tick};
+ const config={ledgerDb:db,ledger,sourceProject:src,ledgerProject:lp,restoreId:rid,servedDatabaseId:databaseId,resolveDbIdentity:async({projectId,databaseId})=>({projectId,databaseId,uid:databaseUid}),authorityPublicKey:pem(authority.publicKey),gatePublicKey:pem(gate.publicKey),callerEmail:email,audience:aud,verifyOidc:async()=>({aud,iss:'https://accounts.google.com',email,email_verified:true}),sign:async msg=>crypto.sign(null,msg,gate.privateKey),now:()=>tick};
  return {proof,resign,rec,config,getGate:()=>gateDoc,setPending:x=>pending=x,setRevision:x=>revision=x,setTime:x=>tick=x,before:f=>beforeCommit=f,gate};
 }
 async function request(s,token='valid'){
@@ -37,7 +38,7 @@ test('a delayed older issuance cannot overwrite a newer valid certificate',async
 
 test('automatic recovery requires a fresh independent signed proof and a real gate recheck',async()=>{
  const s=setup();s.proof.expiresAt=1599000;s.resign();
- const gate=createRestoreGate({ledgerDb:s.config.ledgerDb,sourceProject:src,ledgerProject:lp,restoreId:rid,publicKey:s.config.gatePublicKey,now:s.config.now});
+ const gate=createRestoreGate({ledgerDb:s.config.ledgerDb,sourceProject:src,ledgerProject:lp,restoreId:rid,servedDatabaseId:databaseId,resolveDbIdentity:s.config.resolveDbIdentity,publicKey:s.config.gatePublicKey,now:s.config.now});
  assert.equal(await gate.verify(),false);let renewals=0;
  const monitor=startRestoreHealthMonitor(gate,{renew:async()=>{renewals++;const r=await request(s);if(r.statusCode!==200)throw Error('ISSUER_REFUSED');return 'issued';},clock:s.config.now,report:()=>{},setIntervalFn:()=>({unref(){}}),clearIntervalFn:()=>{}});
  await new Promise(r=>setImmediate(r));assert.equal(renewals,1);assert.equal(await gate.verify(),true);
@@ -52,8 +53,8 @@ test('read-only restore audit checks ledger order and redacted document shape wi
  const {auditRestoredDeletionState}=require('../server/restore-issuer.cjs'),s=setup();
  let parent={retentionRedacted:true,status:'보유기간만료',terminalAt:new Date(0),redactedAt:new Date(0),legalHold:false,dataMutationFrozen:true,retentionFreeze:'retention-v1'},cols=[],history=[],changed=false,reads=0;
  const ref={get:async()=>({exists:true,data:()=>parent,updateTime:{isEqual:()=>!changed||++reads<2}}),listCollections:async()=>cols,collection:()=>({limit:()=>({get:async()=>({size:history.length,docs:history})})})};
- const args={ledgerDb:s.config.ledgerDb,sourceDb:{projectId:src,databaseId:'(default)'},restoredDb:{projectId:src,databaseId:'restore-test',collection:()=>({doc:()=>ref})},restoredDatabaseId:'restore-test',sourceProject:src,ledgerProject:lp,checkpoint:s.proof.checkpoint,ledgerRevision:5,recordCount:1};
- assert.deepEqual(await auditRestoredDeletionState(args),{checkpoint:s.proof.checkpoint,ledgerRevision:5,recordCount:1,restoredDatabaseId:'restore-test'});
+ const args={ledgerDb:s.config.ledgerDb,sourceDb:{projectId:src,databaseId:'(default)'},restoredDb:{projectId:src,databaseId:'restore-test',collection:()=>({doc:()=>ref})},restoredDatabaseId:'restore-test',resolveDbIdentity:s.config.resolveDbIdentity,sourceProject:src,ledgerProject:lp,checkpoint:s.proof.checkpoint,ledgerRevision:5,recordCount:1};
+ assert.deepEqual(await auditRestoredDeletionState(args),{checkpoint:s.proof.checkpoint,ledgerRevision:5,recordCount:1,servedDatabaseId:'restore-test',servedDatabaseUid:databaseUid});
  await assert.rejects(auditRestoredDeletionState({...args,restoredDb:{...args.restoredDb,databaseId:'(default)'},restoredDatabaseId:'(default)'}),/RESTORE_AUDIT_CONFIGURATION_INVALID/);
  await assert.rejects(auditRestoredDeletionState({...args,restoredDatabaseId:'other-database'}),/RESTORE_AUDIT_CONFIGURATION_INVALID/);
  await assert.rejects(auditRestoredDeletionState({...args,sourceDb:{projectId:src}}),/RESTORE_AUDIT_CONFIGURATION_INVALID/);
@@ -65,6 +66,21 @@ test('read-only restore audit checks ledger order and redacted document shape wi
  await assert.rejects(auditRestoredDeletionState(args),/RESTORE_HISTORY_BASELINE_REQUIRED/);history=[];
  assert.equal((await auditRestoredDeletionState(args)).recordCount,1);
  s.setPending(true);await assert.rejects(auditRestoredDeletionState(args),/RESTORE_LEDGER_UNSTABLE/);s.setPending(false);
+ let lookups=0;const changingIdentity=async({projectId,databaseId})=>({projectId,databaseId,uid:++lookups===1?databaseUid:'223e4567-e89b-42d3-a456-426614174000'});
+ await assert.rejects(auditRestoredDeletionState({...args,resolveDbIdentity:changingIdentity}),/RESTORE_IDENTITY_CHANGED/);
+ await assert.rejects(auditRestoredDeletionState({...args,resolveDbIdentity:async()=>{throw Error('metadata unavailable');}}),/metadata unavailable/);
  changed=true;reads=1;await assert.rejects(auditRestoredDeletionState(args),/RESTORE_DATA_CHANGED/);
  assert.equal(s.getGate(),null); // This audit cannot issue or release a restore.
+});
+
+test('rejects signed proof for a different DB UID or ID and identity resolver failure',async()=>{
+ for(const mode of ['uid','id','wrong-project','lookup-fails','changes-before-commit']){
+  const s=setup();let n=0;
+  if(mode==='uid'){s.proof.servedDatabaseUid='223e4567-e89b-42d3-a456-426614174000';s.resign();}
+  if(mode==='id'){s.proof.servedDatabaseId='wrong-db';s.resign();}
+  if(mode==='wrong-project')s.config.resolveDbIdentity=async({databaseId})=>({projectId:'other-project',databaseId,uid:databaseUid});
+  if(mode==='lookup-fails')s.config.resolveDbIdentity=async()=>{throw Error('metadata unavailable');};
+  if(mode==='changes-before-commit')s.config.resolveDbIdentity=async({projectId,databaseId})=>({projectId,databaseId,uid:++n===1?databaseUid:'223e4567-e89b-42d3-a456-426614174000'});
+  assert.equal((await request(s)).statusCode,503,mode);assert.equal(s.getGate(),null);
+ }
 });

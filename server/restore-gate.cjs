@@ -6,11 +6,13 @@ const project=/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
 const restore=/^[A-Za-z0-9_-]{16,80}$/;
 const hash=/^[a-f0-9]{64}$/;
 const b64=/^[A-Za-z0-9_-]{86}$/; // 64-byte Ed25519 signature, unpadded base64url
+const databaseId=/^(?:\(default\)|[a-z][a-z0-9-]{2,61}[a-z0-9])$/;
+const databaseUid=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 function message(v){
-  return Buffer.from(JSON.stringify(['okclean-restore-gate-v1',v.sourceProject,v.ledgerProject,v.restoreId,v.checkpoint,v.ledgerRevision,v.issuedAt,v.expiresAt,v.state]));
+  return Buffer.from(JSON.stringify(['okclean-restore-gate-v2',v.sourceProject,v.ledgerProject,v.restoreId,v.servedDatabaseId,v.servedDatabaseUid,v.checkpoint,v.ledgerRevision,v.issuedAt,v.expiresAt,v.state]));
 }
-function createRestoreGate({ledgerDb,sourceProject,ledgerProject,restoreId,publicKey,now=()=>Date.now(),readTimeoutMs=5000}){
-  if(!project.test(sourceProject||'')||!project.test(ledgerProject||'')||sourceProject===ledgerProject||ledgerDb?.projectId!==ledgerProject||!ledgerDb?.collection||!ledgerDb?.runTransaction||!restore.test(restoreId||'')||!Number.isInteger(readTimeoutMs)||readTimeoutMs<1||readTimeoutMs>30000)throw Error('RESTORE_GATE_CONFIGURATION_REQUIRED');
+function createRestoreGate({ledgerDb,sourceProject,ledgerProject,restoreId,servedDatabaseId,resolveDbIdentity,publicKey,now=()=>Date.now(),readTimeoutMs=5000}){
+  if(!project.test(sourceProject||'')||!project.test(ledgerProject||'')||sourceProject===ledgerProject||ledgerDb?.projectId!==ledgerProject||!ledgerDb?.collection||!ledgerDb?.runTransaction||!restore.test(restoreId||'')||!databaseId.test(servedDatabaseId||'')||typeof resolveDbIdentity!=='function'||!Number.isInteger(readTimeoutMs)||readTimeoutMs<1||readTimeoutMs>30000)throw Error('RESTORE_GATE_CONFIGURATION_REQUIRED');
   if(typeof publicKey!=='string'||!/^-----BEGIN PUBLIC KEY-----\n/.test(publicKey))throw Error('RESTORE_GATE_PUBLIC_KEY_INVALID');
   let key;try{key=crypto.createPublicKey(publicKey);}catch{throw Error('RESTORE_GATE_PUBLIC_KEY_INVALID');}
   if(key.asymmetricKeyType!=='ed25519')throw Error('RESTORE_GATE_PUBLIC_KEY_INVALID');
@@ -22,10 +24,16 @@ function createRestoreGate({ledgerDb,sourceProject,ledgerProject,restoreId,publi
   async function inspect(){
     let timer;
     try{
-      const reading=ledgerDb.runTransaction(async tx=>{
+      // The runtime resolves identity from the Firestore Admin API. A name or
+      // environment variable alone cannot identify a deleted/recreated DB.
+      // Resolver injection is a trusted runtime boundary, not user input.
+      const reading=(async()=>{
+      const identity=await resolveDbIdentity({projectId:sourceProject,databaseId:servedDatabaseId});
+      if(identity?.projectId!==sourceProject||identity?.databaseId!==servedDatabaseId||!databaseUid.test(identity?.uid||''))return {available:false};
+      const state=await ledgerDb.runTransaction(async tx=>{
       const snap=await tx.get(control);if(!snap.exists)return {available:false};
       const v=snap.data(), t=now();
-      if(!v||v.sourceProject!==sourceProject||v.ledgerProject!==ledgerProject||v.restoreId!==restoreId||v.state!=='cleared'||!hash.test(v.checkpoint||'')||!Number.isSafeInteger(v.ledgerRevision)||v.ledgerRevision<0||!Number.isSafeInteger(v.issuedAt)||!Number.isSafeInteger(v.expiresAt)||!Number.isFinite(t)||v.issuedAt>t+30000||v.expiresAt<=t||v.expiresAt<=v.issuedAt||v.expiresAt-v.issuedAt>600000||!b64.test(v.signature||''))return {available:false};
+      if(!v||v.sourceProject!==sourceProject||v.ledgerProject!==ledgerProject||v.restoreId!==restoreId||v.servedDatabaseId!==servedDatabaseId||v.servedDatabaseUid!==identity.uid||!databaseUid.test(v.servedDatabaseUid||'')||v.state!=='cleared'||!hash.test(v.checkpoint||'')||!Number.isSafeInteger(v.ledgerRevision)||v.ledgerRevision<0||!Number.isSafeInteger(v.issuedAt)||!Number.isSafeInteger(v.expiresAt)||!Number.isFinite(t)||v.issuedAt>t+30000||v.expiresAt<=t||v.expiresAt<=v.issuedAt||v.expiresAt-v.issuedAt>600000||!b64.test(v.signature||''))return {available:false};
       if(!crypto.verify(null,message(v),key,Buffer.from(v.signature,'base64url')))return {available:false};
       const actualHead=await tx.get(head);if(!actualHead.exists||actualHead.data()?.revision!==v.ledgerRevision)return {available:false};
       // Pending intents make it unsafe to serve a restored snapshot. Query
@@ -33,6 +41,13 @@ function createRestoreGate({ledgerDb,sourceProject,ledgerProject,restoreId,publi
       const pending=await tx.get(entries.where('state','==','pending').limit(1));
       return pending.empty===true?{available:true,expiresAt:v.expiresAt,issuedAt:v.issuedAt}:{available:false};
       },{readOnly:true});
+      if(state.available!==true)return state;
+      // Detect replacement during the ledger read. This narrows the race but
+      // is not a substitute for separately fenced database administration.
+      const finalIdentity=await resolveDbIdentity({projectId:sourceProject,databaseId:servedDatabaseId});
+      if(finalIdentity?.projectId!==sourceProject||finalIdentity?.databaseId!==servedDatabaseId||finalIdentity?.uid!==identity.uid)return {available:false};
+      return state;
+      })();
       const value=await Promise.race([reading,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('RESTORE_READ_TIMEOUT')),readTimeoutMs);})]);
       // The proof can expire while the ledger transaction is in flight.
       // Check again after the read, before the middleware can allow a request.

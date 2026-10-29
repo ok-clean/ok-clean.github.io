@@ -23,6 +23,7 @@ function validateRuntime(env){
   }
   const ledger=env.OKCLEAN_LEDGER_PROJECT_ID;
   need(typeof ledger==='string'&&projectPattern.test(ledger)&&! /^(demo|test|example)-/i.test(ledger)&&ledger!==project,'RESTORE_LEDGER_PROJECT_INVALID');
+  if(env.OKCLEAN_FIRESTORE_DATABASE_ID!==undefined)need(typeof env.OKCLEAN_FIRESTORE_DATABASE_ID==='string'&&/^(?:\(default\)|[a-z][a-z0-9-]{2,61}[a-z0-9])$/.test(env.OKCLEAN_FIRESTORE_DATABASE_ID),'FIRESTORE_DATABASE_ID_INVALID');
   if(env.OKCLEAN_RESTORE_RENEWAL_ENABLED==='true'){
     const control=env.OKCLEAN_RESTORE_CONTROL_PROJECT_ID;
     need(typeof control==='string'&&projectPattern.test(control)&&! /^(demo|test|example)-/i.test(control)&&control!==project&&control!==ledger,'RESTORE_CONTROL_PROJECT_INVALID');

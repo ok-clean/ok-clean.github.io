@@ -7,6 +7,7 @@ const {getFirestore}=require('firebase-admin/firestore');
 const {createRestoreIssuer,validationMessage,recordBytes,auditRestoredDeletionState}=require('../server/restore-issuer.cjs');
 const {createRestoreGate,startRestoreHealthMonitor}=require('../server/restore-gate.cjs');
 const {createRestoreRenewer}=require('../server/restore-renewal.cjs');
+const databaseUid='123e4567-e89b-42d3-a456-426614174000';
 const source='demo-okclean-integration',project='demo-okclean-ledger',restoreId='synthetic_epoch_123456';
 if(process.env.GCLOUD_PROJECT!==source||process.env.FIRESTORE_EMULATOR_HOST!=='127.0.0.1:8085'||process.env.FIREBASE_AUTH_EMULATOR_HOST!=='127.0.0.1:9099')throw Error('DEMO_EMULATOR_REQUIRED');
 async function main(){
@@ -19,8 +20,9 @@ async function main(){
   // This fixture simulates the source worker; the independent ledger is real
   // emulator storage but the worker does not delete customer data.
   await processWithLedger({ledger,service:{process:async()=>({result:input.action})},...input,transactionFence:async()=>true});
-  const record={sourceProject:source,...input,state:'committed'},proof={sourceProject:source,ledgerProject:project,restoreId,checkpoint:crypto.createHash('sha256').update(recordBytes(record)).digest('hex'),ledgerRevision:2,recordCount:1,issuedAt:now,expiresAt:now+540000,isolated:true,replayed:true,state:'verified'};
-  const audit={ledgerDb:db,sourceDb,restoredDb,restoredDatabaseId,sourceProject:source,ledgerProject:project,checkpoint:proof.checkpoint,ledgerRevision:proof.ledgerRevision,recordCount:1};
+  const record={sourceProject:source,...input,state:'committed'},proof={sourceProject:source,ledgerProject:project,restoreId,servedDatabaseId:restoredDatabaseId,servedDatabaseUid:databaseUid,checkpoint:crypto.createHash('sha256').update(recordBytes(record)).digest('hex'),ledgerRevision:2,recordCount:1,issuedAt:now,expiresAt:now+540000,isolated:true,replayed:true,state:'verified'};
+  const resolveDbIdentity=async({projectId,databaseId})=>({projectId,databaseId,uid:databaseUid});
+  const audit={ledgerDb:db,sourceDb,restoredDb,restoredDatabaseId,resolveDbIdentity,sourceProject:source,ledgerProject:project,checkpoint:proof.checkpoint,ledgerRevision:proof.ledgerRevision,recordCount:1};
   await assert.rejects(auditRestoredDeletionState({...audit,restoredDb:sourceDb,restoredDatabaseId:'(default)'}),/RESTORE_AUDIT_CONFIGURATION_INVALID/);
   const parent=restoredDb.collection('quote_requests').doc(input.id);
   await parent.set({name:'synthetic personal data'});
@@ -37,9 +39,9 @@ async function main(){
   await parent.collection('unexpected').doc('synthetic').delete();
   proof.signature=crypto.sign(null,validationMessage(proof),verifier.privateKey).toString('base64url');
   await db.collection('restore_validation').doc(restoreId).create(proof);
-  const handler=createRestoreIssuer({ledgerDb:db,ledger,sourceProject:source,ledgerProject:project,restoreId,authorityPublicKey:pem(verifier.publicKey),gatePublicKey:pem(signer.publicKey),callerEmail:email,audience:aud,verifyOidc:async()=>({aud,iss:'https://accounts.google.com',email,email_verified:true}),sign:async m=>crypto.sign(null,m,signer.privateKey),now:()=>now});
+  const handler=createRestoreIssuer({ledgerDb:db,ledger,sourceProject:source,ledgerProject:project,restoreId,servedDatabaseId:restoredDatabaseId,resolveDbIdentity,authorityPublicKey:pem(verifier.publicKey),gatePublicKey:pem(signer.publicKey),callerEmail:email,audience:aud,verifyOidc:async()=>({aud,iss:'https://accounts.google.com',email,email_verified:true}),sign:async m=>crypto.sign(null,m,signer.privateKey),now:()=>now});
   const res={setHeader(){},end(v){this.body=JSON.parse(v);return this}};await handler({method:'POST',headers:{authorization:'Bearer synthetic'}},res);assert.equal(res.statusCode,200);
-  const gate=createRestoreGate({ledgerDb:db,sourceProject:source,ledgerProject:project,restoreId,publicKey:pem(signer.publicKey),now:()=>now});assert.equal(await gate.verify(),true);
+  const gate=createRestoreGate({ledgerDb:db,sourceProject:source,ledgerProject:project,restoreId,servedDatabaseId:restoredDatabaseId,resolveDbIdentity,publicKey:pem(signer.publicKey),now:()=>now});assert.equal(await gate.verify(),true);
   const previous=(await db.collection('restore_control').doc('serving').get()).data().expiresAt;now+=240000;
   server=http.createServer((req,res)=>{if(req.url!=='/_internal/restore/issue'){res.writeHead(404);return res.end();}void handler(req,res);});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   const origin=aud;

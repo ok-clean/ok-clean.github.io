@@ -190,6 +190,7 @@ function validateRetentionPreviewRuntime(env){
  need(env.NODE_ENV==='production','NODE_ENV_INVALID');
  need([source,ledger,control].every(x=>typeof x==='string'&&p.test(x)&&! /^(demo|test|example)-/i.test(x))&&new Set([source,ledger,control]).size===3,'PROJECT_CONFIGURATION_INVALID');
  need(env.GOOGLE_CLOUD_PROJECT===source&&(!env.GCLOUD_PROJECT||env.GCLOUD_PROJECT===source),'CLOUD_PROJECT_MISMATCH');
+ if(env.OKCLEAN_FIRESTORE_DATABASE_ID!==undefined)need(typeof env.OKCLEAN_FIRESTORE_DATABASE_ID==='string'&&/^(?:\(default\)|[a-z][a-z0-9-]{2,61}[a-z0-9])$/.test(env.OKCLEAN_FIRESTORE_DATABASE_ID),'FIRESTORE_DATABASE_ID_INVALID');
  need(env.OKCLEAN_RETENTION_PREVIEW_ENABLED==='true'&&env.OKCLEAN_RETENTION_POLICY_REVIEWED==='true','PREVIEW_POLICY_NOT_REVIEWED');
  for(const name of ['OKCLEAN_RETENTION_RESERVATION_DAYS','OKCLEAN_RETENTION_HISTORY_DAYS']){const value=env[name];need(typeof value==='string'&&/^[1-9][0-9]{0,4}$/.test(value)&&Number(value)<=36500,name+'_INVALID');}
  need(typeof env.OKCLEAN_RETENTION_POLICY_VERSION==='string'&&/^[A-Za-z0-9._-]{1,80}$/.test(env.OKCLEAN_RETENTION_POLICY_VERSION)&&! /^(test|demo|example)[-_.]/i.test(env.OKCLEAN_RETENTION_POLICY_VERSION),'POLICY_VERSION_INVALID');
