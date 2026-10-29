@@ -1,6 +1,6 @@
 import {initializeApp} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
-import {getAuth,GoogleAuthProvider,signInWithPopup,signInWithRedirect,getRedirectResult,onAuthStateChanged,signOut} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
-import {getFirestore,collection,query,orderBy,limit,onSnapshot,doc,updateDoc} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
+import {getAuth,GoogleAuthProvider,signInWithPopup,signInWithRedirect,getRedirectResult,onAuthStateChanged,signOut,connectAuthEmulator} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
+import {getFirestore,collection,query,orderBy,limit,onSnapshot,doc,updateDoc,connectFirestoreEmulator} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 const $=id=>document.getElementById(id), esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const msg=s=>$('message').textContent=s;
 let db,auth,unsub,reservationUnsub,records=[],session=0,viewVersion=0,currentUser=null,serverReady=false;
@@ -29,12 +29,12 @@ const config=settings?.firebase;
 const localReservation=settings?.reservation?.emulator===true && ['localhost','127.0.0.1'].includes(location.hostname) && /^demo-[a-z0-9-]+$/.test(config?.projectId||'');
 if(!config?.apiKey||!config?.projectId){msg('Firebase 연결 전입니다. 설치방법에 따라 config.json의 firebase 설정을 입력해 주세요.');$('loginBtn').disabled=true;}
 else{
- const app=initializeApp(config);auth=getAuth(app);db=getFirestore(app);
+ const app=initializeApp(config);auth=getAuth(app);
  if(localReservation){
-  const {connectAuthEmulator}=await import('https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js');
-  const {connectFirestoreEmulator}=await import('https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js');
-  connectAuthEmulator(auth,'http://127.0.0.1:9099',{disableWarnings:true});connectFirestoreEmulator(db,'127.0.0.1',8085);
+  connectAuthEmulator(auth,'http://127.0.0.1:9099',{disableWarnings:true});
  }
+ db=getFirestore(app);
+ if(localReservation)connectFirestoreEmulator(db,'127.0.0.1',8085);
  $('loginBtn').onclick=async()=>{const started=session;try{await signInWithPopup(auth,new GoogleAuthProvider())}catch(e){if(started!==session)return;if(e.code==='auth/popup-blocked'){try{await signInWithRedirect(auth,new GoogleAuthProvider())}catch(err){if(started===session)msg('로그인 실패: '+err.message)}}else msg('로그인 실패: '+e.message)}};
  $('logout').onclick=async()=>{const started=resetSession();msg('로그아웃 중…');try{await signOut(auth)}catch(e){if(started===session)msg('로그아웃하지 못했어요. 다시 시도해 주세요.')}};
  getRedirectResult(auth).catch(e=>{if(session<=1&&!currentUser&&!$('login').hidden)msg('로그인 실패: '+e.message)});

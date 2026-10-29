@@ -5,12 +5,13 @@ const modules={
  'firebase-app.js': `export const initializeApp = () => ({});`,
  'firebase-auth.js': `export class GoogleAuthProvider {};
  export const getAuth=()=>window.fake.authState;
+ export const connectAuthEmulator=()=>{};
  export const signInWithPopup=()=>Promise.resolve();
  export const signInWithRedirect=()=>Promise.resolve();
  export const getRedirectResult=()=>Promise.resolve();
  export const onAuthStateChanged=(a,cb)=>{window.fake.auth=user=>{a.currentUser=user;cb(user)};queueMicrotask(()=>window.fake.auth(null));return ()=>{}};
  export const signOut=()=>new Promise((resolve,reject)=>{window.fake.signouts.push({resolve:()=>{window.fake.auth(null);resolve()},reject});});`,
- 'firebase-firestore.js': `export const getFirestore=()=>({});
+ 'firebase-firestore.js': `export const getFirestore=()=>({}); export const connectFirestoreEmulator=()=>{};
  export const collection=(_db,name)=>name; export const query=(...args)=>args;
  export const orderBy=(...args)=>args; export const limit=n=>n; export const doc=(_db,name,id)=>({name,id});
  export const onSnapshot=(_query,options,next,error)=>{const observer={options,next,error,unsubscribed:false};window.fake.observers.push(observer);return ()=>{observer.unsubscribed=true};};
