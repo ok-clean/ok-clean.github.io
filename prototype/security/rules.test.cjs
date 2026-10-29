@@ -10,9 +10,9 @@ const {reviewPartnerAsAdmin,assignPartnerAsAdmin,revokeAssignmentAsAdmin,readAss
   await env.clearFirestore();
   const anon=env.authenticatedContext('customer-1',{firebase:{sign_in_provider:'anonymous'}}).firestore();
   const other=env.authenticatedContext('customer-2',{firebase:{sign_in_provider:'anonymous'}}).firestore();
-  const verified=env.authenticatedContext('verified-customer',{email_verified:true,firebase:{sign_in_provider:'password'}}).firestore();
-  const verifiedOther=env.authenticatedContext('verified-other',{email_verified:true,firebase:{sign_in_provider:'google.com'}}).firestore();
-  const unverifiedCustomer=env.authenticatedContext('not-verified',{email_verified:false,firebase:{sign_in_provider:'password'}}).firestore();
+  const verified=env.authenticatedContext('verified-customer',{customer:true,email_verified:true,firebase:{sign_in_provider:'password'}}).firestore();
+  const verifiedOther=env.authenticatedContext('verified-other',{customer:true,email_verified:true,firebase:{sign_in_provider:'google.com'}}).firestore();
+  const unverifiedCustomer=env.authenticatedContext('not-verified',{customer:true,email_verified:false,firebase:{sign_in_provider:'password'}}).firestore();
   const admin=env.authenticatedContext('admin-test',{admin:true}).firestore();
   const stranger=env.unauthenticatedContext().firestore();
   const partner=env.authenticatedContext('partner-1',{email_verified:true,firebase:{sign_in_provider:'password'}}).firestore();
