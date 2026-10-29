@@ -12,11 +12,17 @@ self.addEventListener("fetch", e => {
   // 사례 목록은 요청마다 시각이 달라 매번 새로운 캐시 항목이 생깁니다.
   const timestampedCases = req.mode !== "navigate" &&
     url.pathname === new URL("cases.json", self.registration.scope).pathname && /^\?t=[0-9]+$/.test(url.search);
+  const network = fetch(req);
+  // 응답은 바로 전달하되 캐시 저장이 끝날 때까지 작업자를 유지합니다.
+  // 저장 공간 부족 등 캐시 실패는 성공한 네트워크 응답을 바꾸지 않습니다.
+  e.waitUntil(network.then(res => {
+    if(res.ok && !timestampedCases){
+      const copy = res.clone();
+      return caches.open(CACHE).then(c => c.put(req, copy));
+    }
+  }).catch(() => {}));
   e.respondWith(
-    fetch(req).then(res => {
-      if(res.ok && !timestampedCases){ const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
-      return res;
-    }).catch(() => caches.open(CACHE).then(cache => cache.match(req).then(r => {
+    network.catch(() => caches.open(CACHE).then(cache => cache.match(req).then(r => {
       if(r) return r;
       // 홈 문서를 하위 URL에 반환하면 상대 경로가 바뀌어 화면이 깨집니다.
       const path = new URL(req.url).pathname;
