@@ -37,4 +37,10 @@ async function main(){
   console.log('PASS: member account links require both synthetic Firebase Auth identities and freeze gate');
  }finally{await app.delete();}
 }
-main().catch(()=>{console.error('MEMBER_LINK_EMULATOR_FAILED');process.exitCode=1;});
+main().catch(e=>{
+ // Test inputs are synthetic, but avoid printing errors, credentials or payloads.
+ // The source location and error type are enough to locate failed assertions.
+ const location=typeof e?.stack==='string'?e.stack.match(/member-account-link-emulator\.cjs:\d+:\d+/)?.[0]:'unknown';
+ const kind=e?.name==='AssertionError'?'ASSERTION':'OTHER';
+ console.error('MEMBER_LINK_EMULATOR_FAILED',kind,location||'unknown');process.exitCode=1;
+});
