@@ -22,8 +22,8 @@ const PINNED = {
   memberRules: '4ffb09ebfb1dd3d89de445ea49faf31e53ba51befa8b846a578dc05404750f02',
   // Updated alongside the auth initialization fix; the VM runs this exact client.
   memberClient: '0bd219f10ddd43e5a0a0a0152d805383e0c22023c86f22d26590770c7d2c51a3',
-  // #25: dc056ec8e4eea0689cd65fa5aeae6f4947c66d2c (test-only matching policy)
-  matchingRules: 'e07de1a8b8073d0130780d2ef5a7e4331355958fde364611c6021ead8fe9d544',
+  // Updated test-only matching policy including optional notes and indicative estimates.
+  matchingRules: 'c678d29472071d7f645592e1c659d9f9a6624d22b9ef0c5ead65b4e206fe3d84',
 };
 function pinned(path, expected) {
   const text = readFileSync(path, 'utf8');
@@ -34,6 +34,7 @@ function pinned(path, expected) {
 const memberRules = pinned('firestore.rules', PINNED.memberRules);
 const memberClient = pinned('member-sync.js', PINNED.memberClient);
 const matchingRules = pinned('tests/fixtures/matching-test-only.rules', PINNED.matchingRules);
+assert.equal(pinned('prototype/security/firestore.rules', PINNED.matchingRules), matchingRules, 'test fixture must match prototype rules');
 const head = "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n";
 const tail = '  }\n}\n';
 function body(policy) {
@@ -132,6 +133,8 @@ add('member create google account','member','google',false,db=>setDoc(doc(db,'me
 add('member privileged update uid admin','member','memberAdmin',true,db=>updateDoc(doc(db,'member_requests','sample'),{memo:'가상 변경'}));
 add('member privileged update claim admin','member','claim',false,db=>updateDoc(doc(db,'member_requests','sample'),{memo:'가상 금지'}));
 add('quote create anonymous','matching','anon',true,db=>setDoc(doc(db,'quote_requests','new-anon'),quotePayload('fake-customer-a')));
+add('quote create with valid details','matching','anon',true,db=>setDoc(doc(db,'quote_requests','new-details'),{...quotePayload('fake-customer-a'),notes:'가상 요청',estimateMin:100,estimateMax:200}));
+add('quote rejects invalid estimate','matching','anon',false,db=>setDoc(doc(db,'quote_requests','bad-details'),{...quotePayload('fake-customer-a'),estimateMin:200,estimateMax:100}));
 add('quote create owner mismatch','matching','anon',false,db=>setDoc(doc(db,'quote_requests','wrong-owner'),quotePayload('fake-customer-b')));
 add('quote create partner password','matching','partner',false,db=>setDoc(doc(db,'quote_requests','partner-create'),quotePayload('fake-partner-a')));
 add('quote status change claim admin','matching','claim',true,db=>updateDoc(doc(db,'quote_requests','sample'),{status:'상담중'}));
