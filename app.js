@@ -334,6 +334,42 @@ $("qKakao").onclick = async () => {
   const copied = await copy(summary());
   toast(copied ? "문의 내용을 복사했어요. 전화로 연결할게요." : "복사하지 못했어요. 견적 내용을 확인해 전화로 문의해 주세요."); setTimeout(() => location.href = "tel:" + phoneDigits, 600);
 };
+// The real calculator hosts this flow; it is available only to local emulator
+// integration tests until operational authentication and rules are approved.
+const reservationTest = C.reservation?.emulator === true &&
+  ['localhost','127.0.0.1'].includes(location.hostname) &&
+  /^demo-[a-z0-9-]+$/.test(C.firebase?.projectId || '');
+if(reservationTest && $("qReserve") && $("reservationForm")){
+  const button=$("qReserve"), form=$("reservationForm"), status=$("reserveStatus");
+  let locked=false;
+  button.hidden=false;
+  button.onclick=()=>{form.hidden=false;$("reserveName").focus();};
+  form.onsubmit=async e=>{
+    e.preventDefault();
+    if(locked)return;
+    if(!validateQuoteDateBeforeSend() || !$("qArea").value || !$("qDate").value){status.textContent="지역과 희망 날짜를 선택해 주세요.";return;}
+    if(!form.reportValidity())return;
+    const name=$("reserveName").value.trim(), phone=$("reservePhone").value.trim();
+    const size=Number($("reserveSize").value), notes=$("reserveNotes").value;
+    if(!name || name.length>30 || !/^01[016789]-?\d{3,4}-?\d{4}$/.test(phone) || !Number.isInteger(size) || size<1 || size>999 || notes.length>500){
+      status.textContent="이름, 휴대폰 번호와 규모를 확인해 주세요.";return;
+    }
+    const names={'move-in':'입주·이사 청소',regular:'거주·정기 청소',office:'사무실·상가 청소',clinic:'사무실·상가 청소',aircon:'에어컨 청소'};
+    const allowed=['춘천','화천','양구','인제','철원','홍천','횡성','가평'];
+    const result=estimate(), id=crypto.randomUUID();
+    const payload={name,phone,size,notes,service:names[cur.svc]||'그 외 청소',area:allowed.includes($("qArea").value)?$("qArea").value:'그 외 지역',date:$("qDate").value,
+      estimateMin:result?.lo ?? null,estimateMax:result?.hi ?? null};
+    locked=true;$("reserveSubmit").disabled=true;status.textContent="접수 확인 중입니다.";
+    const timer=setTimeout(()=>{status.textContent="접수 확인이 지연되고 있어요. 다시 제출하지 말고 관리자에게 확인해 주세요.";},15000);
+    try{
+      const client=await import('./reservation-emulator.js');
+      const saved=await client.submitReservation(C.firebase,id,payload);
+      form.reset();status.textContent="시험 접수 완료 · 접수번호: "+saved;
+    }catch(_){
+      status.textContent="접수를 확인하지 못했습니다. 중복을 막기 위해 다시 제출하지 말고 관리자에게 확인해 주세요.";
+    }finally{clearTimeout(timer);}
+  };
+}
 drawForm();
 
 // ── 서비스 분류 칩 ──
