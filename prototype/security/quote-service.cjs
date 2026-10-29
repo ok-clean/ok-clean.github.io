@@ -12,6 +12,9 @@ function validateRequest(form) {
  if (typeof form.name !== 'string' || !form.name.trim() || form.name.trim().length > 30) throw new Error('이름을 확인해 주세요.');
  if (typeof form.phone !== 'string' || !/^01[016789]-?[0-9]{3,4}-?[0-9]{4}$/.test(form.phone)) throw new Error('연락처를 확인해 주세요.');
  if (form.consent !== true) throw new Error('개인정보 수집에 동의해 주세요.');
+ if (form.notes !== undefined && (typeof form.notes !== 'string' || form.notes.length > 500)) throw new Error('요청사항은 500자 이내로 입력해 주세요.');
+ if (form.estimateMin !== undefined && (!Number.isInteger(form.estimateMin) || form.estimateMin < 0 || form.estimateMin > 1000000000)) throw new Error('예상 금액을 확인해 주세요.');
+ if (form.estimateMax !== undefined && (!Number.isInteger(form.estimateMax) || form.estimateMin === undefined || form.estimateMax < form.estimateMin || form.estimateMax > 1000000000)) throw new Error('예상 금액을 확인해 주세요.');
 }
 async function createQuote(db, uid, id, form) {
  if (!uid || !safeId(id)) throw new Error('요청 식별자를 확인해 주세요.');
@@ -19,6 +22,10 @@ async function createQuote(db, uid, id, form) {
  validateRequest({...form, date});
  const payload = {service:form.service,area:form.area,size:form.size,date,name:form.name.trim(),phone:form.phone,
   consentVersion:'test-v1',consentAt:serverTimestamp(),createdAt:serverTimestamp(),ownerUid:uid,status:'신규'};
+ // Client estimates are indicative only; an administrator must confirm the final price.
+ if (form.notes !== undefined) payload.notes = form.notes;
+ if (form.estimateMin !== undefined) payload.estimateMin = form.estimateMin;
+ if (form.estimateMax !== undefined) payload.estimateMax = form.estimateMax;
  // The returned promise settles only when the Firestore write is acknowledged.
  await setDoc(doc(db,'quote_requests',id),payload);
  return {id};
