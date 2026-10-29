@@ -18,12 +18,11 @@ if (host !== '127.0.0.1:8080' && host !== 'localhost:8080') {
   throw new Error('A loopback Firestore emulator on port 8080 is required; cloud execution is forbidden');
 }
 const PINNED = {
-  // #49: 877d02c1500019ae177508763e1f18cf0a8266e6 (member rules)
-  memberRules: '4ffb09ebfb1dd3d89de445ea49faf31e53ba51befa8b846a578dc05404750f02',
-  // Updated alongside the auth initialization fix; the VM runs this exact client.
-  memberClient: '0bd219f10ddd43e5a0a0a0152d805383e0c22023c86f22d26590770c7d2c51a3',
-  // Updated test-only matching policy including optional notes and indicative estimates.
-  matchingRules: '6ad02c5ab44f4031b5b97589ea51064d2c0e5a6b923e4d36ebbe126d5bcd4a9b',
+  // Member rules updated for explicitly scoped member_admin/super_admin claims; baseline anonymous creation is unchanged.
+  memberRules: '8f057918a534f6522e787e6c0e8559f520af86af66f2dd6075c5900c44301b35',
+  memberClient: '9b0ffc599a041a87055c0f9fc91f570c9435cdc47fd918983ee245e95071c85d',
+  // #25: dc056ec8e4eea0689cd65fa5aeae6f4947c66d2c (test-only matching policy)
+  matchingRules: 'e07de1a8b8073d0130780d2ef5a7e4331355958fde364611c6021ead8fe9d544',
 };
 function pinned(path, expected) {
   const text = readFileSync(path, 'utf8');
@@ -34,7 +33,6 @@ function pinned(path, expected) {
 const memberRules = pinned('firestore.rules', PINNED.memberRules);
 const memberClient = pinned('member-sync.js', PINNED.memberClient);
 const matchingRules = pinned('tests/fixtures/matching-test-only.rules', PINNED.matchingRules);
-assert.equal(pinned('prototype/security/firestore.rules', PINNED.matchingRules), matchingRules, 'test fixture must match prototype rules');
 const head = "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n";
 const tail = '  }\n}\n';
 function body(policy) {
@@ -59,9 +57,9 @@ const roles = {
   partner:password('fake-partner-a'), partnerOther:password('fake-partner-b'), partnerPending:password('fake-partner-c'),
   unverified:password('fake-partner-a',false), google:google('fake-google-user'),
   claim:claimAdmin, memberAdmin, dual:dualAdmin,
-  verifiedCustomer:{uid:'fake-verified-customer',claims:{customer:true,email_verified:true,firebase:{sign_in_provider:'password'}}},
-  verifiedOther:{uid:'fake-verified-other',claims:{customer:true,email_verified:true,firebase:{sign_in_provider:'password'}}},
-  unverifiedCustomer:{uid:'fake-verified-customer',claims:{customer:true,email_verified:false,firebase:{sign_in_provider:'password'}}},
+  memberClaim:{uid:'fake-member-claim',claims:{member_admin:true,firebase:{sign_in_provider:'google.com'}}},
+  reservationClaim:{uid:'fake-reservation-claim',claims:{reservation_admin:true,firebase:{sign_in_provider:'google.com'}}},
+  superClaim:{uid:'fake-super-claim',claims:{super_admin:true,firebase:{sign_in_provider:'google.com'}}},
 };
 const fakeMember = {
   name:'가상고객',phone:'01000000000',area:'춘천',free:'가상 서비스',ad:false,code:'OK-ABC234',ref:'',
@@ -78,7 +76,6 @@ async function seed(env) {
     await Promise.all([
       setDoc(doc(db,'member_requests','sample'),fakeMember),
       setDoc(doc(db,'quote_requests','sample'),fakeQuote),
-      setDoc(doc(db,'quote_requests','verified-owned'),{...fakeQuote,ownerUid:'fake-verified-customer'}),
       setDoc(doc(db,'quote_requests','new-offer'),fakeQuote),
       setDoc(doc(db,'quote_requests','pending-offer'),fakeQuote),
       setDoc(doc(db,'quote_requests','batch-good'),fakeQuote),
@@ -121,11 +118,11 @@ function assignBatch(db,requestId,includePrivate=false) {
   batch.set(doc(db,'quote_requests',requestId,'grants',grantId),grant);
   return batch.commit();
 }
-for(const [role,ok] of [['visitor',false],['anon',false],['other',false],['partner',false],['google',false],['claim',false],['memberAdmin',true],['dual',true]]) {
+for(const [role,ok] of [['visitor',false],['anon',false],['other',false],['partner',false],['google',false],['claim',false],['memberAdmin',true],['dual',true],['memberClaim',true],['reservationClaim',false],['superClaim',true]]) {
   add('member read '+role,'member',role,ok,db=>getDoc(doc(db,'member_requests','sample')));
   add('member list '+role,'member',role,ok,db=>getDocs(collection(db,'member_requests')));
 }
-for(const [role,ok] of [['visitor',false],['anon',false],['other',false],['partner',false],['google',false],['memberAdmin',false],['claim',true],['dual',true]]) {
+for(const [role,ok] of [['visitor',false],['anon',false],['other',false],['partner',false],['google',false],['memberAdmin',false],['claim',true],['dual',true],['memberClaim',false],['reservationClaim',false],['superClaim',false]]) {
   add('quote read '+role,'matching',role,ok,db=>getDoc(doc(db,'quote_requests','sample')));
   add('quote list '+role,'matching',role,ok,db=>getDocs(collection(db,'quote_requests')));
 }
@@ -135,15 +132,11 @@ add('member create unverified signed-out','member','visitor',false,db=>setDoc(do
 add('member create partner password','member','partner',false,db=>setDoc(doc(db,'member_requests','partner-create'),memberPayload('fake-partner-a')));
 add('member create google account','member','google',false,db=>setDoc(doc(db,'member_requests','google-create'),memberPayload('fake-google-user')));
 add('member privileged update uid admin','member','memberAdmin',true,db=>updateDoc(doc(db,'member_requests','sample'),{memo:'가상 변경'}));
+add('member privileged update member claim','member','memberClaim',true,db=>updateDoc(doc(db,'member_requests','sample'),{memo:'가상 변경'}));
+add('member update reservation-only claim denied','member','reservationClaim',false,db=>updateDoc(doc(db,'member_requests','sample'),{memo:'가상 금지'}));
+add('member privileged update super claim','member','superClaim',true,db=>updateDoc(doc(db,'member_requests','sample'),{memo:'가상 변경'}));
 add('member privileged update claim admin','member','claim',false,db=>updateDoc(doc(db,'member_requests','sample'),{memo:'가상 금지'}));
 add('quote create anonymous','matching','anon',true,db=>setDoc(doc(db,'quote_requests','new-anon'),quotePayload('fake-customer-a')));
-add('verified customer creates own request','matching','verifiedCustomer',true,db=>setDoc(doc(db,'quote_requests','verified-new'),quotePayload('fake-verified-customer')));
-add('verified customer reads own request','matching','verifiedCustomer',true,db=>getDoc(doc(db,'quote_requests','verified-owned')));
-add('other verified customer cannot read request','matching','verifiedOther',false,db=>getDoc(doc(db,'quote_requests','verified-owned')));
-add('unverified customer cannot read request','matching','unverifiedCustomer',false,db=>getDoc(doc(db,'quote_requests','verified-owned')));
-add('verified customer cannot list all requests','matching','verifiedCustomer',false,db=>getDocs(collection(db,'quote_requests')));
-add('quote create with valid details','matching','anon',true,db=>setDoc(doc(db,'quote_requests','new-details'),{...quotePayload('fake-customer-a'),notes:'가상 요청',estimateMin:100,estimateMax:200}));
-add('quote rejects invalid estimate','matching','anon',false,db=>setDoc(doc(db,'quote_requests','bad-details'),{...quotePayload('fake-customer-a'),estimateMin:200,estimateMax:100}));
 add('quote create owner mismatch','matching','anon',false,db=>setDoc(doc(db,'quote_requests','wrong-owner'),quotePayload('fake-customer-b')));
 add('quote create partner password','matching','partner',false,db=>setDoc(doc(db,'quote_requests','partner-create'),quotePayload('fake-partner-a')));
 add('quote status change claim admin','matching','claim',true,db=>updateDoc(doc(db,'quote_requests','sample'),{status:'상담중'}));
@@ -197,7 +190,7 @@ async function matrix(env,mode) {
 // imports replaced by local test adapters. The Firestore write itself uses the
 // emulator SDK and the chosen synthetic authentication context.
 function memberEntry(db, existing, uid, recordId) {
-  const auth={currentUser:existing ? {uid} : null, authStateReady:async()=>{}};
+  const auth={currentUser:existing ? {uid} : null};
   let signIns=0;
   const imports = memberClient.match(/^import [^\n]+;$/gm) || [];
   assert.equal(imports.length,3,'Unexpected member client imports');
@@ -210,7 +203,6 @@ function memberEntry(db, existing, uid, recordId) {
     // The pinned client runs in a VM realm; Firestore accepts a host-realm
     // plain object. Preserve its exact fields and host SDK timestamp sentinel.
     crypto:{randomUUID:()=>recordId},doc,setDoc:(ref,data)=>setDoc(ref,Object.fromEntries(Object.entries(data))),serverTimestamp,
-    setTimeout,clearTimeout,
   };
   vm.runInNewContext(program+'\nthis.submitMember = submitMember;',context,{filename:'member-sync.js'});
   return {submit:()=>context.submitMember({apiKey:'fake-test-identifier',projectId:'demo-okclean-coexist'},

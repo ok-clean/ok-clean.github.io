@@ -8,3 +8,5 @@ test('administrator API remains off unless valid HTTPS Cloud Run configuration i
  assert.equal(reservationApiUrl(config),'https://test-service.run.app');
  for(const overrides of [{enabled:false},{apiUrl:'http://test-service.run.app/'},{apiUrl:'https://test-service.run.app.evil.invalid/'},{apiUrl:'https://user@test-service.run.app/'},{apiUrl:'https://test-service.run.app/admin/'},{appCheckSiteKey:''}])assert.equal(reservationApiUrl({reservation:{...config.reservation,...overrides}}),null);
 });
+
+test('reservation permission recognises distinct trusted claims without granting member role',()=>{const begin=source.indexOf('function hasReservationClaim('),end=source.indexOf('\nconst settings=',begin);assert.ok(begin>=0&&end>begin);const can=vm.runInNewContext('('+source.slice(begin,end)+')');for(const c of [{admin:true},{reservation_admin:true},{super_admin:true}])assert.equal(can(c),true);for(const c of [{member_admin:true},{partner:true},{customer:true},{admin:'true'},null])assert.equal(can(c),false);});

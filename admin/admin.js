@@ -24,6 +24,7 @@ function validAuth(started,user){
  resetSession();msg('인증 상태를 확인하는 중이에요.');return false;
 }
 function hasAccess(){return !!(serverReady&&currentUser&&validAuth(session,currentUser));}
+function hasReservationClaim(claims){return claims?.reservation_admin===true || claims?.super_admin===true || claims?.admin===true;}
 const settings=await fetch('../config.json',{cache:'no-store'}).then(r=>r.json()).catch(()=>null);
 const config=settings?.firebase;
 const localReservation=settings?.reservation?.emulator===true && ['localhost','127.0.0.1'].includes(location.hostname) && /^demo-[a-z0-9-]+$/.test(config?.projectId||'');
@@ -55,7 +56,8 @@ else{
   if(localReservation) startReservationView(started,user);
   else if(productionReservation) startProductionReservationView(started,user,app);
   msg('서버에서 회원정보 접근을 확인하는 중…');
-  const isCurrent=()=>validAuth(started,user);
+  let memberSubscriptionActive=true;
+  const isCurrent=()=>memberSubscriptionActive&&validAuth(started,user);
   try{
    unsub=onSnapshot(query(collection(db,'member_requests'),orderBy('joined','desc'),limit(500)),{includeMetadataChanges:true},snapshot=>{
     if(!isCurrent())return;
@@ -71,7 +73,7 @@ else{
     }
     records=snapshot.docs.map(d=>({id:d.id,...d.data()}));serverReady=true;render();$('dashboard').hidden=false;
     msg('최근 500건까지 표시됩니다.');
-   },e=>{if(!isCurrent())return;resetSession();msg('회원 목록에 접근할 수 없습니다. Firebase 관리자 UID 등록과 보안 규칙을 확인해 주세요. ('+e.code+')');});
+   },e=>{if(!isCurrent())return;memberSubscriptionActive=false;const stop=unsub;unsub=null;if(stop)stop();clearMembers();msg('회원 목록에 접근할 수 없습니다. Firebase 회원 관리 권한과 보안 규칙을 확인해 주세요. ('+e.code+')');});
   }catch(e){if(isCurrent()){clearMembers();msg('회원 목록을 불러오지 못했어요. 연결과 권한을 확인해 주세요.');}}
  });
 }
@@ -108,7 +110,8 @@ async function startReservationView(started,user){
 async function startProductionReservationView(started,user,app){
  let appCheck,getAppCheckToken;
  try{
-  const claim=await user.getIdTokenResult();if(!validAuth(started,user)||claim.claims.admin!==true)return;
+  if(globalThis.FIREBASE_APPCHECK_DEBUG_TOKEN)throw Error('App Check unavailable');
+  const claim=await user.getIdTokenResult();if(!validAuth(started,user)||!hasReservationClaim(claim.claims))return;
   const sdk=await import('https://www.gstatic.com/firebasejs/10.14.1/firebase-app-check.js');
   if(!validAuth(started,user))return;
   if(!productionAppCheck)productionAppCheck=sdk.initializeAppCheck(app,{provider:new sdk.ReCaptchaV3Provider(settings.reservation.appCheckSiteKey),isTokenAutoRefreshEnabled:true});
@@ -117,7 +120,7 @@ async function startProductionReservationView(started,user,app){
  async function call(endpoint,payload){
   if(!validAuth(started,user))throw Error('session ended');
   const [idToken,check]=await Promise.all([user.getIdToken(),getAppCheckToken(appCheck)]);
-  if(!validAuth(started,user))throw Error('session ended');
+  if(!validAuth(started,user)||typeof idToken!=='string'||!idToken||typeof check?.token!=='string'||!check.token)throw Error('session ended');
   const response=await fetch(productionReservation+endpoint,{method:'POST',credentials:'omit',cache:'no-store',referrerPolicy:'no-referrer',redirect:'error',headers:{'Content-Type':'application/json','Authorization':'Bearer '+idToken,'X-Firebase-AppCheck':check.token},body:JSON.stringify(payload)});
   if(!response.ok)throw Error('server rejected');const result=await response.json();
   if(result.status!=='ok'||!validAuth(started,user))throw Error('invalid response');return result;

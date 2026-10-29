@@ -33,7 +33,7 @@ gcloud run deploy SERVICE_NAME \
   --project PROJECT_ID --region REGION \
   --image IMAGE_WITH_VERIFIED_DIGEST \
   --service-account SERVICE_ACCOUNT_EMAIL \
-  --update-env-vars NODE_ENV=production,OKCLEAN_PROJECT_ID=PROJECT_ID,GOOGLE_CLOUD_PROJECT=PROJECT_ID,ALLOWED_ORIGIN=https://ok-clean.github.io,CONSENT_VERSION=REVIEWED_POLICY_VERSION \
+  --update-env-vars NODE_ENV=production,OKCLEAN_PROJECT_ID=PROJECT_ID,GOOGLE_CLOUD_PROJECT=PROJECT_ID,OKCLEAN_FIREBASE_WEB_APP_ID=FIREBASE_WEB_APP_ID,ALLOWED_ORIGIN=https://ok-clean.github.io,CONSENT_VERSION=REVIEWED_POLICY_VERSION \
   --no-traffic
 ```
 
@@ -41,7 +41,7 @@ gcloud run deploy SERVICE_NAME \
 
 ## 승인 후 점검과 롤백 계획
 
-1. 운영자 전용 IAM·서비스 계정의 최소 권한, Firestore 규칙, 고객 인증 제공업체, 관리자 클레임, Firebase App Check 등록, API 활성화 상태 및 서비스의 HTTPS/CORS를 확인한다. 서비스 계정의 App Check 토큰 검증 권한도 확인한다.
+1. 운영자 전용 IAM·서비스 계정의 최소 권한, Firestore 규칙, 고객 인증 제공업체, 관리자 클레임, Firebase App Check 등록, API 활성화 상태 및 서비스의 HTTPS/CORS를 확인한다. 서비스 계정의 App Check 토큰 검증 권한도 확인한다. Firebase 콘솔 App Check → 앱 → 디버그 토큰 관리에서 운영 앱에 등록된 불필요한 디버그 토큰을 제거한다. 등록된 디버그 토큰은 유효한 App Check 토큰으로 교환될 수 있어 서버의 앱 ID 검증만으로 출처를 구분할 수 없다.
 2. 개인정보를 사용하지 않는 독립 테스트 환경에서 예약·계산 검증·실패/재시도·본인 복구·타인/비관리자 차단·관리자 상태 이력을 점검한다. 실제 운영 프로젝트에서 테스트 데이터 생성은 별도 승인 없이 하지 않는다.
 3. 배포 전 서비스의 기존 리비전과 트래픽 비율 및 사이트 이전 버전을 기록한다. 장애 시 승인된 운영자가 Cloud Run에서 기존 리비전으로 트래픽을 되돌리고, 사이트도 기존 배포 버전으로 되돌린 후 예약·상담 동작을 확인한다. 트래픽 변경 명령 자체가 운영 변경이므로 별도 승인이 필요하다.
 4. Cloud Run 오류율·지연·인증 거부·Firestore 오류를 개인정보나 토큰 없이 모니터링한다. 실행 횟수·CPU/메모리 시간·Firestore·네트워크·App Check·이미지 보관·빌드 등을 예산에 포함한다. **알림 전용 예산은 지출을 자동 제한하지 않는다.** 실제 계정의 예산·상한 기능 지원 여부와 경고 수신자를 확인한다.

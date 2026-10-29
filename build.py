@@ -345,6 +345,8 @@ def index_page(c, cases=()):
         <button class="btn line" id="reserveLogin" type="button">시험 계정 로그인</button>
         <label>기존 접수번호 <input id="reserveReceipt" autocomplete="off" maxlength="80"></label>
         <button class="btn line" id="reserveRecover" type="button">접수 확인</button>
+        <button class="btn line" id="reserveListMine" type="button" hidden>내 예약 목록</button>
+        <div id="reserveOwnList" aria-live="polite"></div>
       </div>
       <div class="field"><label for="reserveName">이름</label><input id="reserveName" maxlength="30" required autocomplete="off"></div>
       <div class="field"><label for="reservePhone">휴대폰 번호</label><input id="reservePhone" type="tel" required autocomplete="off"></div>

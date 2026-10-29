@@ -3,14 +3,17 @@
 const {createVerifiedReservationHandler}=require('../prototype/security/verified-reservation-handler.cjs');
 const {createReceiptStatusHandler}=require('../prototype/security/receipt-status-handler.cjs');
 const {createPricePolicy}=require('./pricing.cjs');
+const {createCustomerReservationsHandler}=require('./customer-reservations.cjs');
 const allowedStatuses=new Set(['신규','검토중','상담중','예약확정','작업완료','종료','취소']);
 const safeId=/^[A-Za-z0-9_-]{1,80}$/;
 const closed=new Set(['예약확정','작업완료','종료','취소']);
+function canManageReservations(claims){return claims?.reservation_admin === true || claims?.super_admin === true || claims?.admin === true;}
 function validTransition(from,to){return allowedStatuses.has(to) && !(closed.has(from)&&!closed.has(to)) && !(from==='취소'&&to!=='취소') && !(to==='취소'&&!['신규','검토중','상담중','취소'].includes(from));}
 function createHttpHandler({auth,appCheck,db,rateLimit,allowedOrigin,services,consentVersion}){
   if(!auth?.verifyIdToken || !appCheck?.verifyToken || !db?.runTransaction || !rateLimit || allowedOrigin!=='https://ok-clean.github.io')throw Error('Incomplete secure server configuration');
   if(typeof consentVersion!=='string' || !/^[A-Za-z0-9._-]{1,80}$/.test(consentVersion))throw Error('Consent configuration required');
   const validatePrice=createPricePolicy(services);
+  const customerList=createCustomerReservationsHandler({db,rateLimit});
   const verifyIdToken=t=>auth.verifyIdToken(t,true);
   const submit=createVerifiedReservationHandler({verifyIdToken,db,consentVersion,enforceRateLimit:uid=>rateLimit(uid,'submit')});
   const status=createReceiptStatusHandler({verifyIdToken,enforceRateLimit:uid=>rateLimit(uid,'status'),loadRequest:async id=>{const s=await db.collection('quote_requests').doc(id).get();return s.exists?s.data():null;}});
@@ -22,7 +25,7 @@ function createHttpHandler({auth,appCheck,db,rateLimit,allowedOrigin,services,co
     if(req.method==='OPTIONS'){res.statusCode=204;return res.end();}
     const send=(code,body)=>{res.statusCode=code;res.setHeader('Content-Type','application/json');return res.end(JSON.stringify(body));};
     if(req.method!=='POST')return send(405,{status:'unavailable'});
-    if(!['/reservation/submit','/reservation/status','/admin/list','/admin/status','/admin/history'].includes(req.path))return send(404,{status:'unavailable'});
+    if(!['/reservation/submit','/reservation/status','/reservation/list','/admin/list','/admin/status','/admin/history'].includes(req.path))return send(404,{status:'unavailable'});
     try{
       if(typeof req.headers['x-firebase-appcheck']!=='string')return send(401,{status:'unavailable'});
       await appCheck.verifyToken(req.headers['x-firebase-appcheck']);
@@ -30,6 +33,7 @@ function createHttpHandler({auth,appCheck,db,rateLimit,allowedOrigin,services,co
       const caller=await verifyIdToken(token);
       if(!caller?.uid)return send(401,{status:'unavailable'});
       const data=req.body;if(!data||typeof data!=='object'||Array.isArray(data))return send(400,{status:'unavailable'});
+      if(req.path==='/reservation/list'){const result=await customerList(caller);return send(result.httpStatus,result.body);}
       if(req.path==='/reservation/submit'||req.path==='/reservation/status'){
         let result;
         if(req.path.endsWith('/submit')){
@@ -40,7 +44,7 @@ function createHttpHandler({auth,appCheck,db,rateLimit,allowedOrigin,services,co
         }else result=await status({idToken:token,requestId:data.requestId});
         return send(result.httpStatus,result.body);
       }
-      if(caller.admin!==true)return send(403,{status:'unavailable'});
+      if(!canManageReservations(caller))return send(403,{status:'unavailable'});
       if(!await rateLimit(caller.uid,'admin'))return send(429,{status:'unavailable'});
       if(req.path==='/admin/list'){
         const docs=await db.collection('quote_requests').orderBy('createdAt','desc').limit(50).get();
@@ -55,7 +59,7 @@ function createHttpHandler({auth,appCheck,db,rateLimit,allowedOrigin,services,co
       if(!allowedStatuses.has(data.status))return send(400,{status:'unavailable'});
       const history=ref.collection('status_history').doc();
       const outcome=await db.runTransaction(async tx=>{
-        const snap=await tx.get(ref);if(!snap.exists)return 'missing';const oldStatus=snap.data().status;
+        const snap=await tx.get(ref);if(!snap.exists)return 'missing';if(snap.data().retentionRedacted===true)return 'invalid';const oldStatus=snap.data().status;
         if(!validTransition(oldStatus,data.status))return 'invalid';
         if(oldStatus!==data.status){tx.update(ref,{status:data.status});tx.create(history,{from:oldStatus,to:data.status,actorUid:caller.uid,at:new Date()});}
         return 'ok';
@@ -64,4 +68,4 @@ function createHttpHandler({auth,appCheck,db,rateLimit,allowedOrigin,services,co
     }catch{return send(503,{status:'unavailable'});}
   };
 }
-module.exports={createHttpHandler,validTransition};
+module.exports={createHttpHandler,validTransition,canManageReservations};

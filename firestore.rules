@@ -3,7 +3,9 @@ service cloud.firestore {
   match /databases/{database}/documents {
     function isAdmin() {
       // 관리자 Firebase Auth UID를 직접 입력하세요. 이메일 문자열만으로 권한을 부여하지 않습니다.
-      return request.auth != null && request.auth.uid == 'REPLACE_WITH_ADMIN_UID';
+      return request.auth != null && (request.auth.uid == 'REPLACE_WITH_ADMIN_UID'
+        || request.auth.token.get('member_admin', false) == true
+        || request.auth.token.get('super_admin', false) == true);
     }
     match /member_requests/{id} {
       allow read, update, delete: if isAdmin();

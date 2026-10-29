@@ -60,12 +60,31 @@ async function main(){
   await p.locator('#reserveEmail').fill('container-user@example.test');await p.locator('#reservePassword').fill('synthetic-test-password');await p.locator('#reserveLogin').click();await p.getByText('로그인했습니다.').waitFor();
   await p.locator('#reserveReceipt').fill(id);await p.locator('#reserveRecover').click();await p.getByText('예약 접수 완료 · 접수번호: '+id).waitFor();
   assert.equal((await db.collection('quote_requests').doc(id).get()).exists,true);
+  await p.locator('#reserveListMine').click();await p.locator('#reserveOwnList').getByText(id,{exact:false}).waitFor({timeout:30000});
+  assert.doesNotMatch(await p.locator('#reserveOwnList').innerText(),/01000000006|가상 요청/,'list must not display contact details or notes');
+  await p.evaluate(async()=>{const f=await import('/firebase-bundle.js');await f.signOut(f.getAuth(f.getApp('production-reservation')));});
+  await p.waitForFunction(()=>document.querySelector('#reserveOwnList').textContent==='');
+  const outsider=await context(),op=await outsider.newPage();await op.goto(origin+'/',{waitUntil:'load'});await op.locator('#qReserve').click();
+  await op.locator('#reserveEmail').fill('container-other@example.test');await op.locator('#reservePassword').fill('synthetic-test-password');await op.locator('#reserveLogin').click();await op.getByText('로그인했습니다.').waitFor();
+  await op.locator('#reserveListMine').click();await op.locator('#reserveOwnList').getByText('조회된 예약이 없습니다.').waitFor({timeout:30000});
+  assert.doesNotMatch(await op.locator('#reserveOwnList').innerText(),new RegExp(id));await outsider.close();
   const manager=await context(),mp=await manager.newPage();await mp.goto(origin+'/admin/index.html',{waitUntil:'load'});
   await mp.waitForFunction(async()=>{const f=await import('/firebase-bundle.js');return f.getApps().some(a=>a.name==='[DEFAULT]');});
   await mp.evaluate(async()=>{const f=await import('/firebase-bundle.js');await f.signInWithEmailAndPassword(f.getAuth(),'container-admin@example.test','synthetic-test-password');});
   const card=mp.locator('#reservationList article').filter({hasText:'가상브라우저'});await card.waitFor({timeout:30000});await card.locator('select').selectOption('상담중');await card.getByRole('button',{name:'상태 저장'}).click();await mp.getByText('상태가 저장되었습니다.').waitFor();
   assert.equal((await db.collection('quote_requests').doc(id).get()).data().status,'상담중');await card.getByRole('button',{name:'처리 이력'}).click();await card.getByText('신규 → 상담중').waitFor({timeout:30000});
-  await manager.close();await next.close();await ctx.close();console.log('PASS production client -> container server -> Firebase emulators, App Check test double');
+  // A reservation-only admin must retain its server-backed reservation view when
+  // Firestore denies access to the unrelated member ledger.
+  const reserveOnly=await context(),rp=await reserveOnly.newPage();await rp.goto(origin+'/admin/index.html',{waitUntil:'load'});
+  await rp.waitForFunction(async()=>{const f=await import('/firebase-bundle.js');return f.getApps().some(a=>a.name==='[DEFAULT]');});
+  await rp.evaluate(async()=>{const f=await import('/firebase-bundle.js');await f.signInWithEmailAndPassword(f.getAuth(),'container-reservation@example.test','synthetic-test-password');});
+  const reserveCard=rp.locator('#reservationList article').filter({hasText:'가상브라우저'});await reserveCard.waitFor({timeout:30000});
+  await rp.getByText(/회원 목록에 접근할 수 없습니다/).waitFor({timeout:30000});
+  assert.equal(await rp.locator('#dashboard').isHidden(),true,'member ledger is not shown');
+  assert.equal(await reserveCard.isVisible(),true,'reservation view survives independent member permission failure');
+  await reserveCard.locator('select').selectOption('예약확정');await reserveCard.getByRole('button',{name:'상태 저장'}).click();await rp.getByText('상태가 저장되었습니다.').waitFor();
+  assert.equal((await db.collection('quote_requests').doc(id).get()).data().status,'예약확정');
+  await reserveOnly.close();await manager.close();await next.close();await ctx.close();console.log('PASS production client -> container server -> Firebase emulators, App Check test double');
  }finally{await browser.close();await fb.delete();}
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

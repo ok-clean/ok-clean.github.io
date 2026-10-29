@@ -421,11 +421,12 @@ if(((reservationTest && C.reservation?.verifiedEmulator) || reservationProductio
   const getClient=()=>reservationProduction ? import('./reservation-api.js') : import('./verified-reservation-emulator.js');
   const receiptPrefix=reservationProduction?'예약 접수 완료 · 접수번호: ':'시험 접수 완료 · 접수번호: ';
   if(reservationProduction){$("reserveIntro").textContent='예상 견적은 현장 확인 후 달라질 수 있습니다.';$("reserveConsentDetails").hidden=false;$("reserveConsentDetails").textContent=reservationConsent.text;$("reservePolicyLink").href=reservationConsent.policyUrl;$("reservePolicyLink").hidden=false;$("reserveConsentText").textContent='위 개인정보 수집·이용에 동의합니다.';$("reserveLogin").textContent='로그인';$("reserveEmailLabel").textContent='이메일';$("reservePasswordLabel").textContent='비밀번호';}
-  let busy=false, pending=null;
+  let busy=false, pending=null, userWatcher=null;
   try{pending=sessionStorage.getItem(key);}catch(_){busy=true;}
   $("qReserve").hidden=false;$("reserveVerified").hidden=false;
   $("qReserve").onclick=()=>{form.hidden=false;};
   $("reserveSubmit").disabled=busy||!!pending;
+  if(reservationProduction)$("reserveListMine").hidden=false;
   if(pending){$("reserveReceipt").value=pending;status.textContent='이전 접수 확인이 필요합니다. 로그인 후 접수를 확인해 주세요.';}
   async function recover(id){
     if(busy || !/^[A-Za-z0-9_-]{1,80}$/.test(id))return;
@@ -441,13 +442,35 @@ if(((reservationTest && C.reservation?.verifiedEmulator) || reservationProductio
     finally{busy=false;}
   }
   $("reserveLogin").onclick=async()=>{
+    $("reserveOwnList").replaceChildren();
     try{const client=await getClient();
       const ok=await client.login(C.firebase,$("reserveEmail").value,$("reservePassword").value,C.reservation);
       $("reservePassword").value='';if(!ok)throw Error();
+      if(reservationProduction && !userWatcher)userWatcher=await client.watchUser(C.firebase,C.reservation,()=>$("reserveOwnList").replaceChildren());
       status.textContent=reservationProduction?'로그인했습니다.':'시험 계정으로 로그인했습니다.';if(pending)await recover(pending);
     }catch(_){$("reservePassword").value='';status.textContent=reservationProduction?'계정 인증을 확인해 주세요.':'시험 계정 인증을 확인해 주세요.';}
   };
   $("reserveRecover").onclick=()=>recover($("reserveReceipt").value.trim());
+  $("reserveListMine").onclick=async()=>{
+    if(!reservationProduction || busy)return;
+    const list=$("reserveOwnList");list.replaceChildren();busy=true;
+    try{
+      const client=await getClient();
+      if(!userWatcher)userWatcher=await client.watchUser(C.firebase,C.reservation,()=>list.replaceChildren());
+      const result=await client.listOwn(C.firebase,C.reservation);
+      if(!Array.isArray(result.items))throw Error();
+      for(const item of result.items){
+        if(typeof item.id!=='string'||!/^[A-Za-z0-9_-]{1,80}$/.test(item.id))continue;
+        const row=document.createElement('p');
+        const date=item.date ? new Date(item.date) : null;
+        const dateText=date && Number.isFinite(date.getTime()) ? new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',dateStyle:'medium'}).format(date) : '날짜 미확인';
+        row.textContent=[item.id,item.service,item.status,dateText].join(' · ');list.append(row);
+      }
+      if(!result.items.length)list.textContent='조회된 예약이 없습니다.';
+      else if(result.truncated){const note=document.createElement('p');note.textContent='최대 50건이 표시됩니다. 나머지는 관리자에게 문의해 주세요.';list.append(note);}
+    }catch(_){list.textContent='예약을 확인하지 못했습니다. 로그인 상태를 확인해 주세요.';}
+    finally{busy=false;}
+  };
   $("reserveNew").onclick=()=>{if(busy||pending)return;form.reset();$("reserveNew").hidden=true;$("reserveSubmit").disabled=false;status.textContent='';};
   form.onsubmit=async e=>{
     e.preventDefault();if(busy||pending)return;
