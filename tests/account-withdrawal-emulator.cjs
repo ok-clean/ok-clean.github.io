@@ -23,6 +23,15 @@ async function main(){
   const stale='synthetic-stale-identity';await auth.createUser({uid:stale,email:'synthetic-stale-identity@example.test',password:'synthetic-password'});
   await db.collection('account_lifecycle').doc(stale).create({status:'withdrawal_requested',sessionRevocation:'revoked',authCreationTime:'previous-creation'});
   assert.equal((await run(stale)).result,'security_review_required');assert.equal((await auth.getUser(stale)).uid,stale);
+  // A real Auth emulator deletion is committed but its response is deliberately
+  // lost. Recreating the processor must observe absence and avoid a second call.
+  const lost='synthetic-auth-response-loss';await auth.createUser({uid:lost,email:'synthetic-auth-loss@example.test',password:'synthetic-password'});
+  await db.collection('account_lifecycle').doc(lost).create({status:'withdrawal_requested',sessionRevocation:'revoked',authCreationTime:(await auth.getUser(lost)).metadata.creationTime});
+  let deleteCalls=0;
+  const lossyAuth={getUser:auth.getUser.bind(auth),deleteUser:async id=>{deleteCalls++;await auth.deleteUser(id);throw Error('synthetic response lost');}};
+  const lostRun=createDemoWithdrawalProcessor({db,auth:lossyAuth,policy:{reviewed:true,allowDemoAuthDeletion:true},protectedMemberAdminUid:'protected-demo-admin'});
+  assert.equal((await lostRun(lost)).result,'retry_needed');const pending=(await db.collection('account_lifecycle').doc(lost).get()).data();assert.equal(pending.demoAuthState,'delete_pending');assert.equal(pending.demoAuthAttempts,1);
+  assert.equal((await run(lost)).result,'auth_absent_pending_other_data');assert.equal(deleteCalls,1);assert.equal((await db.collection('account_lifecycle').doc(lost).get()).data().status,'withdrawal_requested');
   console.log('PASS: synthetic Auth account absent; withdrawal remains pending and reservation prevents account deletion');
  }finally{await app.delete();}
 }

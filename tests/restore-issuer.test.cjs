@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),crypto=require('node:crypto');
 const {createRestoreIssuer,validationMessage,recordBytes}=require('../server/restore-issuer.cjs');
-const {message}=require('../server/restore-gate.cjs');
+const {message,createRestoreGate,startRestoreHealthMonitor}=require('../server/restore-gate.cjs');
 const src='demo-source',lp='demo-ledger',rid='restore_epoch_123456',aud='https://issuer.example.test',email='issuer@demo-ledger.iam.gserviceaccount.com';
 function setup(){
  const authority=crypto.generateKeyPairSync('ed25519'),gate=crypto.generateKeyPairSync('ed25519');const pem=k=>k.export({format:'pem',type:'spki'});
@@ -9,7 +9,7 @@ function setup(){
  let tick=1000000,pending=false,revision=5,gateDoc=null,beforeCommit=null;
  const proof={sourceProject:src,ledgerProject:lp,restoreId:rid,checkpoint:crypto.createHash('sha256').update(recordBytes(rec)).digest('hex'),ledgerRevision:revision,recordCount:1,issuedAt:tick-1000,expiresAt:tick+60000,isolated:true,replayed:true,state:'verified'};
  function resign(){proof.signature=crypto.sign(null,validationMessage(proof),authority.privateKey).toString('base64url');}resign();
- const refs={restore_validation:{id:'validation',get:async()=>({exists:true,data:()=>({...proof})})},deletion_ledger_meta:{id:'head',get:async()=>({exists:true,data:()=>({revision})})},restore_control:{id:'gate'},deletion_ledger:{where:()=>({limit:()=>({id:'pending'})}),orderBy:()=>({limit:()=>({get:async()=>({docs:[{id:crypto.createHash('sha256').update(src).update('\0').update(rec.action).update('\0').update(rec.id).digest('hex'),data:()=>rec}]})})})}};
+ const refs={restore_validation:{id:'validation',get:async()=>({exists:true,data:()=>({...proof})})},deletion_ledger_meta:{id:'head',get:async()=>({exists:true,data:()=>({revision})})},restore_control:{id:'gate',get:async()=>({exists:!!gateDoc,data:()=>gateDoc})},deletion_ledger:{where:()=>({limit:()=>({id:'pending'})}),orderBy:()=>({limit:()=>({get:async()=>({docs:[{id:crypto.createHash('sha256').update(src).update('\0').update(rec.action).update('\0').update(rec.id).digest('hex'),data:()=>rec}]})})})}};
  const db={projectId:lp,collection:n=>n==='deletion_ledger'?refs[n]:{doc:()=>refs[n]},runTransaction:async f=>{if(beforeCommit)await beforeCommit();const staged=[];const tx={get:async ref=>ref.id==='pending'?{empty:!pending}:ref.get(),set:(ref,v)=>staged.push(v)};const result=await f(tx);for(const v of staged)gateDoc=v;return result;}};
  const ledger={safety:{sourceProjectId:src,ledgerProjectId:lp},assertNoPending:async()=>{if(pending)throw Error('pending');},page:async()=>({records:[rec],next:null})};
  const config={ledgerDb:db,ledger,sourceProject:src,ledgerProject:lp,restoreId:rid,authorityPublicKey:pem(authority.publicKey),gatePublicKey:pem(gate.publicKey),callerEmail:email,audience:aud,verifyOidc:async()=>({aud,iss:'https://accounts.google.com',email,email_verified:true}),sign:async msg=>crypto.sign(null,msg,gate.privateKey),now:()=>tick};
@@ -25,3 +25,25 @@ test('pending, ledger mismatch and mid-signature revision changes never issue',a
 test('invalid gate signature and non-independent verification key are rejected',async()=>{const s=setup();s.config.sign=async()=>Buffer.alloc(64);assert.equal((await request(s)).statusCode,503);s.config.authorityPublicKey=s.config.gatePublicKey;assert.throws(()=>createRestoreIssuer(s.config),/INDEPENDENT_AUTHORITY_REQUIRED/);});
 
 test('production issuer entrypoint stays hard blocked even when enabled',()=>{const {spawnSync}=require('node:child_process');const r=spawnSync(process.execPath,[require('node:path').join(__dirname,'../server/restore-issuer-index.cjs')],{encoding:'utf8',env:{...process.env,OKCLEAN_RESTORE_ISSUER_ENABLED:'true'}});assert.notEqual(r.status,0);assert.match(r.stderr,/INDEPENDENT_RESTORE_VERIFIER_REQUIRED/);});
+
+test('a delayed older issuance cannot overwrite a newer valid certificate',async()=>{
+ const s=setup();s.proof.expiresAt=1599000;s.resign();
+ let resume,started;const blocked=new Promise(r=>resume=r),firstStarted=new Promise(r=>started=r);let calls=0;
+ s.config.sign=async msg=>{if(++calls===1){started();await blocked;}return crypto.sign(null,msg,s.gate.privateKey);};
+ const old=request(s);await firstStarted;s.setTime(1001000);assert.equal((await request(s)).statusCode,200);
+ const newer=s.getGate();resume();assert.equal((await old).statusCode,200);
+ assert.deepEqual(s.getGate(),newer);
+});
+
+test('automatic recovery requires a fresh independent signed proof and a real gate recheck',async()=>{
+ const s=setup();s.proof.expiresAt=1599000;s.resign();
+ const gate=createRestoreGate({ledgerDb:s.config.ledgerDb,sourceProject:src,ledgerProject:lp,restoreId:rid,publicKey:s.config.gatePublicKey,now:s.config.now});
+ assert.equal(await gate.verify(),false);let renewals=0;
+ const monitor=startRestoreHealthMonitor(gate,{renew:async()=>{renewals++;const r=await request(s);if(r.statusCode!==200)throw Error('ISSUER_REFUSED');return 'issued';},clock:s.config.now,report:()=>{},setIntervalFn:()=>({unref(){}}),clearIntervalFn:()=>{}});
+ await new Promise(r=>setImmediate(r));assert.equal(renewals,1);assert.equal(await gate.verify(),true);
+ // A restart/expired certificate needs a new signed issue, and the gate still
+ // rejects a pending ledger entry regardless of any prior successful renewal.
+ s.setTime(s.getGate().expiresAt);assert.equal(await gate.verify(),false);await monitor.check();assert.equal(await gate.verify(),true);
+ s.setPending(true);assert.equal(await gate.verify(),false);await monitor.check();assert.equal(await gate.verify(),false);
+ monitor.stop();
+});

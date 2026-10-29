@@ -74,6 +74,28 @@ async function main(){
    const historyCount=(await probe.collection('status_history').get()).size;
    assert.equal((await send('/admin/status',manager,{requestId:'freeze-probe',status:'예약확정'})).code,409);
    assert.equal((await probe.collection('status_history').get()).size,historyCount,'no related history after account freeze');
+   // Race the retention parent's freeze with the real container admin writer.
+   // Only known server writers are covered; direct Admin SDK writers remain a
+   // production blocker and are deliberately simulated separately below.
+   const retained=db.collection('quote_requests').doc('retention-freeze-probe');
+   await retained.create({ownerUid:'synthetic-retention-owner',status:'종료',legalHold:false,name:'가상보존'});
+   await retained.collection('status_history').doc('terminal').create({to:'종료',at:new Date('2020-01-01T00:00:00Z')});
+   const retention=require('../server/retention.cjs').createRetentionService({db,projectId:project,firestoreHost:'127.0.0.1:8085',policy:{reservationDays:30,historyDays:90},clock:()=>new Date('2030-03-01T00:00:00Z'),authorize:async()=>true});
+   let retainedPlan=await retention.process(retained.id);
+   assert.equal(retainedPlan.result,'would_redact');
+   const doFreeze=plan=>retention.freeze(retained.id,{expectedAction:'redacted',expectedVersion:plan.version,expectedHistoryVersion:plan.historyVersion,transactionFence:async()=>true});
+   const [freezeOutcome,adminRace]=await Promise.all([doFreeze(retainedPlan),send('/admin/status',manager,{requestId:retained.id,status:'예약확정'})]);
+   assert.ok(['frozen','changed'].includes(freezeOutcome.result));
+   if(freezeOutcome.result==='frozen')assert.equal(adminRace.code,409);
+   else {assert.equal(adminRace.code,200);retainedPlan=await retention.process(retained.id);assert.equal(retainedPlan.result,'would_redact');assert.equal((await doFreeze(retainedPlan)).result,'frozen');}
+   const retainedHistoryCount=(await retained.collection('status_history').get()).size;
+   assert.equal((await send('/admin/status',manager,{requestId:retained.id,status:'작업완료'})).code,409);
+   assert.equal((await retained.collection('status_history').get()).size,retainedHistoryCount);
+   // A synthetic Admin SDK bypass can still add an unknown subcollection. It
+   // is detected on the subsequent scan and deletion stays blocked.
+   await retained.collection('unknown-related-data').doc('synthetic').create({synthetic:true});
+   assert.equal((await retention.process(retained.id,{apply:true,transactionFence:async()=>true})).result,'blocked_dependencies');
+   assert.equal((await retained.get()).data().name,'가상보존');
    // A still-valid privileged ID token must not bypass an actor's lifecycle gate.
    const adminLife=db.collection('account_lifecycle').doc('REPLACE_WITH_ADMIN_UID');
    await adminLife.create({status:'withdrawal_requested'});

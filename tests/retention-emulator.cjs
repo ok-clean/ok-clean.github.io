@@ -18,23 +18,31 @@ async function main(){
   const recoveryIds=[ref.id];
   const opts={db,projectId:project,firestoreHost:host,policy:{reservationDays:30,historyDays:90},clock:()=>new Date('2030-03-01T00:00:00Z'),authorize:async()=>true};
   const service=createRetentionService(opts);
+  const fence=async()=>true; // test-only; not an operational fence
+  async function freezeCandidate(svc,id){
+   const p=await svc.process(id);const action=p.result==='would_redact'?'redacted':p.result==='would_purge_history'?'history_purged':null;
+   assert.ok(action);assert.equal((await svc.freeze(id,{expectedVersion:p.version,expectedHistoryVersion:p.historyVersion,expectedAction:action,transactionFence:fence})).result,'frozen');
+  }
   assert.equal((await service.process(ref.id)).result,'would_redact');assert.equal((await ref.get()).data().name,'가상고객');
   const page=await service.scan({limit:1});assert.deepEqual(page.ids,['synthetic-retention']);
-  const raced=await Promise.all([service.process(ref.id,{apply:true}),service.process(ref.id,{apply:true})]);
+  assert.equal((await service.process(ref.id,{apply:true,transactionFence:fence})).result,'freeze_required');
+  await freezeCandidate(service,ref.id);
+  const raced=await Promise.all([service.process(ref.id,{apply:true,transactionFence:fence}),service.process(ref.id,{apply:true,transactionFence:fence})]);
   assert.equal(raced.filter(x=>x.result==='redacted').length,1);assert.equal(raced.filter(x=>['preserved','changed'].includes(x.result)).length,1);const row=(await ref.get()).data();assert.equal(row.retentionRedacted,true);assert.equal(row.name,undefined);assert.equal(row.phone,undefined);assert.equal(row.ownerUid,undefined);
   assert.equal((await ref.collection('status_history').get()).size,1);
   const later=createRetentionService({...opts,clock:()=>new Date('2030-05-01T00:00:00Z')});
-  assert.equal((await later.process(ref.id,{apply:true})).result,'history_purged');assert.equal((await ref.collection('status_history').get()).size,0);assert.equal((await later.process(ref.id,{apply:true})).result,'already_purged');
+  assert.equal((await later.process(ref.id,{apply:true,transactionFence:fence})).result,'history_purged');assert.equal((await ref.collection('status_history').get()).size,0);assert.equal((await later.process(ref.id,{apply:true,transactionFence:fence})).result,'already_purged');
   // Restore an old synthetic parent and child within this isolated emulator, then
   // reapply the existing retention operation using only in-memory test IDs.
   // This does not test an independently retained ledger or enforce network isolation.
   await ref.set(beforeDelete);await ref.collection('status_history').doc('event').set(beforeDeleteHistory);
   assert.equal((await ref.get()).data().name,'가상고객');
-  const reapplied=await later.processBatch(recoveryIds,{apply:true});assert.equal(reapplied.redacted,1);
+  await freezeCandidate(later,ref.id);
+  const reapplied=await later.processBatch(recoveryIds,{apply:true,transactionFence:fence});assert.equal(reapplied.redacted,1);
   assert.equal((await ref.get()).data().name,undefined);assert.equal((await ref.get()).data().ownerUid,undefined);
-  const repurged=await later.processBatch(recoveryIds,{apply:true});assert.equal(repurged.history_purged,1);
+  const repurged=await later.processBatch(recoveryIds,{apply:true,transactionFence:fence});assert.equal(repurged.history_purged,1);
   assert.equal((await ref.collection('status_history').get()).size,0);
-  assert.equal((await later.processBatch(recoveryIds,{apply:true})).already_purged,1);
+  assert.equal((await later.processBatch(recoveryIds,{apply:true,transactionFence:fence})).already_purged,1);
   const audit=await db.collection('retention_audit').get();assert.equal(audit.size,4);for(const d of audit.docs)assert.deepEqual(Object.keys(d.data()).sort(),['action','at']);
   // Firestore orderBy('at') silently excludes this malformed child. All-child
   // scanning must block both redaction and history cleanup instead.
@@ -42,7 +50,7 @@ async function main(){
   await malformed.create({status:'종료',legalHold:false,name:'가상보존'});
   await malformed.collection('status_history').doc('valid').create({to:'종료',at:new Date('2030-01-01T00:00:00Z')});
   await malformed.collection('status_history').doc('missing-time').create({to:'종료'});
-  assert.equal((await service.process(malformed.id,{apply:true})).result,'blocked_dependencies');
+  assert.equal((await service.process(malformed.id,{apply:true,transactionFence:fence})).result,'blocked_dependencies');
   assert.equal((await malformed.get()).data().name,'가상보존');
   assert.equal((await malformed.collection('status_history').get()).size,2);
   // Scheduler integration uses real demo Firestore; only the OIDC verifier is a test double.

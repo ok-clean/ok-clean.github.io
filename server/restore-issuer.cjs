@@ -43,8 +43,13 @@ function createRestoreIssuer({ledgerDb,ledger,sourceProject,ledgerProject,restor
   const sig=await sign(gateMessage(certificate));if(!Buffer.isBuffer(sig)||sig.length!==64||!crypto.verify(null,gateMessage(certificate),gate,sig))throw Error('SIGNATURE_INVALID');
   certificate.signature=sig.toString('base64url');
   await ledgerDb.runTransaction(async tx=>{
-   const current=await tx.get(validation),currentHead=await tx.get(head),pending=await tx.get(entries.where('state','==','pending').limit(1));
+   const current=await tx.get(validation),currentHead=await tx.get(head),pending=await tx.get(entries.where('state','==','pending').limit(1)),old=await tx.get(control);
    if(!current.exists||!validate(current.data(),now())||!crypto.timingSafeEqual(crypto.createHash('sha256').update(validationMessage(current.data())).update(current.data().signature).digest(),crypto.createHash('sha256').update(validationMessage(proof)).update(proof.signature).digest())||!currentHead.exists||currentHead.data()?.revision!==proof.ledgerRevision||!pending.empty||now()>=expiresAt)throw Error('REVALIDATION_FAILED');
+   // Concurrent invocations can finish in the opposite order. Never shorten a
+   // newer valid certificate, but only trust one independently signed by our
+   // configured key for this exact project, epoch, checkpoint and revision.
+   const v=old.exists?old.data():null,t=now();
+   if(v&&v.sourceProject===sourceProject&&v.ledgerProject===ledgerProject&&v.restoreId===restoreId&&v.state==='cleared'&&v.checkpoint===proof.checkpoint&&v.ledgerRevision===proof.ledgerRevision&&Number.isSafeInteger(v.issuedAt)&&Number.isSafeInteger(v.expiresAt)&&v.issuedAt<=t+30000&&v.expiresAt>certificate.expiresAt&&v.expiresAt<=proof.expiresAt&&v.expiresAt>v.issuedAt&&v.expiresAt-v.issuedAt<=600000&&typeof v.signature==='string'&&/^[A-Za-z0-9_-]{86}$/.test(v.signature)&&crypto.verify(null,gateMessage(v),gate,Buffer.from(v.signature,'base64url')))return;
    tx.set(control,certificate);
   });
   return true;

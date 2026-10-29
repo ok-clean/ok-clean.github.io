@@ -1,12 +1,12 @@
 'use strict';
 process.env.FIRESTORE_EMULATOR_HOST='127.0.0.1:8085';process.env.GCLOUD_PROJECT='demo-okclean';
 const {test}=require('node:test');const assert=require('node:assert/strict');const {createRetentionService}=require('../server/retention.cjs');
-function fixture({mode='valid',status='종료',terminalDate='2030-01-01T00:00:00Z',clock='2030-03-01T00:00:00Z'}={}){
- const audits=[];const docs=new Map([['x',{status,legalHold:false,name:'가상고객',phone:'01000000000',ownerUid:'synthetic',notes:'synthetic'}]]),histories=new Map([['x',[{id:'h1',to:status,at:new Date(terminalDate),actorUid:'synthetic-admin'}]]]);let beforeTx=null,fail=false,unknown=false,version={seconds:100,nanoseconds:2};
+function fixture({mode='valid',status='종료',terminalDate='2030-01-01T00:00:00Z',clock='2030-03-01T00:00:00Z',preFrozen=true}={}){
+ const audits=[];const docs=new Map([['x',{status,legalHold:false,name:'가상고객',phone:'01000000000',ownerUid:'synthetic',notes:'synthetic',...(preFrozen?{dataMutationFrozen:true,retentionFreeze:'retention-v1'}:{})}]]),histories=new Map([['x',[{id:'h1',to:status,at:new Date(terminalDate),actorUid:'synthetic-admin'}]]]);let beforeTx=null,fail=false,unknown=false,version={seconds:100,nanoseconds:2};
  const mkRef=id=>({id,get:async()=>({exists:docs.has(id),updateTime:{...version},data:()=>docs.get(id)}),listCollections:async()=>unknown?[{id:'offers'}]:[{id:'status_history'}],collection:()=>({id:'status_history',_id:id,orderBy(){return this},limit(){return this},get:async()=>({size:(histories.get(id)||[]).length,docs:(histories.get(id)||[]).map(h=>({id:h.id,updateTime:h.updateTime||{seconds:200,nanoseconds:1},ref:{id:h.id,parentId:id,listCollections:async()=>[]},data:()=>h}))})})});
- const db={projectId:'demo-okclean',collection:name=>({doc:name==='retention_audit'?()=>({audit:true}):mkRef}),runTransaction:async fn=>{if(fail)throw Error('synthetic failure');if(beforeTx){beforeTx();beforeTx=null;}return fn({get:async target=>target._id?target.get():target.get(),set:(ref,v)=>docs.set(ref.id,v),create:(ref,v)=>{assert.equal(ref.audit,true);audits.push(v);},delete:ref=>histories.set(ref.parentId,(histories.get(ref.parentId)||[]).filter(h=>h.id!==ref.id))});}};
+ const db={projectId:'demo-okclean',collection:name=>({doc:name==='retention_audit'?()=>({audit:true}):mkRef}),runTransaction:async fn=>{if(fail)throw Error('synthetic failure');if(beforeTx){beforeTx();beforeTx=null;}return fn({get:async target=>target._id?target.get():target.get(),set:(ref,v)=>docs.set(ref.id,v),update:(ref,v)=>docs.set(ref.id,{...docs.get(ref.id),...v}),create:(ref,v)=>{assert.equal(ref.audit,true);audits.push(v);},delete:ref=>histories.set(ref.parentId,(histories.get(ref.parentId)||[]).filter(h=>h.id!==ref.id))});}};
  const options={db,projectId:'demo-okclean',firestoreHost:'127.0.0.1:8085',policy:{reservationDays:30,historyDays:90},clock:()=>new Date(clock),authorize:async()=>true};
- return {docs,histories,audits,options,make:()=>createRetentionService(options),setBeforeTx:fn=>{beforeTx=fn;},setVersion:v=>{version=v;},setFail:v=>{fail=v;},setUnknown:v=>{unknown=v;}};
+ return {docs,histories,audits,options,make:()=>{const svc=createRetentionService(options);const guarded=o=>o?.apply&&o.transactionFence===undefined?{...o,transactionFence:async()=>true}:o;return {...svc,process:(id,o)=>svc.process(id,guarded(o)),processBatch:(ids,o)=>svc.processBatch(ids,guarded(o))};},setBeforeTx:fn=>{beforeTx=fn;},setVersion:v=>{version=v;},setFail:v=>{fail=v;},setUnknown:v=>{unknown=v;}};
 }
 test('policy absent, real project, and real host always fail closed',()=>{const x=fixture();for(const changed of [{policy:null},{projectId:'production-project'},{firestoreHost:'other:8085'},{db:{...x.options.db,projectId:'actual-production'}}])assert.throws(()=>createRetentionService({...x.options,...changed}));});
 test('dry run never writes; unfinished and recent records are kept',async()=>{const x=fixture();assert.equal((await x.make().process('x')).result,'would_redact');assert.equal(x.docs.get('x').name,'가상고객');const recent=fixture({terminalDate:'2030-02-25T00:00:00Z'});assert.equal((await recent.make().process('x',{apply:true})).result,'preserved');const active=fixture({status:'상담중'});assert.equal((await active.make().process('x',{apply:true})).result,'preserved');});
@@ -28,3 +28,57 @@ test('a changed related history document blocks the scheduled action',async()=>{
 test('a child without a valid at field blocks redaction and history purge',async()=>{const x=fixture();x.histories.get('x').push({id:'malformed',to:'종료'});assert.equal((await x.make().process('x',{apply:true})).result,'blocked_dependencies');assert.equal(x.docs.get('x').name,'가상고객');assert.equal(x.histories.get('x').length,2);x.docs.set('x',{status:'보유기간만료',retentionRedacted:true,legalHold:false,terminalAt:new Date('2030-01-01T00:00:00Z')});x.options.clock=()=>new Date('2030-05-01T00:00:00Z');assert.equal((await x.make().process('x',{apply:true})).result,'blocked_dependencies');assert.equal(x.histories.get('x').length,2);assert.equal(x.audits.length,0);});
 test('latest status is selected from all history without Firestore ordering',async()=>{const x=fixture();x.histories.get('x').unshift({id:'older',to:'상담중',at:new Date('2029-12-01T00:00:00Z')});assert.equal((await x.make().process('x')).result,'would_redact');x.histories.get('x').push({id:'newer',to:'상담중',at:new Date('2030-02-01T00:00:00Z')});assert.equal((await x.make().process('x',{apply:true})).result,'preserved');assert.equal(x.docs.get('x').name,'가상고객');});
 test('conflicting statuses at the same latest time block deletion',async()=>{const x=fixture();x.histories.get('x').push({id:'tie',to:'상담중',at:new Date('2030-01-01T00:00:00Z')});assert.equal((await x.make().process('x',{apply:true})).result,'blocked_dependencies');assert.equal(x.docs.get('x').name,'가상고객');});
+
+test('retention freeze rechecks known dependencies and rejects unrelated locks',async()=>{
+  const x=fixture({preFrozen:false}),api=x.make(),plan=await api.process('x');
+  const options={expectedAction:'redacted',expectedVersion:plan.version,expectedHistoryVersion:plan.historyVersion,transactionFence:async()=>true};
+  assert.equal((await api.freeze('x',options)).result,'frozen');
+  assert.equal(x.docs.get('x').dataMutationFrozen,true);
+  assert.equal(x.docs.get('x').retentionFreeze,'retention-v1');
+  assert.equal((await api.freeze('x',options)).result,'frozen');
+  // Known administrator writes must reject the frozen parent; an unrelated
+  // account deletion lock must not be repurposed by retention.
+  const y=fixture({preFrozen:false}),other=y.make(),p=await other.process('x');
+  y.docs.set('x',{...y.docs.get('x'),dataMutationFrozen:true});
+  assert.equal((await other.freeze('x',{...options,expectedVersion:p.version,expectedHistoryVersion:p.historyVersion})).result,'blocked_dependencies');
+  assert.equal(y.docs.get('x').name,'가상고객');
+});
+test('freeze rejects changed history, legal hold, lost fence, and unknown later children',async()=>{
+  for(const change of ['history','hold','fence']){
+    const x=fixture({preFrozen:false}),api=x.make(),plan=await api.process('x');
+    if(change==='history')x.histories.get('x')[0].updateTime={seconds:201,nanoseconds:0};
+    if(change==='hold')x.docs.set('x',{...x.docs.get('x'),legalHold:true});
+    const got=await api.freeze('x',{expectedAction:'redacted',expectedVersion:plan.version,expectedHistoryVersion:plan.historyVersion,transactionFence:async()=>change!=='fence'});
+    assert.ok(['changed','blocked_legal_hold','retry_needed'].includes(got.result));
+    assert.equal(x.docs.get('x').dataMutationFrozen,undefined);
+    assert.equal(x.docs.get('x').name,'가상고객');
+  }
+  const x=fixture({preFrozen:false}),api=x.make(),plan=await api.process('x');
+  assert.equal((await api.freeze('x',{expectedAction:'redacted',expectedVersion:plan.version,expectedHistoryVersion:plan.historyVersion,transactionFence:async()=>true})).result,'frozen');
+  x.setUnknown(true);
+  assert.equal((await api.process('x',{apply:true})).result,'blocked_dependencies');
+  assert.equal(x.docs.get('x').name,'가상고객');
+  assert.equal(x.docs.get('x').dataMutationFrozen,true);
+});
+
+test('freeze cannot be used on active, recent or wrong-stage records',async()=>{
+  const historyVersion=require('node:crypto').createHash('sha256').update(JSON.stringify([['h1','200:1']])).digest('hex');
+  for(const x of [fixture({status:'상담중',preFrozen:false}),fixture({terminalDate:'2030-02-28T00:00:00Z',preFrozen:false})]){
+    const got=await x.make().freeze('x',{expectedAction:'redacted',expectedVersion:'100:2',expectedHistoryVersion:historyVersion,transactionFence:async()=>true});
+    assert.equal(got.result,'preserved');assert.equal(x.docs.get('x').dataMutationFrozen,undefined);
+  }
+});
+
+test('direct destructive calls cannot bypass the parent freeze',async()=>{
+  const x=fixture({preFrozen:false}),api=x.make(),plan=await api.process('x');
+  assert.equal((await api.process('x',{apply:true})).result,'freeze_required');
+  assert.equal(x.docs.get('x').name,'가상고객');
+  assert.equal((await api.freeze('x',{expectedAction:'redacted',expectedVersion:plan.version,expectedHistoryVersion:plan.historyVersion,transactionFence:async()=>true})).result,'frozen');
+  assert.equal((await api.process('x',{apply:true})).result,'redacted');
+});
+
+test('all destructive calls require a transaction fence',async()=>{
+  const x=fixture(),api=createRetentionService(x.options);
+  await assert.rejects(api.process('x',{apply:true}),/TRANSACTION_FENCE_REQUIRED/);
+  assert.equal(x.docs.get('x').name,'가상고객');assert.equal(x.audits.length,0);
+});

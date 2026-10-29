@@ -16,17 +16,19 @@ async function main(){
   const before=(await ref.get()).data(),beforeHist=(await hist.get()).data();
   const ledger=createDeletionLedger({ledgerDb,primaryProjectId:primary,ledgerProjectId:secondary});
   const service=createRetentionService({db,projectId:primary,firestoreHost:host,policy:{reservationDays:30,historyDays:90},clock:()=>new Date('2030-03-01T00:00:00Z'),authorize:async()=>true});
-  const preview=await service.process(ref.id);const input={id:ref.id,action:'redacted',expectedVersion:preview.version,expectedHistoryVersion:preview.historyVersion};const transactionFence=async()=>true;
+  const transactionFence=async()=>true; // test-only; not an operational fence
+  async function freezeCandidate(id){const p=await service.process(id);assert.equal(p.result,'would_redact');assert.equal((await service.freeze(id,{expectedAction:'redacted',expectedVersion:p.version,expectedHistoryVersion:p.historyVersion,transactionFence})).result,'frozen');return service.process(id);}
+  const preview=await freezeCandidate(ref.id);const input={id:ref.id,action:'redacted',expectedVersion:preview.version,expectedHistoryVersion:preview.historyVersion};
   assert.equal((await processWithLedger({ledger,service,transactionFence,...input})).result,'redacted');assert.equal((await ref.get()).data().name,undefined);
   assert.equal((await ledger.page()).records[0].state,'committed');
   await ref.set(before);await hist.set(beforeHist);assert.equal((await ref.get()).data().name,'가상고객');
   // Fence is a test double; production requires network isolation + independent IAM.
-  const replay=await ledger.replay({verifyLedgerSnapshot:async()=>true,isRestoreFenced:async()=>true,reapply:async({id,action})=>{if(action!=='redacted')return false;const current=await service.process(id);return (await service.process(id,{apply:true,expectedAction:action,expectedVersion:current.version,expectedHistoryVersion:current.historyVersion,transactionFence})).result==='redacted';}});
+  const replay=await ledger.replay({verifyLedgerSnapshot:async()=>true,isRestoreFenced:async()=>true,reapply:async({id,action})=>{if(action!=='redacted')return false;const current=await freezeCandidate(id);return (await service.process(id,{apply:true,expectedAction:action,expectedVersion:current.version,expectedHistoryVersion:current.historyVersion,transactionFence})).result==='redacted';}});
   assert.deepEqual(replay,{processed:1});assert.equal((await ref.get()).data().name,undefined);
   // If data changes after the durable intention, the worker must not delete it.
   const raced=db.collection('quote_requests').doc('synthetic-ledger-changed');
   await raced.create({...before});await raced.collection('status_history').doc('event').create(beforeHist);
-  const beforeRace=await service.process(raced.id);const changed={id:raced.id,action:'redacted',expectedVersion:beforeRace.version,expectedHistoryVersion:beforeRace.historyVersion};
+  const beforeRace=await freezeCandidate(raced.id);const changed={id:raced.id,action:'redacted',expectedVersion:beforeRace.version,expectedHistoryVersion:beforeRace.historyVersion};
   await ledger.recordIntent(changed);await raced.update({notes:'synthetic concurrent change'});
   assert.equal((await processWithLedger({ledger,service,transactionFence,...changed})).result,'changed');
   assert.equal((await raced.get()).data().name,'가상고객');

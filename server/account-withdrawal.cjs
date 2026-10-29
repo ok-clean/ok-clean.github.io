@@ -26,14 +26,17 @@ function createWithdrawalHandler({db,auth,rateLimit,protectedMemberAdminUid,with
      // Never apply a previous request to a newly created Auth user with the
      // same UID. Legacy requests lacking the identity binding require review.
      if(!creationTime||!data?.authCreationTime||data.authCreationTime!==creationTime){tx.update(ref,{securityReview:'required'});return 'review_required';}
-     tx.update(ref,{sessionRevocation:'pending'});return 'pending';
+     const prior=data.sessionRevocationGeneration===undefined?0:data.sessionRevocationGeneration;
+     if(!Number.isSafeInteger(prior)||prior<0||prior>=Number.MAX_SAFE_INTEGER){tx.update(ref,{securityReview:'required'});return 'review_required';}
+     const generation=prior+1;tx.update(ref,{sessionRevocation:'pending',sessionRevocationGeneration:generation});return {status:'pending',generation};
     }
     if(!creationTime)return 'identity_unavailable';
-    tx.create(ref,{status:'withdrawal_requested',requestedAt:new Date(timestamp),sessionRevocation:'pending',authCreationTime:creationTime});return 'pending';
+    tx.create(ref,{status:'withdrawal_requested',requestedAt:new Date(timestamp),sessionRevocation:'pending',sessionRevocationGeneration:1,authCreationTime:creationTime});return {status:'pending',generation:1};
    });
    if(result==='unavailable')return response(409,'unavailable');
    if(result==='identity_unavailable')return response(503,'unavailable');
    if(result==='review_required')return response(403,'unavailable');
+   const generation=result.generation;
    // Reservation access is already frozen transactionally. Recheck latest
    // privileges before revoking refresh tokens; these systems cannot share a
    // transaction, so admin provisioning must also honour the lifecycle gate.
@@ -46,10 +49,10 @@ function createWithdrawalHandler({db,auth,rateLimit,protectedMemberAdminUid,with
    }
    // Recheck the persisted request immediately before the external call.
    // Auth role/identity changes still require a separately enforced fence.
-   const sameRequest=await db.runTransaction(async tx=>{const snap=await tx.get(ref),v=snap.data();return snap.exists&&v?.status==='withdrawal_requested'&&v?.securityReview!=='required'&&v?.sessionRevocation==='pending'&&v?.authCreationTime===creationTime;});
+   const sameRequest=await db.runTransaction(async tx=>{const snap=await tx.get(ref),v=snap.data();return snap.exists&&v?.status==='withdrawal_requested'&&v?.securityReview!=='required'&&v?.sessionRevocation==='pending'&&v?.sessionRevocationGeneration===generation&&v?.authCreationTime===creationTime;});
    if(!sameRequest)return response(403,'unavailable');
    await auth.revokeRefreshTokens(caller.uid);
-   await db.runTransaction(async tx=>{const snap=await tx.get(ref);if(!snap.exists||snap.data()?.status!=='withdrawal_requested'||snap.data()?.securityReview==='required'||snap.data()?.authCreationTime!==creationTime)throw Error('LIFECYCLE_CHANGED');tx.update(ref,{sessionRevocation:'revoked',sessionRevokedAt:new Date(now())});});
+   await db.runTransaction(async tx=>{const snap=await tx.get(ref);if(!snap.exists||snap.data()?.status!=='withdrawal_requested'||snap.data()?.securityReview==='required'||snap.data()?.sessionRevocation!=='pending'||snap.data()?.sessionRevocationGeneration!==generation||snap.data()?.authCreationTime!==creationTime)throw Error('LIFECYCLE_CHANGED');tx.update(ref,{sessionRevocation:'revoked',sessionRevokedAt:new Date(now())});});
    return response(200,'pending');
   }catch{return response(503,'unavailable');}
  };
@@ -62,15 +65,17 @@ module.exports={createWithdrawalHandler,privileged};
 // worker needs independently enforced inventory, identity and restore controls.
 function createDemoWithdrawalProcessor({db,auth,policy,protectedMemberAdminUid,now=()=>Date.now(),randomId=()=>require('node:crypto').randomBytes(16).toString('hex')}){
  const project='demo-okclean-integration';
+ const liveLease=(expiry,current)=>{if(expiry==null||!Number.isFinite(current))return false;const ms=new Date(expiry?.toDate?expiry.toDate():expiry).getTime();return Number.isFinite(ms)&&ms>current;};
  if(process.env.GCLOUD_PROJECT!==project || db?.projectId!==project || process.env.FIRESTORE_EMULATOR_HOST!=='127.0.0.1:8085' || process.env.FIREBASE_AUTH_EMULATOR_HOST!=='127.0.0.1:9099') throw Error('DEMO_EMULATOR_REQUIRED');
  if(!db?.runTransaction || !db?.collection || !auth?.getUser || !auth?.deleteUser) throw Error('Trusted dependencies required');
  return async function process(uid){
   if(policy?.reviewed!==true || policy?.allowDemoAuthDeletion!==true || !protectedMemberAdminUid || protectedMemberAdminUid==='REPLACE_WITH_ADMIN_UID')return {result:'policy_unconfirmed'};
   if(typeof uid!=='string'||!uid||uid.length>128||uid.includes('/')||uid===protectedMemberAdminUid)return {result:'blocked'};
   const ref=db.collection('account_lifecycle').doc(uid), token=randomId(), start=now();
+  if(!Number.isFinite(start))return {result:'retry_needed'};
   let claim,expectedAuthCreationTime;
   try{
-   claim=await db.runTransaction(async tx=>{const snap=await tx.get(ref), v=snap.data();if(!snap.exists||v?.status!=='withdrawal_requested')return 'blocked';if(v.securityReview==='required')return 'security_review_required';if(v.demoAuthState==='absent')return 'verify_absent';if(v.sessionRevocation!=='revoked')return 'session_revocation_pending';if(typeof v.authCreationTime!=='string'||!v.authCreationTime){tx.update(ref,{securityReview:'required'});return 'security_review_required';}expectedAuthCreationTime=v.authCreationTime;if(v.demoLeaseExpiresAt && new Date(v.demoLeaseExpiresAt.toDate?v.demoLeaseExpiresAt.toDate():v.demoLeaseExpiresAt).getTime()>start)return 'busy';tx.update(ref,{demoLeaseToken:token,demoLeaseExpiresAt:new Date(start+60000)});return 'claimed';});
+   claim=await db.runTransaction(async tx=>{const snap=await tx.get(ref), v=snap.data();if(!snap.exists||v?.status!=='withdrawal_requested')return 'blocked';if(v.securityReview==='required')return 'security_review_required';if(v.demoAuthState==='absent')return 'verify_absent';if(v.sessionRevocation!=='revoked')return 'session_revocation_pending';if(typeof v.authCreationTime!=='string'||!v.authCreationTime){tx.update(ref,{securityReview:'required'});return 'security_review_required';}expectedAuthCreationTime=v.authCreationTime;const hasToken=Object.prototype.hasOwnProperty.call(v,'demoLeaseToken'),hasExpiry=Object.prototype.hasOwnProperty.call(v,'demoLeaseExpiresAt');if(hasToken!==hasExpiry)return 'retry_needed';if(hasToken){const expiry=v.demoLeaseExpiresAt,expiryMs=expiry==null?NaN:new Date(expiry?.toDate?expiry.toDate():expiry).getTime();if(typeof v.demoLeaseToken!=='string'||!Number.isFinite(expiryMs))return 'retry_needed';if(expiryMs>start)return v.demoLeaseToken?'busy':'retry_needed';}tx.update(ref,{demoLeaseToken:token,demoLeaseExpiresAt:new Date(start+60000)});return 'claimed';});
    if(claim==='verify_absent'){try{await auth.getUser(uid);return {result:'uid_reused_blocked'};}catch(e){return {result:e?.code==='auth/user-not-found'?'absent':'retry_needed'};}}
    if(claim!=='claimed')return {result:claim};
    // Check for reservations and freeze related writes in one transaction.
@@ -79,7 +84,7 @@ function createDemoWithdrawalProcessor({db,auth,policy,protectedMemberAdminUid,n
    const freeze=await db.runTransaction(async tx=>{
     const snap=await tx.get(ref),v=snap.data();
     const expiry=v?.demoLeaseExpiresAt;
-    if(!snap.exists||v?.status!=='withdrawal_requested'||v?.securityReview==='required'||v?.sessionRevocation!=='revoked'||v?.demoLeaseToken!==token||new Date(expiry?.toDate?expiry.toDate():expiry).getTime()<=now())return 'retry_needed';
+    if(!snap.exists||v?.status!=='withdrawal_requested'||v?.securityReview==='required'||v?.sessionRevocation!=='revoked'||v?.demoLeaseToken!==token||!liveLease(expiry,now()))return 'retry_needed';
     const reservations=await tx.get(db.collection('quote_requests').where('ownerUid','==',uid).limit(1));
     if(!reservations.empty)return 'reservations_pending';
     // A known member link is unresolved customer data, so never delete Auth.
@@ -106,10 +111,18 @@ function createDemoWithdrawalProcessor({db,auth,policy,protectedMemberAdminUid,n
     // API has no conditional delete, leaving a final unavoidable race.
     if(!account.metadata?.creationTime||account.metadata.creationTime!==fresh.metadata?.creationTime)return {result:'retry_needed'};
    }
-   const ownsLease=await db.runTransaction(async tx=>{const snap=await tx.get(ref), v=snap.data();const expiry=v?.demoLeaseExpiresAt;return snap.exists && v?.status==='withdrawal_requested' && v?.securityReview!=='required' && v?.sessionRevocation==='revoked' && v?.dataMutationFrozen===true && v?.demoLeaseToken===token && new Date(expiry?.toDate?expiry.toDate():expiry).getTime()>now();});
+   // Persist the attempt *before* the external call. A process crash or an
+   // ambiguous error must not be mistaken for a completed withdrawal. On retry
+   // getUser above verifies the same Auth identity (or confirms it is absent).
+   const ownsLease=await db.runTransaction(async tx=>{const snap=await tx.get(ref), v=snap.data();const expiry=v?.demoLeaseExpiresAt;
+    const allowed=snap.exists && v?.status==='withdrawal_requested' && v?.securityReview!=='required' && v?.sessionRevocation==='revoked' && v?.dataMutationFrozen===true && v?.demoLeaseToken===token && v?.authCreationTime===expectedAuthCreationTime && liveLease(expiry,now());
+    if(!allowed)return false;
+    if(account){const attempts=v.demoAuthAttempts??0;if(!Number.isSafeInteger(attempts)||attempts<0||attempts>=Number.MAX_SAFE_INTEGER)return false;tx.update(ref,{demoAuthState:'delete_pending',demoAuthAttempts:attempts+1,demoAuthLastAttemptAt:new Date(now())});}
+    return true;
+   });
    if(!ownsLease)return {result:'retry_needed'};
    if(account){try{await auth.deleteUser(uid);}catch(e){if(e?.code!=='auth/user-not-found')throw e;}}
-   const finalized=await db.runTransaction(async tx=>{const snap=await tx.get(ref);if(!snap.exists||snap.data()?.demoLeaseToken!==token)return false;tx.update(ref,{demoAuthState:'absent',demoAuthCheckedAt:new Date(now())});return true;});
+   const finalized=await db.runTransaction(async tx=>{const snap=await tx.get(ref),v=snap.data(),expiry=v?.demoLeaseExpiresAt;if(!snap.exists||v?.demoLeaseToken!==token||v?.status!=='withdrawal_requested'||v?.securityReview==='required'||v?.sessionRevocation!=='revoked'||v?.authCreationTime!==expectedAuthCreationTime||!liveLease(expiry,now()))return false;tx.update(ref,{demoAuthState:'absent',demoAuthCheckedAt:new Date(now())});return true;});
    return {result:finalized?'auth_absent_pending_other_data':'retry_needed'};
   }catch{return {result:'retry_needed'};}
   finally{
@@ -128,20 +141,22 @@ function createWithdrawalRecoveryHandler({db,auth,verifyOidc,config,now=()=>Date
  const c=config||{}, validProject=/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
  const ready=c.enabled===true&&c.policyReviewed===true&&validProject.test(c.projectId||'')&&db.projectId===c.projectId&&typeof c.audience==='string'&&/^https:\/\//.test(c.audience)&&typeof c.serviceAccount==='string'&&/^[a-z0-9-]+@[a-z0-9-]+\.iam\.gserviceaccount\.com$/.test(c.serviceAccount)&&typeof c.protectedMemberAdminUid==='string'&&c.protectedMemberAdminUid.length>0&&c.protectedMemberAdminUid!=='REPLACE_WITH_ADMIN_UID';
  const control=db.collection('withdrawal_recovery_control').doc('current'),leaseMs=300000;
- function ts(x){return x instanceof Date?x.getTime():typeof x?.toDate==='function'?x.toDate().getTime():0;}
+ function ts(x){return x instanceof Date?x.getTime():typeof x?.toDate==='function'?x.toDate().getTime():NaN;}
  function time(){const n=now();if(!Number.isFinite(n))throw Error('INVALID_CLOCK');return n;}
- async function claim(job){return db.runTransaction(async tx=>{const s=await tx.get(control),v=s.exists?s.data():{};const n=time();if(v.owner&&ts(v.expiresAt)>n)return null;const cursor=typeof v.cursor==='string'?v.cursor:null;tx.set(control,{owner:job,expiresAt:new Date(n+leaseMs),cursor});return {cursor};});}
+ async function claim(job){return db.runTransaction(async tx=>{const s=await tx.get(control),v=s.exists?s.data():{};const n=time();if(s.exists){if(v.owner===null){if(v.expiresAt!==null)return null;}else{if(typeof v.owner!=='string'||!/^[A-Za-z0-9_-]{1,80}$/.test(v.owner))return null;const expiry=ts(v.expiresAt);if(!Number.isFinite(expiry)||expiry>n)return null;}}const cursor=typeof v.cursor==='string'?v.cursor:null;tx.set(control,{owner:job,expiresAt:new Date(n+leaseMs),cursor});return {cursor};});}
  async function owns(job){return db.runTransaction(async tx=>{const s=await tx.get(control),v=s.data();return s.exists&&v?.owner===job&&ts(v.expiresAt)>time();});}
- async function finish(job,cursor,counts,outcome){return db.runTransaction(async tx=>{const s=await tx.get(control),v=s.data();if(!s.exists||v?.owner!==job)return false;tx.set(control,{owner:null,expiresAt:null,cursor,lastResult:outcome,lastCounts:counts,lastRunAt:new Date(time())});return true;});}
- async function markReview(ref,job){return db.runTransaction(async tx=>{const lock=await tx.get(control),s=await tx.get(ref),v=lock.data();if(!lock.exists||v?.owner!==job||ts(v.expiresAt)<=time()||!s.exists||s.data()?.status!=='withdrawal_requested')return false;tx.update(ref,{securityReview:'required',sessionRevocation:'pending'});return true;});}
+ async function finish(job,cursor,counts,outcome){return db.runTransaction(async tx=>{const s=await tx.get(control),v=s.data(),expiry=ts(v?.expiresAt);if(!s.exists||v?.owner!==job||!Number.isFinite(expiry)||expiry<=time())return false;tx.set(control,{owner:null,expiresAt:null,cursor,lastResult:outcome,lastCounts:counts,lastRunAt:new Date(time())});return true;});}
+ async function markReview(ref,job){return db.runTransaction(async tx=>{const lock=await tx.get(control),s=await tx.get(ref),v=lock.data(),expiry=ts(v?.expiresAt);if(!lock.exists||v?.owner!==job||!Number.isFinite(expiry)||expiry<=time()||!s.exists||s.data()?.status!=='withdrawal_requested')return false;tx.update(ref,{securityReview:'required',sessionRevocation:'pending'});return true;});}
  async function processOne(ref,job){
   const snapshot=await ref.get(),v=snapshot.exists?snapshot.data():null;
   if(!v||v.status!=='withdrawal_requested'||v.sessionRevocation!=='pending'||v.securityReview==='required')return 'skipped';
+  const generation=v.sessionRevocationGeneration===undefined?0:v.sessionRevocationGeneration;
+  if(!Number.isSafeInteger(generation)||generation<0)return await markReview(ref,job)?'review':'retry';
   if(ref.id===c.protectedMemberAdminUid||typeof v.authCreationTime!=='string'||!v.authCreationTime){return await markReview(ref,job)?'review':'retry';}
   let first;
   try{first=await auth.getUser(ref.id);}catch(e){if(e?.code==='auth/user-not-found'){return await markReview(ref,job)?'review':'retry';}throw e;}
   if(first.uid!==ref.id||first.disabled||privileged(first.customClaims)||first.metadata?.creationTime!==v.authCreationTime){return await markReview(ref,job)?'review':'retry';}
-  const gate=await db.runTransaction(async tx=>{const lock=await tx.get(control),s=await tx.get(ref),v=lock.data(),x=s.data();return lock.exists&&v?.owner===job&&ts(v.expiresAt)>time()&&s.exists&&x?.status==='withdrawal_requested'&&x?.securityReview!=='required'&&x?.sessionRevocation==='pending'&&x?.authCreationTime===first.metadata.creationTime;});
+  const gate=await db.runTransaction(async tx=>{const lock=await tx.get(control),s=await tx.get(ref),v=lock.data(),x=s.data();return lock.exists&&v?.owner===job&&ts(v.expiresAt)>time()&&s.exists&&x?.status==='withdrawal_requested'&&x?.securityReview!=='required'&&x?.sessionRevocation==='pending'&&(x?.sessionRevocationGeneration??0)===generation&&x?.authCreationTime===first.metadata.creationTime;});
   if(!gate)return 'retry';
   // Firebase Auth and Firestore do not share a transaction. This operation is
   // limited to revoking sessions. External privilege changes require separate
@@ -149,7 +164,7 @@ function createWithdrawalRecoveryHandler({db,auth,verifyOidc,config,now=()=>Date
   await auth.revokeRefreshTokens(ref.id);
   const after=await auth.getUser(ref.id);
   if(after.uid!==ref.id||after.disabled||privileged(after.customClaims)||after.metadata?.creationTime!==first.metadata.creationTime){return await markReview(ref,job)?'review':'retry';}
-  const committed=await db.runTransaction(async tx=>{const lock=await tx.get(control),s=await tx.get(ref),v=lock.data(),x=s.data();if(!lock.exists||v?.owner!==job||ts(v.expiresAt)<=time()||!s.exists||x?.status!=='withdrawal_requested'||x?.securityReview==='required'||x?.sessionRevocation!=='pending'||x?.authCreationTime!==after.metadata.creationTime)return false;tx.update(ref,{sessionRevocation:'revoked',sessionRevokedAt:new Date(time())});return true;});
+  const committed=await db.runTransaction(async tx=>{const lock=await tx.get(control),s=await tx.get(ref),v=lock.data(),x=s.data(),expiry=ts(v?.expiresAt);if(!lock.exists||v?.owner!==job||!Number.isFinite(expiry)||expiry<=time()||!s.exists||x?.status!=='withdrawal_requested'||x?.securityReview==='required'||x?.sessionRevocation!=='pending'||(x?.sessionRevocationGeneration??0)!==generation||x?.authCreationTime!==after.metadata.creationTime)return false;tx.update(ref,{sessionRevocation:'revoked',sessionRevokedAt:new Date(time())});return true;});
   return committed?'revoked':'retry';
  }
  return async function(req,res){

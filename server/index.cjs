@@ -8,7 +8,7 @@ const {getFirestore}=require('firebase-admin/firestore');
 const {createHttpHandler}=require('./handler.cjs');
 const {createRateLimit}=require('./rate-limit.cjs');
 const {attachDemoRetentionRoute}=require('./demo-retention-route.cjs');
-const {createRestoreGate}=require('./restore-gate.cjs');
+const {createRestoreGate,startRestoreHealthMonitor}=require('./restore-gate.cjs');
 const services=require('./services.json');
 // Fail closed before starting the listener when production settings are unsafe.
 const runtimeErrors=require('./preflight.cjs').validateRuntime(process.env);
@@ -24,7 +24,22 @@ attachDemoRetentionRoute({app,db,createLedgerDb:()=>getFirestore(initializeApp({
 // the Admin SDK. A gate check cannot replace a network fence during restore.
 const restoreLedger=getFirestore(initializeApp({credential:applicationDefault(),projectId:process.env.OKCLEAN_LEDGER_PROJECT_ID},'restore-gate-ledger'));
 const restoreGate=createRestoreGate({ledgerDb:restoreLedger,sourceProject:process.env.OKCLEAN_PROJECT_ID,ledgerProject:process.env.OKCLEAN_LEDGER_PROJECT_ID,restoreId:process.env.OKCLEAN_RESTORE_EPOCH,publicKey:process.env.OKCLEAN_RESTORE_PUBLIC_KEY});
-app.use(restoreGate.middleware);
+let renew=null;
+if(process.env.OKCLEAN_RESTORE_RENEWAL_ENABLED==='true'){
+  // The default Cloud Run workload identity must have ONLY invoker access to
+  // the dedicated issuer. Its independent validator and KMS are mandatory.
+  const {GoogleAuth}=require('google-auth-library');
+  const {createRestoreRenewer}=require('./restore-renewal.cjs');
+  const google=new GoogleAuth();
+  const controlProjectId=process.env.OKCLEAN_RESTORE_CONTROL_PROJECT_ID;
+  const controlDb=getFirestore(initializeApp({credential:applicationDefault(),projectId:controlProjectId},'restore-renewal-control'));
+  renew=createRestoreRenewer({controlDb,controlProjectId,sourceProjectId:process.env.OKCLEAN_PROJECT_ID,ledgerProjectId:process.env.OKCLEAN_LEDGER_PROJECT_ID,issuerOrigin:process.env.OKCLEAN_RESTORE_ISSUER_ORIGIN,createClient:audience=>google.getIdTokenClient(audience)});
+}
+const restoreMonitor=startRestoreHealthMonitor(restoreGate,{renew});
+// Cloud Run can suspend CPU outside requests. Await the renewal check while a
+// request is active, then independently revalidate before passing it through.
+// Failed renewal does not extend expired/untrusted attestations.
+app.use(async(req,res,next)=>{await restoreMonitor.check();return restoreGate.middleware(req,res,next);});
 // Separate Scheduler identity; token recovery does not delete accounts.
 // This route remains absent unless explicitly enabled after policy review.
 if(process.env.OKCLEAN_WITHDRAWAL_RECOVERY_ENABLED==='true'){

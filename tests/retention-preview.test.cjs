@@ -33,3 +33,22 @@ test('preview service runtime requires three distinct real projects and separate
  const env={NODE_ENV:'production',OKCLEAN_PROJECT_ID:cfg.projectId,GOOGLE_CLOUD_PROJECT:cfg.projectId,OKCLEAN_LEDGER_PROJECT_ID:cfg.ledgerProjectId,OKCLEAN_RETENTION_CONTROL_PROJECT_ID:cfg.controlProjectId,OKCLEAN_RETENTION_PREVIEW_ENABLED:'true',OKCLEAN_RETENTION_POLICY_REVIEWED:'true',OKCLEAN_RETENTION_RESERVATION_DAYS:'30',OKCLEAN_RETENTION_HISTORY_DAYS:'90',OKCLEAN_RETENTION_PREVIEW_AUDIENCE:'https://preview-service-abc.run.app/_internal/retention/preview',OKCLEAN_RETENTION_SCHEDULER_ACCOUNT:'scheduler@production-source.iam.gserviceaccount.com',OKCLEAN_RETENTION_PREVIEW_IDENTITY:'preview-worker@production-source.iam.gserviceaccount.com',OKCLEAN_RETENTION_POLICY_VERSION:'reviewed-v1',OKCLEAN_RESTORE_EPOCH:'synthetic-epoch-123456',OKCLEAN_RESTORE_PUBLIC_KEY:publicKey.export({type:'spki',format:'pem'})};assert.deepEqual(validateRetentionPreviewRuntime(env),[]);
  for(const patch of [{OKCLEAN_RETENTION_POLICY_REVIEWED:'false'},{OKCLEAN_RETENTION_RESERVATION_DAYS:''},{OKCLEAN_RETENTION_CONTROL_PROJECT_ID:cfg.ledgerProjectId},{OKCLEAN_RETENTION_PREVIEW_IDENTITY:env.OKCLEAN_RETENTION_SCHEDULER_ACCOUNT},{OKCLEAN_RETENTION_POLICY_VERSION:'test-v1'},{FIRESTORE_EMULATOR_HOST:'127.0.0.1:8085'},{GOOGLE_CLOUD_PROJECT:'wrong-project'},{OKCLEAN_RESTORE_PUBLIC_KEY:''}])assert.ok(validateRetentionPreviewRuntime({...env,...patch}).length);
 });
+
+test('corrupt preview lease cannot be reclaimed and fails closed',async()=>{
+  for(const expiry of [new Date('invalid'),null,'invalid']){
+    const f=fixture();f.rows.set('retention_preview/control',{owner:'other',expiresAt:expiry,cursor:null,policyVersion:cfg.policyVersion});
+    assert.equal((await f.call()).code,503);
+    assert.equal(f.rows.get('retention_preview/control').owner,'other');
+  }
+});
+test('preview lease corruption during scan stops the worker before inspection',async()=>{
+  let f,called=false;
+  f=fixture({scan:async()=>{const key='retention_preview/control';f.rows.set(key,{...f.rows.get(key),expiresAt:new Date('invalid')});return {ids:['receipt_private'],next:null};},process:async()=>{called=true;return {result:'would_redact'};}});
+  assert.equal((await f.call()).code,503);assert.equal(called,false);
+});
+
+test('preview rejects malformed or ambiguously released lease owner',async()=>{
+  for(const state of [{owner:'',expiresAt:new Date('2030-01-01T00:01:00Z')},{owner:0,expiresAt:new Date('2030-01-01T00:01:00Z')},{expiresAt:new Date('2030-01-01T00:01:00Z')},{owner:null},{owner:null,expiresAt:new Date('2030-01-01T00:01:00Z')}]){
+    const f=fixture();f.rows.set('retention_preview/control',{...state,cursor:null,policyVersion:cfg.policyVersion});assert.equal((await f.call()).code,503);
+  }
+});

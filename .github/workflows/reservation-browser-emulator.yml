@@ -21,6 +21,7 @@ on:
       - 'tests/member-link-client.test.cjs'
       - 'tests/restore-gate*.cjs'
       - 'tests/restore-issuer*.cjs'
+      - 'tests/restore-renewal*.cjs'
       - 'tests/withdrawal-recovery*.cjs'
       - 'tests/server-index-gate.test.cjs'
       - 'tests/app-check*.cjs'
@@ -50,7 +51,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: node --test tests/server-handler.test.cjs tests/verified-reservation-handler.test.cjs tests/pricing.test.cjs tests/reservation-api.test.cjs tests/admin-reservation-config.test.cjs tests/preflight.test.cjs tests/reservation-consent.test.cjs tests/retention.test.cjs tests/customer-reservations.test.cjs tests/account-withdrawal.test.cjs tests/account-withdrawal-processor.test.cjs tests/withdrawal-recovery.test.cjs tests/retention-scheduler.test.cjs tests/retention-preview.test.cjs tests/demo-retention-route.test.cjs tests/deletion-ledger.test.cjs tests/restore-gate.test.cjs tests/restore-issuer.test.cjs tests/member-account-link.test.cjs tests/member-link-client.test.cjs tests/server-index-gate.test.cjs tests/app-check-policy.test.cjs tests/app-check-handler.test.cjs tests/admin-app-check-debug.test.cjs
+      - run: node --test tests/server-handler.test.cjs tests/verified-reservation-handler.test.cjs tests/pricing.test.cjs tests/reservation-api.test.cjs tests/admin-reservation-config.test.cjs tests/preflight.test.cjs tests/reservation-consent.test.cjs tests/retention.test.cjs tests/customer-reservations.test.cjs tests/account-withdrawal.test.cjs tests/account-withdrawal-processor.test.cjs tests/withdrawal-recovery.test.cjs tests/retention-scheduler.test.cjs tests/retention-preview.test.cjs tests/demo-retention-route.test.cjs tests/deletion-ledger.test.cjs tests/restore-gate.test.cjs tests/restore-issuer.test.cjs tests/restore-renewal.test.cjs tests/member-account-link.test.cjs tests/member-link-client.test.cjs tests/server-index-gate.test.cjs tests/app-check-policy.test.cjs tests/app-check-handler.test.cjs tests/admin-app-check-debug.test.cjs
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

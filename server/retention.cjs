@@ -40,6 +40,7 @@ function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new
     if(typeof apply!=='boolean')throw Error('INVALID_MODE');
     if(apply&&previewOnly===true)throw Error('PREVIEW_READ_ONLY');
     if(transactionFence!==null && typeof transactionFence!=='function')throw Error('INVALID_FENCE');
+    if(apply && typeof transactionFence!=='function')throw Error('TRANSACTION_FENCE_REQUIRED');
     if(expectedVersion!==null && (typeof expectedVersion!=='string'||!/^\d+:\d{1,9}$/.test(expectedVersion)))throw Error('INVALID_VERSION');
     if(expectedHistoryVersion!==null && (typeof expectedHistoryVersion!=='string'||!/^[0-9a-f]{64}$/.test(expectedHistoryVersion)))throw Error('INVALID_HISTORY_VERSION');
     if(expectedAction!==null && !['redacted','history_purged'].includes(expectedAction))throw Error('INVALID_ACTION');
@@ -64,6 +65,8 @@ function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new
           if(version(v)!==expectedVersion)return {result:'changed'};
         }
         const value=snap.data();
+        // Do not interfere with an account-level or unrelated processing lock.
+        if(value.dataMutationFrozen===true && value.retentionFreeze!=='retention-v1')return {result:'blocked_dependencies'};
         // Retention cannot proceed until a trusted operator explicitly rules out
         // a legal hold. Missing or malformed flags are not treated as clearance.
         if(value.legalHold !== false)return {result:'blocked_legal_hold'};
@@ -87,9 +90,12 @@ function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new
           if(sorted.some((entry,index)=>index>0&&toMs(entry.at)===terminalAt&&entry.to!==latest.to))return {result:'blocked_dependencies'};
           if(latest.to!==value.status||!Number.isFinite(terminalAt)||terminalAt>at.getTime()-policy.reservationDays*DAY)return {result:'preserved'};
           if(!apply)return {result:'would_redact',version:version(snap.updateTime),historyVersion};
+          // All destructive paths, including restore reapplication and direct
+          // callers, must first freeze the parent against known writers.
+          if(value.dataMutationFrozen!==true||value.retentionFreeze!=='retention-v1')return {result:'freeze_required'};
           // Full replacement removes name, phone, notes, UID, fingerprint and other request fields.
           // Keep a receipt tombstone to prevent reuse and preserve separately retained history.
-          tx.set(ref,{retentionRedacted:true,status:'보유기간만료',terminalAt:new Date(terminalAt),redactedAt:at,legalHold:false});
+          tx.set(ref,{retentionRedacted:true,status:'보유기간만료',terminalAt:new Date(terminalAt),redactedAt:at,legalHold:false,dataMutationFrozen:true,retentionFreeze:'retention-v1'});
           tx.create(db.collection('retention_audit').doc(),{action:'redacted',at});
           return {result:'redacted'};
         }
@@ -97,6 +103,7 @@ function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new
         if(!Number.isFinite(terminalAt)||terminalAt>at.getTime()-policy.historyDays*DAY)return {result:'preserved'};
         if(!history.size)return {result:'already_purged'};
         if(!apply)return {result:'would_purge_history',version:version(snap.updateTime),historyVersion};
+        if(value.dataMutationFrozen!==true||value.retentionFreeze!=='retention-v1')return {result:'freeze_required'};
         for(const doc of history.docs)tx.delete(doc.ref);
         if(history.size)tx.create(db.collection('retention_audit').doc(),{action:'history_purged',at});
         // Keep the irreversible, non-owner tombstone to prevent replay of a deleted ID.
@@ -120,6 +127,47 @@ function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new
     if(!Array.isArray(ids)||ids.length>100)throw Error('INVALID_BATCH');
     const counts={};for(const id of ids){const {result}=await process(id,options);counts[result]=(counts[result]||0)+1;}return counts;
   }
-  return {process,processBatch,scan,schedulerSafety:Object.freeze({projectId,firestoreHost,reservationDays:policy.reservationDays,historyDays:policy.historyDays,previewOnly})};
+  // Freeze known writers *before* inspecting subcollections for deletion. The
+  // admin status writer reads this same parent within its write transaction.
+  // Unknown Admin SDK writers remain outside this contract; never enable this
+  // demo-only operation in production without independently enforced IAM.
+  async function freeze(requestId,{expectedVersion,expectedHistoryVersion,expectedAction,transactionFence}={}){
+    if(previewOnly===true)throw Error('PREVIEW_READ_ONLY');
+    if(typeof requestId!=='string'||!/^[A-Za-z0-9_-]{1,80}$/.test(requestId)||typeof expectedVersion!=='string'||!/^\d+:\d{1,9}$/.test(expectedVersion)||typeof expectedHistoryVersion!=='string'||!/^[a-f0-9]{64}$/.test(expectedHistoryVersion)||!['redacted','history_purged'].includes(expectedAction)||typeof transactionFence!=='function')throw Error('INVALID_FREEZE_REQUEST');
+    if(await authorize()!==true)throw Error('APPLY_NOT_AUTHORIZED');
+    const at=clock();if(!(at instanceof Date)||!Number.isFinite(at.getTime()))throw Error('INVALID_CLOCK');
+    const ref=db.collection('quote_requests').doc(requestId);
+    try{return await db.runTransaction(async tx=>{
+      if(await transactionFence(tx)!==true)return {result:'retry_needed'};
+      const snap=await tx.get(ref);if(!snap.exists)return {result:'absent'};
+      const value=snap.data();
+      if(version(snap.updateTime)!==expectedVersion)return {result:'changed'};
+      if(value.legalHold!==false)return {result:'blocked_legal_hold'};
+      if(value.dataMutationFrozen===true && value.retentionFreeze!=='retention-v1')return {result:'blocked_dependencies'};
+      if(expectedAction!==(value.retentionRedacted?'history_purged':'redacted'))return {result:'changed'};
+      const history=await tx.get(ref.collection('status_history').limit(201));
+      if(history.size>200 || history.docs.some(doc=>!Number.isFinite(toMs(doc.data()?.at))))return {result:'blocked_dependencies'};
+      const versions=history.docs.map(doc=>[doc.id||doc.ref?.id,version(doc.updateTime)]);
+      if(versions.some(([id,v])=>typeof id!=='string'||!v))return {result:'retry_needed'};
+      versions.sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0);
+      if(createHash('sha256').update(JSON.stringify(versions)).digest('hex')!==expectedHistoryVersion)return {result:'changed'};
+      // A caller cannot freeze an active or recently completed reservation by
+      // manufacturing an expected version; recheck policy at the same point.
+      if(expectedAction==='redacted'){
+        if(!TERMINAL.has(value.status)||!history.docs.length)return {result:'preserved'};
+        const sorted=history.docs.map(doc=>doc.data()).sort((a,b)=>toMs(b.at)-toMs(a.at));
+        const latest=sorted[0],terminalAt=toMs(latest.at);
+        if(sorted.some((entry,index)=>index>0&&toMs(entry.at)===terminalAt&&entry.to!==latest.to))return {result:'blocked_dependencies'};
+        if(latest.to!==value.status||!Number.isFinite(terminalAt)||terminalAt>at.getTime()-policy.reservationDays*DAY)return {result:'preserved'};
+      }else{
+        const terminalAt=toMs(value.terminalAt);
+        if(!Number.isFinite(terminalAt)||terminalAt>at.getTime()-policy.historyDays*DAY||!history.size)return {result:'preserved'};
+      }
+      if(value.dataMutationFrozen===true)return {result:'frozen'};
+      tx.update(ref,{dataMutationFrozen:true,retentionFreeze:'retention-v1'});
+      return {result:'frozen'};
+    });}catch{return {result:'retry_needed'};}
+  }
+  return {process,processBatch,scan,freeze,schedulerSafety:Object.freeze({projectId,firestoreHost,reservationDays:policy.reservationDays,historyDays:policy.historyDays,previewOnly})};
 }
 module.exports={createRetentionService};

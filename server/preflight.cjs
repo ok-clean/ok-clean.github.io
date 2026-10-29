@@ -2,6 +2,7 @@
 // Read-only validation only. No network calls, no deploy, never print configuration values.
 const fs=require('node:fs');
 const crypto=require('node:crypto');
+const {parseIssuerOrigin}=require('./restore-renewal.cjs');
 const placeholders=/미정|미확정|확인\s*필요|설정\s*필요|TODO|TBD|PLACEHOLDER|REPLACE_ME/i;
 const projectPattern=/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
 const appPattern=/^1:[0-9]+:web:[a-fA-F0-9]+$/;
@@ -22,6 +23,11 @@ function validateRuntime(env){
   }
   const ledger=env.OKCLEAN_LEDGER_PROJECT_ID;
   need(typeof ledger==='string'&&projectPattern.test(ledger)&&! /^(demo|test|example)-/i.test(ledger)&&ledger!==project,'RESTORE_LEDGER_PROJECT_INVALID');
+  if(env.OKCLEAN_RESTORE_RENEWAL_ENABLED==='true'){
+    const control=env.OKCLEAN_RESTORE_CONTROL_PROJECT_ID;
+    need(typeof control==='string'&&projectPattern.test(control)&&! /^(demo|test|example)-/i.test(control)&&control!==project&&control!==ledger,'RESTORE_CONTROL_PROJECT_INVALID');
+    need(!!parseIssuerOrigin(env.OKCLEAN_RESTORE_ISSUER_ORIGIN),'RESTORE_ISSUER_ORIGIN_INVALID');
+  }
   need(typeof env.OKCLEAN_RESTORE_EPOCH==='string'&&/^[A-Za-z0-9_-]{16,80}$/.test(env.OKCLEAN_RESTORE_EPOCH),'RESTORE_EPOCH_MISSING');
   try{need(typeof env.OKCLEAN_RESTORE_PUBLIC_KEY==='string'&&/^-----BEGIN PUBLIC KEY-----\n/.test(env.OKCLEAN_RESTORE_PUBLIC_KEY)&&crypto.createPublicKey(env.OKCLEAN_RESTORE_PUBLIC_KEY).asymmetricKeyType==='ed25519','RESTORE_PUBLIC_KEY_INVALID');}catch{errors.push('RESTORE_PUBLIC_KEY_INVALID');}
   for(const name of ['FIREBASE_AUTH_EMULATOR_HOST','FIRESTORE_EMULATOR_HOST','FIREBASE_STORAGE_EMULATOR_HOST','FIREBASE_EMULATOR_HUB','FIREBASE_APP_CHECK_DEBUG_TOKEN','FIREBASE_APPCHECK_DEBUG_TOKEN','APP_CHECK_DEBUG_TOKEN','GOOGLE_APPLICATION_CREDENTIALS']){

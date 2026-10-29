@@ -8,7 +8,7 @@ function fixture({conf={},verify=async()=>valid,process,scan,ledgerOverride,cloc
   const rows=new Map(),ledgerRows=new Map();let chain=Promise.resolve(),counter=0;
   const doc=key=>({key});
   const db={projectId:'demo-okclean',collection:name=>({doc:id=>doc(name+'/'+id)}),runTransaction:fn=>{const action=chain.then(()=>fn({get:async ref=>({exists:rows.has(ref.key),data:()=>rows.get(ref.key)}),set:(ref,value)=>rows.set(ref.key,value),create:(ref,value)=>{if(rows.has(ref.key))throw Error('EXISTS');rows.set(ref.key,value)}}));chain=action.catch(()=>{});return action;}};
-  const service={schedulerSafety:{projectId:'demo-okclean',firestoreHost:'127.0.0.1:8085',reservationDays:30,historyDays:90},scan:scan|| (async()=>({ids:['synthetic'],next:null})),process:async(id,options={})=>{if(!options.apply)return {result:'would_redact',version:'100:2',historyVersion:'a'.repeat(64)};if(process)return process(id,options);assert.equal(options.expectedAction,'redacted');assert.equal(await db.runTransaction(options.transactionFence),true);return {result:'redacted'};}};
+  const service={schedulerSafety:{projectId:'demo-okclean',firestoreHost:'127.0.0.1:8085',reservationDays:30,historyDays:90},scan:scan|| (async()=>({ids:['synthetic'],next:null})),freeze:async(id,options)=>{assert.equal(await db.runTransaction(options.transactionFence),true);return {result:'frozen'};},process:async(id,options={})=>{if(!options.apply)return {result:'would_redact',version:'100:2',historyVersion:'a'.repeat(64)};if(process)return process(id,options);assert.equal(options.expectedAction,'redacted');assert.equal(await db.runTransaction(options.transactionFence),true);return {result:'redacted'};}};
   const ledger=ledgerOverride||{safety:{sourceProjectId:'demo-okclean',ledgerProjectId:'demo-independent-ledger'},assertNoPending:async()=>{if([...ledgerRows.values()].includes('pending'))throw Error('PENDING')},recordIntent:async input=>{ledgerRows.set(input.id,'pending');return 'pending';},markCommitted:async input=>{assert.equal(ledgerRows.get(input.id),'pending');ledgerRows.set(input.id,'committed');return 'committed';}};
   const handler=createScheduledRetentionHandler({db,service,ledger,verifyOidc:verify,config:{...config,...conf},clock,newId:()=>`run-${++counter}`});
   async function call(auth='Bearer valid',method='POST'){const res={code:null,data:null,set(){return this},status(code){this.code=code;return this},json(data){this.data=data;return this;}};await handler({method,headers:{authorization:auth}},res);return res;}
@@ -35,3 +35,31 @@ test('failure retains original cursor and next invocation can retry',async()=>{
 });
 test('ledger intent failure blocks source modification',async()=>{let modified=false;const x=fixture({ledgerOverride:{safety:{sourceProjectId:'demo-okclean',ledgerProjectId:'demo-independent-ledger'},assertNoPending:async()=>{},recordIntent:async()=>{throw Error('unavailable')},markCommitted:async()=>{}},process:async()=>{modified=true;return {result:'redacted'}}});assert.equal((await x.call()).code,503);assert.equal(modified,false);});
 test('ledger completion failure remains pending and blocks later retry',async()=>{let pending=false,writes=0;const x=fixture({ledgerOverride:{safety:{sourceProjectId:'demo-okclean',ledgerProjectId:'demo-independent-ledger'},assertNoPending:async()=>{if(pending)throw Error('unresolved')},recordIntent:async()=>{pending=true;return 'pending'},markCommitted:async()=>{throw Error('unavailable')}},process:async()=>{writes++;return {result:'redacted'}}});assert.equal((await x.call()).code,503);assert.equal(pending,true);assert.equal(x.rows.get('retention_scheduler/control').cursor,null);assert.equal((await x.call()).code,503);assert.equal(writes,1);});
+
+test('corrupt lease expiry fails closed; an actually expired lease can be reclaimed',async()=>{
+  for(const expiry of [new Date('invalid'),null,'invalid']){
+    const x=fixture();x.rows.set('retention_scheduler/control',{owner:'stale',expiresAt:expiry,cursor:null,policyVersion:config.policyVersion});
+    assert.equal((await x.call()).code,503);
+    assert.equal(x.rows.get('retention_scheduler/control').owner,'stale');
+    assert.equal(x.ledgerRows.size,0);
+  }
+  const x=fixture();x.rows.set('retention_scheduler/control',{owner:'stale',expiresAt:new Date('2029-12-31T23:00:00Z'),cursor:null,policyVersion:config.policyVersion});
+  assert.equal((await x.call()).code,200);
+});
+test('lease corruption while scanning blocks freeze and deletion',async()=>{
+  let x; x=fixture({scan:async()=>{const key='retention_scheduler/control';x.rows.set(key,{...x.rows.get(key),expiresAt:new Date('invalid')});return {ids:['synthetic'],next:null};}});
+  assert.equal((await x.call()).code,503);assert.equal(x.ledgerRows.size,0);
+});
+test('expired worker cannot write a successful completion',async()=>{
+  let at=new Date('2030-01-01T00:00:00Z');
+  const x=fixture({clock:()=>at,process:async()=>{at=new Date('2030-01-01T00:06:00Z');return {result:'redacted'};}});
+  assert.equal((await x.call()).code,503);
+  assert.equal(x.rows.has('retention_scheduler_runs/run-1'),false);
+});
+
+test('malformed owner with any expiry is not treated as an unlocked lease',async()=>{
+  for(const state of [{owner:'',expiresAt:new Date('2030-01-01T00:01:00Z')},{owner:0,expiresAt:new Date('2030-01-01T00:01:00Z')},{expiresAt:new Date('2030-01-01T00:01:00Z')},{owner:null},{owner:null,expiresAt:new Date('2030-01-01T00:01:00Z')}]){
+    const x=fixture();x.rows.set('retention_scheduler/control',{...state,cursor:null,policyVersion:config.policyVersion});
+    assert.equal((await x.call()).code,503);assert.equal(x.ledgerRows.size,0);
+  }
+});

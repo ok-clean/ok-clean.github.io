@@ -3,9 +3,16 @@
 // It does not itself make retention safe for production or enable a schedule.
 const {randomUUID}=require('node:crypto');
 const {processWithLedger}=require('./deletion-ledger.cjs');
+function leaseOccupied(exists,state,at,ms){
+  if(!exists)return false;
+  if(state.owner===null&&state.expiresAt===null)return false;
+  if(typeof state.owner!=='string'||!/^[A-Za-z0-9_-]{1,80}$/.test(state.owner))throw Error('INVALID_LEASE');
+  const expiry=ms(state.expiresAt);if(!Number.isFinite(expiry)||expiry<=0)throw Error('INVALID_LEASE');
+  return expiry>at.getTime();
+}
 
 function createScheduledRetentionHandler({db,service,ledger,verifyOidc,config,clock=()=>new Date(),newId=randomUUID}){
-  if(!db?.collection||!db?.runTransaction||!service?.scan||!service?.process||!ledger?.recordIntent||!ledger?.markCommitted||!ledger?.assertNoPending||typeof verifyOidc!=='function')throw Error('INVALID_SCHEDULER_DEPENDENCIES');
+  if(!db?.collection||!db?.runTransaction||!service?.scan||!service?.process||!service?.freeze||!ledger?.recordIntent||!ledger?.markCommitted||!ledger?.assertNoPending||typeof verifyOidc!=='function')throw Error('INVALID_SCHEDULER_DEPENDENCIES');
   const cfg=config||{};
   const ready=cfg.enabled===true && cfg.reviewed===true && /^demo-[a-z0-9-]+$/.test(cfg.projectId||'') &&
     process.env.FIRESTORE_EMULATOR_HOST==='127.0.0.1:8085' && process.env.GCLOUD_PROJECT===cfg.projectId && db.projectId===cfg.projectId &&
@@ -22,11 +29,11 @@ function createScheduledRetentionHandler({db,service,ledger,verifyOidc,config,cl
   const runs=db.collection('retention_scheduler_runs');
   const leaseMs=5*60*1000, limit=25;
   const now=()=>{const d=clock();if(!(d instanceof Date)||!Number.isFinite(d.getTime()))throw Error('INVALID_CLOCK');return d;};
-  const ms=x=>x instanceof Date?x.getTime():typeof x?.toDate==='function'?x.toDate().getTime():0;
+  const ms=x=>x instanceof Date?x.getTime():typeof x?.toDate==='function'?x.toDate().getTime():NaN;
   async function acquire(id){
     return db.runTransaction(async tx=>{
       const snap=await tx.get(control), state=snap.exists?snap.data():{},at=now();
-      if(state.owner && ms(state.expiresAt)>at.getTime())return null;
+      if(leaseOccupied(snap.exists,state,at,ms))return null;
       const cursor=state.policyVersion===cfg.policyVersion&&typeof state.cursor==='string'?state.cursor:null;
       tx.set(control,{owner:id,expiresAt:new Date(at.getTime()+leaseMs),cursor,policyVersion:cfg.policyVersion});
       return {cursor};
@@ -34,12 +41,12 @@ function createScheduledRetentionHandler({db,service,ledger,verifyOidc,config,cl
   }
   async function renew(id){return db.runTransaction(async tx=>{
     const snap=await tx.get(control),s=snap.exists?snap.data():{},at=now();
-    if(s.owner!==id||ms(s.expiresAt)<=at.getTime())return false;
+    const expiry=ms(s.expiresAt);if(s.owner!==id||!Number.isFinite(expiry)||expiry<=0||expiry<=at.getTime())return false;
     tx.set(control,{...s,expiresAt:new Date(at.getTime()+leaseMs)});return true;
   });}
   async function finish(id,cursor,counts,outcome){return db.runTransaction(async tx=>{
     const snap=await tx.get(control),s=snap.exists?snap.data():{};
-    if(s.owner!==id)return false;
+    const expiry=ms(s.expiresAt);if(s.owner!==id||!Number.isFinite(expiry)||expiry<=0||expiry<=now().getTime())return false;
     tx.set(control,{owner:null,expiresAt:null,cursor,policyVersion:cfg.policyVersion});
     // No document IDs, user data, tokens, or error objects in run history.
     tx.create(runs.doc(id),{at:now(),outcome,counts,policyVersion:cfg.policyVersion});return true;
@@ -56,11 +63,18 @@ function createScheduledRetentionHandler({db,service,ledger,verifyOidc,config,cl
       for(const requestId of page.ids){
         if(!await renew(id))throw Error('FENCE_LOST');
         await ledger.assertNoPending();
-        const transactionFence=async tx=>{const snap=await tx.get(control),s=snap.exists?snap.data():{};return s.owner===id&&ms(s.expiresAt)>now().getTime();};
-        const plan=await service.process(requestId);
+        const transactionFence=async tx=>{const snap=await tx.get(control),s=snap.exists?snap.data():{},expiry=ms(s.expiresAt);return s.owner===id&&Number.isFinite(expiry)&&expiry>0&&expiry>now().getTime();};
+        let plan=await service.process(requestId);
         const action=plan.result==='would_redact'?'redacted':plan.result==='would_purge_history'?'history_purged':null;
         let result=plan.result;
         if(action){
+          // Freeze the parent atomically against known child writers before a
+          // second dependency scan. If interrupted, retain the freeze; never
+          // assume unknown external writers have been blocked.
+          const frozen=await service.freeze(requestId,{expectedVersion:plan.version,expectedHistoryVersion:plan.historyVersion,expectedAction:action,transactionFence});
+          if(frozen?.result!=='frozen')throw Error('FREEZE_FAILED');
+          plan=await service.process(requestId);
+          if((action==='redacted'&&plan.result!=='would_redact')||(action==='history_purged'&&plan.result!=='would_purge_history'))throw Error('RECONCILIATION_REQUIRED');
           // Independent intent precedes source write; failure to commit its
           // completion is treated as uncertain and leaves this cursor pending.
           const applied=await processWithLedger({ledger,service,id:requestId,action,expectedVersion:plan.version,expectedHistoryVersion:plan.historyVersion,transactionFence});
@@ -112,11 +126,11 @@ function createRetentionPreviewHandler({db,controlDb,service,verifyOidc,config,c
   const control=controlDb.collection('retention_preview').doc('control');
   const runs=controlDb.collection('retention_preview_runs');
   const now=()=>{const d=clock();if(!(d instanceof Date)||!Number.isFinite(d.getTime()))throw Error('INVALID_CLOCK');return d;};
-  const ms=x=>x instanceof Date?x.getTime():typeof x?.toDate==='function'?x.toDate().getTime():0;
+  const ms=x=>x instanceof Date?x.getTime():typeof x?.toDate==='function'?x.toDate().getTime():NaN;
   const leaseMs=300000,limit=25;
-  async function acquire(id){return controlDb.runTransaction(async tx=>{const snap=await tx.get(control),s=snap.exists?snap.data():{},at=now();if(s.owner&&ms(s.expiresAt)>at.getTime())return null;const cursor=s.policyVersion===c.policyVersion&&typeof s.cursor==='string'?s.cursor:null;tx.set(control,{owner:id,expiresAt:new Date(at.getTime()+leaseMs),cursor,policyVersion:c.policyVersion});return {cursor};});}
-  async function renew(id){return controlDb.runTransaction(async tx=>{const snap=await tx.get(control),s=snap.exists?snap.data():{},at=now();if(s.owner!==id||ms(s.expiresAt)<=at.getTime())return false;tx.set(control,{...s,expiresAt:new Date(at.getTime()+leaseMs)});return true;});}
-  async function finish(id,cursor,counts,outcome,failureDigest){return controlDb.runTransaction(async tx=>{const snap=await tx.get(control),s=snap.exists?snap.data():{};if(s.owner!==id)return false;tx.set(control,{owner:null,expiresAt:null,cursor,policyVersion:c.policyVersion});tx.create(runs.doc(id),{at:now(),outcome,counts,policyVersion:c.policyVersion,...(failureDigest?{failureDigest}:{})});return true;});}
+  async function acquire(id){return controlDb.runTransaction(async tx=>{const snap=await tx.get(control),s=snap.exists?snap.data():{},at=now();if(leaseOccupied(snap.exists,s,at,ms))return null;const cursor=s.policyVersion===c.policyVersion&&typeof s.cursor==='string'?s.cursor:null;tx.set(control,{owner:id,expiresAt:new Date(at.getTime()+leaseMs),cursor,policyVersion:c.policyVersion});return {cursor};});}
+  async function renew(id){return controlDb.runTransaction(async tx=>{const snap=await tx.get(control),s=snap.exists?snap.data():{},at=now(),expiry=ms(s.expiresAt);if(s.owner!==id||!Number.isFinite(expiry)||expiry<=0||expiry<=at.getTime())return false;tx.set(control,{...s,expiresAt:new Date(at.getTime()+leaseMs)});return true;});}
+  async function finish(id,cursor,counts,outcome,failureDigest){return controlDb.runTransaction(async tx=>{const snap=await tx.get(control),s=snap.exists?snap.data():{},expiry=ms(s.expiresAt);if(s.owner!==id||!Number.isFinite(expiry)||expiry<=0||expiry<=now().getTime())return false;tx.set(control,{owner:null,expiresAt:null,cursor,policyVersion:c.policyVersion});tx.create(runs.doc(id),{at:now(),outcome,counts,policyVersion:c.policyVersion,...(failureDigest?{failureDigest}:{})});return true;});}
   async function run(){
     const id=newId();if(typeof id!=='string'||!/^[A-Za-z0-9_-]{1,80}$/.test(id))throw Error('INVALID_RUN_ID');
     const lease=await acquire(id);if(!lease)return {status:409,body:{status:'busy'}};
