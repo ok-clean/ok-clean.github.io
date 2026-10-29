@@ -23,6 +23,7 @@ async function main(){
   await ctx.addInitScript(()=>{if(location.origin==='https://ok-clean.github.io')localStorage.setItem('joinLater',JSON.stringify(Date.now()));});
   await ctx.route('**/*',async route=>{
    const u=new URL(route.request().url());
+   if(u.origin===origin && u.pathname==='/reservation-api.js'){const src=fs.readFileSync(path.join(root,'reservation-api.js'),'utf8').replace('export async function login(config,email,password,settings){const {auth}=await setup(config,settings);await signInWithEmailAndPassword(auth,email,password);return !!auth.currentUser?.emailVerified;}',"export async function login(config,email,password,settings){try{const {auth}=await setup(config,settings);await signInWithEmailAndPassword(auth,email,password);return !!auth.currentUser?.emailVerified;}catch(e){globalThis.__testAuthError=e.code||e.message||e.name;throw e;}}");return route.fulfill({status:200,contentType:'text/javascript',body:src});}
    if(u.origin===origin){const file=path.resolve(root,'.'+(u.pathname==='/'?'/index.html':u.pathname));if(!file.startsWith(root+path.sep)||!fs.existsSync(file)||!fs.statSync(file).isFile())return route.fulfill({status:404,body:''});return route.fulfill({status:200,contentType:types[path.extname(file)]||'application/octet-stream',body:fs.readFileSync(file)});}
    if(u.origin===api){const response=await route.fetch({url:'http://127.0.0.1:8799'+u.pathname});return route.fulfill({response});}
    if(u.hostname==='127.0.0.1'&&['9099','8085'].includes(u.port))return route.continue();
@@ -36,7 +37,7 @@ async function main(){
  try{
   const ctx=await context(),page=await ctx.newPage();await page.goto(origin+'/',{waitUntil:'load'});
   await page.locator('#qArea').selectOption('춘천');await page.locator('#qDate').fill(new Date(Date.now()+7*86400000).toISOString().slice(0,10));await page.locator('#qReserve').click();
-  await page.locator('#reserveEmail').fill('container-user@example.test');await page.locator('#reservePassword').fill('synthetic-test-password');await page.locator('#reserveLogin').click();await page.getByText('로그인했습니다.').waitFor();
+  await page.locator('#reserveEmail').fill('container-user@example.test');await page.locator('#reservePassword').fill('synthetic-test-password');await page.locator('#reserveLogin').click();try{await page.getByText('로그인했습니다.').waitFor({timeout:10000});}catch{throw Error('login failed: '+await page.locator('#reserveStatus').innerText()+' / '+await page.evaluate(()=>globalThis.__testAuthError||'no-auth-error'));}
   await page.locator('#reserveName').fill('가상브라우저');await page.locator('#reservePhone').fill('01000000006');await page.locator('#reserveSize').fill('20');await page.locator('#reserveNotes').fill('가상 요청');await page.locator('#reserveConsent').check();
   // Make the real server commit, then deliberately lose the response at browser boundary.
   await ctx.route(api+'/reservation/submit',async route=>{const response=await route.fetch({url:'http://127.0.0.1:8799/reservation/submit'});if(route.request().method()==='OPTIONS')return route.fulfill({response});await route.abort();});
