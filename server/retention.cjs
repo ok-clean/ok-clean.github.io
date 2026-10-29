@@ -1,5 +1,6 @@
 'use strict';
 const {createHash}=require('node:crypto');
+const {permits}=require('./deletion-ledger.cjs');
 // Destructive retention remains emulator-only. The optional production preview
 // is strictly read-only and cannot execute the apply branch.
 const TERMINAL=new Set(['작업완료','종료','취소']);
@@ -13,6 +14,7 @@ function ensureEmulator(projectId,host){
   if(typeof projectId!=='string'||!/^demo-[a-z0-9-]+$/.test(projectId)||host!=='127.0.0.1:8085')throw Error('DEMO_FIRESTORE_EMULATOR_REQUIRED');
 }
 function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new Date(),authorize=async()=>false,previewOnly=false}){
+  let api;
   policyCheck(policy);policy=Object.freeze({reservationDays:policy.reservationDays,historyDays:policy.historyDays});
   if(previewOnly===true){
     const env=require('node:process').env;
@@ -35,7 +37,7 @@ function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new
     for(const doc of history.docs)if((await doc.ref.listCollections()).length)return false;
     return true;
   }
-  async function process(requestId,{apply=false,transactionFence=null,expectedVersion=null,expectedHistoryVersion=null,expectedAction=null}={}){
+  async function process(requestId,{apply=false,transactionFence=null,expectedVersion=null,expectedHistoryVersion=null,expectedAction=null,ledgerPermit=null}={}){
     if(typeof requestId!=='string'||!/^[A-Za-z0-9_-]{1,80}$/.test(requestId))throw Error('INVALID_REQUEST_ID');
     if(typeof apply!=='boolean')throw Error('INVALID_MODE');
     if(apply&&previewOnly===true)throw Error('PREVIEW_READ_ONLY');
@@ -93,6 +95,7 @@ function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new
           // All destructive paths, including restore reapplication and direct
           // callers, must first freeze the parent against known writers.
           if(value.dataMutationFrozen!==true||value.retentionFreeze!=='retention-v1')return {result:'freeze_required'};
+          if(!expectedVersion||!expectedHistoryVersion||!permits(ledgerPermit,{service:api,sourceProjectId:projectId,id:requestId,action:'redacted',expectedVersion,expectedHistoryVersion}))return {result:'ledger_required'};
           // Full replacement removes name, phone, notes, UID, fingerprint and other request fields.
           // Keep a receipt tombstone to prevent reuse and preserve separately retained history.
           tx.set(ref,{retentionRedacted:true,status:'보유기간만료',terminalAt:new Date(terminalAt),redactedAt:at,legalHold:false,dataMutationFrozen:true,retentionFreeze:'retention-v1'});
@@ -104,6 +107,7 @@ function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new
         if(!history.size)return {result:'already_purged'};
         if(!apply)return {result:'would_purge_history',version:version(snap.updateTime),historyVersion};
         if(value.dataMutationFrozen!==true||value.retentionFreeze!=='retention-v1')return {result:'freeze_required'};
+        if(!expectedVersion||!expectedHistoryVersion||!permits(ledgerPermit,{service:api,sourceProjectId:projectId,id:requestId,action:'history_purged',expectedVersion,expectedHistoryVersion}))return {result:'ledger_required'};
         for(const doc of history.docs)tx.delete(doc.ref);
         if(history.size)tx.create(db.collection('retention_audit').doc(),{action:'history_purged',at});
         // Keep the irreversible, non-owner tombstone to prevent replay of a deleted ID.
@@ -168,6 +172,6 @@ function createRetentionService({db,projectId,firestoreHost,policy,clock=()=>new
       return {result:'frozen'};
     });}catch{return {result:'retry_needed'};}
   }
-  return {process,processBatch,scan,freeze,schedulerSafety:Object.freeze({projectId,firestoreHost,reservationDays:policy.reservationDays,historyDays:policy.historyDays,previewOnly})};
+  api=Object.freeze({process,processBatch,scan,freeze,schedulerSafety:Object.freeze({projectId,firestoreHost,reservationDays:policy.reservationDays,historyDays:policy.historyDays,previewOnly})});return api;
 }
 module.exports={createRetentionService};

@@ -15,7 +15,7 @@ function createWithdrawalHandler({db,auth,rateLimit,protectedMemberAdminUid,with
   try{
    if(!await rateLimit(caller.uid,'status'))return response(429,'unavailable');
    // Latest server-side role check defends against stale ID-token custom claims.
-   const account=await auth.getUser(caller.uid);if(privileged(account.customClaims)||account.disabled)return response(403,'unavailable');
+   const account=await auth.getUser(caller.uid);if(account.uid!==caller.uid||privileged(account.customClaims)||account.disabled)return response(403,'unavailable');
    const creationTime=typeof account.metadata?.creationTime==='string'&&account.metadata.creationTime?account.metadata.creationTime:null;
    const ref=db.collection('account_lifecycle').doc(caller.uid);
    const result=await db.runTransaction(async tx=>{
@@ -41,7 +41,7 @@ function createWithdrawalHandler({db,auth,rateLimit,protectedMemberAdminUid,with
    // privileges before revoking refresh tokens; these systems cannot share a
    // transaction, so admin provisioning must also honour the lifecycle gate.
    const latest=await auth.getUser(caller.uid);
-   if(latest.disabled||privileged(latest.customClaims)||latest.metadata?.creationTime!==creationTime){
+   if(latest.uid!==caller.uid||latest.disabled||privileged(latest.customClaims)||latest.metadata?.creationTime!==creationTime){
     // Do not clear a lifecycle gate after privilege changes: another worker
     // might have started. Preserve a non-sensitive marker for manual review.
     await db.runTransaction(async tx=>{const snap=await tx.get(ref);if(snap.exists&&snap.data()?.status==='withdrawal_requested')tx.update(ref,{securityReview:'required'});});
@@ -52,6 +52,14 @@ function createWithdrawalHandler({db,auth,rateLimit,protectedMemberAdminUid,with
    const sameRequest=await db.runTransaction(async tx=>{const snap=await tx.get(ref),v=snap.data();return snap.exists&&v?.status==='withdrawal_requested'&&v?.securityReview!=='required'&&v?.sessionRevocation==='pending'&&v?.sessionRevocationGeneration===generation&&v?.authCreationTime===creationTime;});
    if(!sameRequest)return response(403,'unavailable');
    await auth.revokeRefreshTokens(caller.uid);
+   // A role or identity may change while the external revocation is in flight.
+   // Leave the lifecycle gate closed and require review instead of recording
+   // an unqualified success. This does not replace a provisioning fence.
+   const after=await auth.getUser(caller.uid);
+   if(after.uid!==caller.uid||after.disabled||privileged(after.customClaims)||after.metadata?.creationTime!==creationTime){
+    await db.runTransaction(async tx=>{const snap=await tx.get(ref);if(snap.exists&&snap.data()?.status==='withdrawal_requested')tx.update(ref,{securityReview:'required'});});
+    return response(403,'unavailable');
+   }
    await db.runTransaction(async tx=>{const snap=await tx.get(ref);if(!snap.exists||snap.data()?.status!=='withdrawal_requested'||snap.data()?.securityReview==='required'||snap.data()?.sessionRevocation!=='pending'||snap.data()?.sessionRevocationGeneration!==generation||snap.data()?.authCreationTime!==creationTime)throw Error('LIFECYCLE_CHANGED');tx.update(ref,{sessionRevocation:'revoked',sessionRevokedAt:new Date(now())});});
    return response(200,'pending');
   }catch{return response(503,'unavailable');}
@@ -73,9 +81,9 @@ function createDemoWithdrawalProcessor({db,auth,policy,protectedMemberAdminUid,n
   if(typeof uid!=='string'||!uid||uid.length>128||uid.includes('/')||uid===protectedMemberAdminUid)return {result:'blocked'};
   const ref=db.collection('account_lifecycle').doc(uid), token=randomId(), start=now();
   if(!Number.isFinite(start))return {result:'retry_needed'};
-  let claim,expectedAuthCreationTime;
+  let claim,expectedAuthCreationTime,previousAuthState;
   try{
-   claim=await db.runTransaction(async tx=>{const snap=await tx.get(ref), v=snap.data();if(!snap.exists||v?.status!=='withdrawal_requested')return 'blocked';if(v.securityReview==='required')return 'security_review_required';if(v.demoAuthState==='absent')return 'verify_absent';if(v.sessionRevocation!=='revoked')return 'session_revocation_pending';if(typeof v.authCreationTime!=='string'||!v.authCreationTime){tx.update(ref,{securityReview:'required'});return 'security_review_required';}expectedAuthCreationTime=v.authCreationTime;const hasToken=Object.prototype.hasOwnProperty.call(v,'demoLeaseToken'),hasExpiry=Object.prototype.hasOwnProperty.call(v,'demoLeaseExpiresAt');if(hasToken!==hasExpiry)return 'retry_needed';if(hasToken){const expiry=v.demoLeaseExpiresAt,expiryMs=expiry==null?NaN:new Date(expiry?.toDate?expiry.toDate():expiry).getTime();if(typeof v.demoLeaseToken!=='string'||!Number.isFinite(expiryMs))return 'retry_needed';if(expiryMs>start)return v.demoLeaseToken?'busy':'retry_needed';}tx.update(ref,{demoLeaseToken:token,demoLeaseExpiresAt:new Date(start+60000)});return 'claimed';});
+   claim=await db.runTransaction(async tx=>{const snap=await tx.get(ref), v=snap.data();if(!snap.exists||v?.status!=='withdrawal_requested')return 'blocked';if(v.securityReview==='required')return 'security_review_required';if(v.demoAuthState==='absent')return 'verify_absent';if(v.sessionRevocation!=='revoked')return 'session_revocation_pending';if(typeof v.authCreationTime!=='string'||!v.authCreationTime){tx.update(ref,{securityReview:'required'});return 'security_review_required';}expectedAuthCreationTime=v.authCreationTime;previousAuthState=v.demoAuthState;const hasToken=Object.prototype.hasOwnProperty.call(v,'demoLeaseToken'),hasExpiry=Object.prototype.hasOwnProperty.call(v,'demoLeaseExpiresAt');if(hasToken!==hasExpiry)return 'retry_needed';if(hasToken){const expiry=v.demoLeaseExpiresAt,expiryMs=expiry==null?NaN:new Date(expiry?.toDate?expiry.toDate():expiry).getTime();if(typeof v.demoLeaseToken!=='string'||!Number.isFinite(expiryMs))return 'retry_needed';if(expiryMs>start)return v.demoLeaseToken?'busy':'retry_needed';}tx.update(ref,{demoLeaseToken:token,demoLeaseExpiresAt:new Date(start+60000)});return 'claimed';});
    if(claim==='verify_absent'){try{await auth.getUser(uid);return {result:'uid_reused_blocked'};}catch(e){return {result:e?.code==='auth/user-not-found'?'absent':'retry_needed'};}}
    if(claim!=='claimed')return {result:claim};
    // Check for reservations and freeze related writes in one transaction.
@@ -97,8 +105,14 @@ function createDemoWithdrawalProcessor({db,auth,policy,protectedMemberAdminUid,n
    if(freeze!=='frozen')return {result:freeze};
    let account;
    try{account=await auth.getUser(uid);}catch(e){if(e?.code!=='auth/user-not-found')throw e;}
+   // Absence before any recorded delete attempt is not evidence that this
+   // worker performed the deletion: hold the request for investigation.
+   if(!account&&previousAuthState!=='delete_pending'){
+    await db.runTransaction(async tx=>{const snap=await tx.get(ref);if(snap.exists&&snap.data()?.demoLeaseToken===token)tx.update(ref,{securityReview:'required'});});
+    return {result:'security_review_required'};
+   }
    if(account && (account.disabled || privileged(account.customClaims)))return {result:'blocked'};
-   if(account && account.metadata?.creationTime!==expectedAuthCreationTime){
+   if(account && (account.uid!==uid||account.metadata?.creationTime!==expectedAuthCreationTime)){
     await db.runTransaction(async tx=>{const snap=await tx.get(ref);if(snap.exists&&snap.data()?.demoLeaseToken===token)tx.update(ref,{securityReview:'required'});});
     return {result:'security_review_required'};
    }
@@ -109,7 +123,7 @@ function createDemoWithdrawalProcessor({db,auth,policy,protectedMemberAdminUid,n
     if(fresh.disabled||privileged(fresh.customClaims))return {result:'blocked'};
     // Detect a known UID being deleted and recreated between checks. The Auth
     // API has no conditional delete, leaving a final unavoidable race.
-    if(!account.metadata?.creationTime||account.metadata.creationTime!==fresh.metadata?.creationTime)return {result:'retry_needed'};
+    if(fresh.uid!==uid||!account.metadata?.creationTime||account.metadata.creationTime!==fresh.metadata?.creationTime)return {result:'retry_needed'};
    }
    // Persist the attempt *before* the external call. A process crash or an
    // ambiguous error must not be mistaken for a completed withdrawal. On retry
@@ -122,6 +136,9 @@ function createDemoWithdrawalProcessor({db,auth,policy,protectedMemberAdminUid,n
    });
    if(!ownsLease)return {result:'retry_needed'};
    if(account){try{await auth.deleteUser(uid);}catch(e){if(e?.code!=='auth/user-not-found')throw e;}}
+   // A successful-looking response is insufficient if the UID still exists or
+   // has been recreated. Never mark it absent based solely on deleteUser().
+   try{const current=await auth.getUser(uid);if(current.uid!==uid||current.metadata?.creationTime!==expectedAuthCreationTime){await db.runTransaction(async tx=>{const snap=await tx.get(ref);if(snap.exists&&snap.data()?.demoLeaseToken===token)tx.update(ref,{securityReview:'required'});});return {result:'security_review_required'};}return {result:'retry_needed'};}catch(e){if(e?.code!=='auth/user-not-found')throw e;}
    const finalized=await db.runTransaction(async tx=>{const snap=await tx.get(ref),v=snap.data(),expiry=v?.demoLeaseExpiresAt;if(!snap.exists||v?.demoLeaseToken!==token||v?.status!=='withdrawal_requested'||v?.securityReview==='required'||v?.sessionRevocation!=='revoked'||v?.authCreationTime!==expectedAuthCreationTime||!liveLease(expiry,now()))return false;tx.update(ref,{demoAuthState:'absent',demoAuthCheckedAt:new Date(now())});return true;});
    return {result:finalized?'auth_absent_pending_other_data':'retry_needed'};
   }catch{return {result:'retry_needed'};}

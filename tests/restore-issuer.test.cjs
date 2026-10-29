@@ -47,3 +47,21 @@ test('automatic recovery requires a fresh independent signed proof and a real ga
  s.setPending(true);assert.equal(await gate.verify(),false);await monitor.check();assert.equal(await gate.verify(),false);
  monitor.stop();
 });
+
+test('read-only restore audit checks ledger order and redacted document shape without granting a proof',async()=>{
+ const {auditRestoredDeletionState}=require('../server/restore-issuer.cjs'),s=setup();
+ let parent={retentionRedacted:true,status:'보유기간만료',terminalAt:new Date(0),redactedAt:new Date(0),legalHold:false,dataMutationFrozen:true,retentionFreeze:'retention-v1'},cols=[],history=[],changed=false,reads=0;
+ const ref={get:async()=>({exists:true,data:()=>parent,updateTime:{isEqual:()=>!changed||++reads<2}}),listCollections:async()=>cols,collection:()=>({limit:()=>({get:async()=>({size:history.length,docs:history})})})};
+ const args={ledgerDb:s.config.ledgerDb,restoredDb:{projectId:src,collection:()=>({doc:()=>ref})},sourceProject:src,ledgerProject:lp,checkpoint:s.proof.checkpoint,ledgerRevision:5,recordCount:1};
+ assert.deepEqual(await auditRestoredDeletionState(args),{checkpoint:s.proof.checkpoint,ledgerRevision:5,recordCount:1});
+ parent={...parent,phone:'synthetic'};await assert.rejects(auditRestoredDeletionState(args),/RESTORE_REAPPLICATION_REQUIRED/);delete parent.phone;
+ cols=[{id:'unknown'}];await assert.rejects(auditRestoredDeletionState(args),/RESTORE_UNKNOWN_DEPENDENCIES/);cols=[];
+ await assert.rejects(auditRestoredDeletionState({...args,checkpoint:'0'.repeat(64)}),/RESTORE_CHECKPOINT_MISMATCH/);
+ history=[{ref:{listCollections:async()=>[]}}];await assert.rejects(auditRestoredDeletionState(args),/RESTORE_HISTORY_BASELINE_REQUIRED/);history=[];
+ s.rec.action='history_purged';args.checkpoint=crypto.createHash('sha256').update(recordBytes(s.rec)).digest('hex');history=[{ref:{listCollections:async()=>[]}}];
+ await assert.rejects(auditRestoredDeletionState(args),/RESTORE_HISTORY_BASELINE_REQUIRED/);history=[];
+ assert.equal((await auditRestoredDeletionState(args)).recordCount,1);
+ s.setPending(true);await assert.rejects(auditRestoredDeletionState(args),/RESTORE_LEDGER_UNSTABLE/);s.setPending(false);
+ changed=true;reads=1;await assert.rejects(auditRestoredDeletionState(args),/RESTORE_DATA_CHANGED/);
+ assert.equal(s.getGate(),null); // This audit cannot issue or release a restore.
+});

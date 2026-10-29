@@ -2,14 +2,17 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');
 process.env.FIRESTORE_EMULATOR_HOST='127.0.0.1:8085';process.env.GCLOUD_PROJECT='demo-okclean';
 const {createScheduledRetentionHandler}=require('../server/retention-scheduler.cjs');
+const {createDeletionLedger}=require('../server/deletion-ledger.cjs');
 const config={enabled:true,reviewed:true,projectId:'demo-okclean',ledgerProjectId:'demo-independent-ledger',audience:'https://service.example.test/internal/retention',serviceAccount:'scheduler@demo-ok.iam.gserviceaccount.com',policyVersion:'reviewed-v1',reservationDays:30,historyDays:90};
 const valid={aud:config.audience,iss:'https://accounts.google.com',email:config.serviceAccount,email_verified:true};
-function fixture({conf={},verify=async()=>valid,process,scan,ledgerOverride,clock=()=>new Date('2030-01-01T00:00:00Z')}={}){
+function fixture({conf={},verify=async()=>valid,process,scan,ledgerFailure,clock=()=>new Date('2030-01-01T00:00:00Z')}={}){
   const rows=new Map(),ledgerRows=new Map();let chain=Promise.resolve(),counter=0;
   const doc=key=>({key});
   const db={projectId:'demo-okclean',collection:name=>({doc:id=>doc(name+'/'+id)}),runTransaction:fn=>{const action=chain.then(()=>fn({get:async ref=>({exists:rows.has(ref.key),data:()=>rows.get(ref.key)}),set:(ref,value)=>rows.set(ref.key,value),create:(ref,value)=>{if(rows.has(ref.key))throw Error('EXISTS');rows.set(ref.key,value)}}));chain=action.catch(()=>{});return action;}};
   const service={schedulerSafety:{projectId:'demo-okclean',firestoreHost:'127.0.0.1:8085',reservationDays:30,historyDays:90},scan:scan|| (async()=>({ids:['synthetic'],next:null})),freeze:async(id,options)=>{assert.equal(await db.runTransaction(options.transactionFence),true);return {result:'frozen'};},process:async(id,options={})=>{if(!options.apply)return {result:'would_redact',version:'100:2',historyVersion:'a'.repeat(64)};if(process)return process(id,options);assert.equal(options.expectedAction,'redacted');assert.equal(await db.runTransaction(options.transactionFence),true);return {result:'redacted'};}};
-  const ledger=ledgerOverride||{safety:{sourceProjectId:'demo-okclean',ledgerProjectId:'demo-independent-ledger'},assertNoPending:async()=>{if([...ledgerRows.values()].includes('pending'))throw Error('PENDING')},recordIntent:async input=>{ledgerRows.set(input.id,'pending');return 'pending';},markCommitted:async input=>{assert.equal(ledgerRows.get(input.id),'pending');ledgerRows.set(input.id,'committed');return 'committed';}};
+  const stored=new Map();let ledgerChain=Promise.resolve();
+  const ledgerDb={projectId:'demo-independent-ledger',collection:name=>({doc:id=>doc(name+'/'+id),where:()=>({limit:()=>({get:async()=>({empty:![...ledgerRows.values()].includes('pending')})})})}),runTransaction:fn=>{const action=ledgerChain.then(()=>fn({get:async ref=>({exists:stored.has(ref.key),data:()=>stored.get(ref.key)}),set:(ref,value)=>stored.set(ref.key,value),create:(ref,value)=>{if(ledgerFailure==='intent')throw Error('unavailable');if(stored.has(ref.key))throw Error('EXISTS');stored.set(ref.key,value);ledgerRows.set(value.id,value.state);},update:(ref,value)=>{if(ledgerFailure==='commit')throw Error('unavailable');const row={...stored.get(ref.key),...value};stored.set(ref.key,row);ledgerRows.set(row.id,row.state);}}));ledgerChain=action.catch(()=>{});return action;}};
+  const ledger=createDeletionLedger({ledgerDb,primaryProjectId:config.projectId,ledgerProjectId:config.ledgerProjectId,clock});
   const handler=createScheduledRetentionHandler({db,service,ledger,verifyOidc:verify,config:{...config,...conf},clock,newId:()=>`run-${++counter}`});
   async function call(auth='Bearer valid',method='POST'){const res={code:null,data:null,set(){return this},status(code){this.code=code;return this},json(data){this.data=data;return this;}};await handler({method,headers:{authorization:auth}},res);return res;}
   return {call,rows,ledgerRows};
@@ -28,13 +31,13 @@ test('uses fenced transactions, count-only audit and a durable pagination cursor
 });
 test('concurrent invocations return busy and do not start a second page',async()=>{
   let release,entered;const started=new Promise(r=>entered=r),wait=new Promise(r=>release=r);let calls=0;
-  const x=fixture({process:async()=>{calls++;entered();await wait;return {result:'redacted'}}});const first=x.call();await started;assert.equal((await x.call()).code,409);release();assert.equal((await first).code,200);assert.equal(calls,1);
+  const x=fixture({process:async()=>{calls++;entered();await wait;return {result:'redacted'}}});const first=x.call();await Promise.race([started,first.then(()=>{throw Error('worker did not reach processing')})]);assert.equal((await x.call()).code,409);release();assert.equal((await first).code,200);assert.equal(calls,1);
 });
 test('failure retains original cursor and next invocation can retry',async()=>{
   let calls=0;const x=fixture({scan:async()=>{if(++calls===1)throw Error('transient scan failure');return {ids:['synthetic'],next:null}}});assert.equal((await x.call()).code,503);assert.equal(x.rows.get('retention_scheduler/control').cursor,null);assert.equal((await x.call()).code,200);assert.equal(calls,2);assert.equal(x.rows.get('retention_scheduler_runs/run-1').outcome,'retry_needed');
 });
-test('ledger intent failure blocks source modification',async()=>{let modified=false;const x=fixture({ledgerOverride:{safety:{sourceProjectId:'demo-okclean',ledgerProjectId:'demo-independent-ledger'},assertNoPending:async()=>{},recordIntent:async()=>{throw Error('unavailable')},markCommitted:async()=>{}},process:async()=>{modified=true;return {result:'redacted'}}});assert.equal((await x.call()).code,503);assert.equal(modified,false);});
-test('ledger completion failure remains pending and blocks later retry',async()=>{let pending=false,writes=0;const x=fixture({ledgerOverride:{safety:{sourceProjectId:'demo-okclean',ledgerProjectId:'demo-independent-ledger'},assertNoPending:async()=>{if(pending)throw Error('unresolved')},recordIntent:async()=>{pending=true;return 'pending'},markCommitted:async()=>{throw Error('unavailable')}},process:async()=>{writes++;return {result:'redacted'}}});assert.equal((await x.call()).code,503);assert.equal(pending,true);assert.equal(x.rows.get('retention_scheduler/control').cursor,null);assert.equal((await x.call()).code,503);assert.equal(writes,1);});
+test('ledger intent failure blocks source modification',async()=>{let modified=false;const x=fixture({ledgerFailure:'intent',process:async()=>{modified=true;return {result:'redacted'}}});assert.equal((await x.call()).code,503);assert.equal(modified,false);});
+test('ledger completion failure remains pending and blocks later retry',async()=>{let writes=0;const x=fixture({ledgerFailure:'commit',process:async()=>{writes++;return {result:'redacted'}}});assert.equal((await x.call()).code,503);assert.equal(x.ledgerRows.get('synthetic'),'pending');assert.equal(x.rows.get('retention_scheduler/control').cursor,null);assert.equal((await x.call()).code,503);assert.equal(writes,1);});
 
 test('corrupt lease expiry fails closed; an actually expired lease can be reclaimed',async()=>{
   for(const expiry of [new Date('invalid'),null,'invalid']){

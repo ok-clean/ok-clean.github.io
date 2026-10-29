@@ -1,12 +1,15 @@
 'use strict';
 process.env.FIRESTORE_EMULATOR_HOST='127.0.0.1:8085';process.env.GCLOUD_PROJECT='demo-okclean';
 const {test}=require('node:test');const assert=require('node:assert/strict');const {createRetentionService}=require('../server/retention.cjs');
+const {createDeletionLedger,processWithLedger}=require('../server/deletion-ledger.cjs');
+// Separate in-memory ledger for unit tests; real emulator exercises persistence.
+function unitLedger(){const stores=new Map();const ledgerDb={projectId:'demo-ledger',collection(name){if(!stores.has(name))stores.set(name,new Map());const map=stores.get(name);return {doc:id=>({id,map})};},async runTransaction(fn){const writes=[];const tx={async get(ref){const value=ref.map.get(ref.id);return {exists:value!==undefined,data:()=>value};},create(ref,value){writes.push(()=>ref.map.set(ref.id,value));},set(ref,value){writes.push(()=>ref.map.set(ref.id,value));},update(ref,value){writes.push(()=>ref.map.set(ref.id,{...ref.map.get(ref.id),...value}));}};const result=await fn(tx);writes.forEach(fn=>fn());return result;}};return createDeletionLedger({ledgerDb,primaryProjectId:'demo-okclean',ledgerProjectId:'demo-ledger'});}
 function fixture({mode='valid',status='종료',terminalDate='2030-01-01T00:00:00Z',clock='2030-03-01T00:00:00Z',preFrozen=true}={}){
  const audits=[];const docs=new Map([['x',{status,legalHold:false,name:'가상고객',phone:'01000000000',ownerUid:'synthetic',notes:'synthetic',...(preFrozen?{dataMutationFrozen:true,retentionFreeze:'retention-v1'}:{})}]]),histories=new Map([['x',[{id:'h1',to:status,at:new Date(terminalDate),actorUid:'synthetic-admin'}]]]);let beforeTx=null,fail=false,unknown=false,version={seconds:100,nanoseconds:2};
  const mkRef=id=>({id,get:async()=>({exists:docs.has(id),updateTime:{...version},data:()=>docs.get(id)}),listCollections:async()=>unknown?[{id:'offers'}]:[{id:'status_history'}],collection:()=>({id:'status_history',_id:id,orderBy(){return this},limit(){return this},get:async()=>({size:(histories.get(id)||[]).length,docs:(histories.get(id)||[]).map(h=>({id:h.id,updateTime:h.updateTime||{seconds:200,nanoseconds:1},ref:{id:h.id,parentId:id,listCollections:async()=>[]},data:()=>h}))})})});
  const db={projectId:'demo-okclean',collection:name=>({doc:name==='retention_audit'?()=>({audit:true}):mkRef}),runTransaction:async fn=>{if(fail)throw Error('synthetic failure');if(beforeTx){beforeTx();beforeTx=null;}return fn({get:async target=>target._id?target.get():target.get(),set:(ref,v)=>docs.set(ref.id,v),update:(ref,v)=>docs.set(ref.id,{...docs.get(ref.id),...v}),create:(ref,v)=>{assert.equal(ref.audit,true);audits.push(v);},delete:ref=>histories.set(ref.parentId,(histories.get(ref.parentId)||[]).filter(h=>h.id!==ref.id))});}};
  const options={db,projectId:'demo-okclean',firestoreHost:'127.0.0.1:8085',policy:{reservationDays:30,historyDays:90},clock:()=>new Date(clock),authorize:async()=>true};
- return {docs,histories,audits,options,make:()=>{const svc=createRetentionService(options);const guarded=o=>o?.apply&&o.transactionFence===undefined?{...o,transactionFence:async()=>true}:o;return {...svc,process:(id,o)=>svc.process(id,guarded(o)),processBatch:(ids,o)=>svc.processBatch(ids,guarded(o))};},setBeforeTx:fn=>{beforeTx=fn;},setVersion:v=>{version=v;},setFail:v=>{fail=v;},setUnknown:v=>{unknown=v;}};
+ return {docs,histories,audits,options,make:()=>{const svc=createRetentionService(options);const guarded=o=>o?.apply&&o.transactionFence===undefined?{...o,transactionFence:async()=>true}:o;return {...svc,async process(id,o){const opts=guarded(o),result=await svc.process(id,opts);if(result.result!=='ledger_required')return result;const plan=await svc.process(id);const action=plan.result==='would_redact'?'redacted':'history_purged';return processWithLedger({ledger:unitLedger(),service:svc,id,action,expectedVersion:opts.expectedVersion||plan.version,expectedHistoryVersion:opts.expectedHistoryVersion||plan.historyVersion,transactionFence:opts.transactionFence});},processBatch:(ids,o)=>svc.processBatch(ids,guarded(o))};},setBeforeTx:fn=>{beforeTx=fn;},setVersion:v=>{version=v;},setFail:v=>{fail=v;},setUnknown:v=>{unknown=v;}};
 }
 test('policy absent, real project, and real host always fail closed',()=>{const x=fixture();for(const changed of [{policy:null},{projectId:'production-project'},{firestoreHost:'other:8085'},{db:{...x.options.db,projectId:'actual-production'}}])assert.throws(()=>createRetentionService({...x.options,...changed}));});
 test('dry run never writes; unfinished and recent records are kept',async()=>{const x=fixture();assert.equal((await x.make().process('x')).result,'would_redact');assert.equal(x.docs.get('x').name,'가상고객');const recent=fixture({terminalDate:'2030-02-25T00:00:00Z'});assert.equal((await recent.make().process('x',{apply:true})).result,'preserved');const active=fixture({status:'상담중'});assert.equal((await active.make().process('x',{apply:true})).result,'preserved');});
@@ -81,4 +84,25 @@ test('all destructive calls require a transaction fence',async()=>{
   const x=fixture(),api=createRetentionService(x.options);
   await assert.rejects(api.process('x',{apply:true}),/TRANSACTION_FENCE_REQUIRED/);
   assert.equal(x.docs.get('x').name,'가상고객');assert.equal(x.audits.length,0);
+});
+test('direct apply and batch cannot bypass the independent ledger',async()=>{
+  const x=fixture(),api=createRetentionService(x.options),plan=await api.process('x');
+  const opts={apply:true,expectedVersion:plan.version,expectedHistoryVersion:plan.historyVersion,expectedAction:'redacted',transactionFence:async()=>true};
+  assert.equal((await api.process('x',opts)).result,'ledger_required');
+  assert.deepEqual(await api.processBatch(['x'],opts),{ledger_required:1});
+  assert.equal(x.docs.get('x').name,'가상고객');assert.equal(x.audits.length,0);
+  assert.equal((await api.process('x',{...opts,ledgerPermit:{}})).result,'ledger_required');
+  await assert.rejects(processWithLedger({ledger:{recordIntent:async()=> 'pending',markCommitted:async()=>{}},service:api,id:'x',action:'redacted',expectedVersion:plan.version,expectedHistoryVersion:plan.historyVersion,transactionFence:opts.transactionFence}),/INCOMPLETE_DELETION_GUARD/);
+});
+test('a failed intent or a stale permit cannot authorize destruction',async()=>{
+  const x=fixture(),api=createRetentionService(x.options),plan=await api.process('x'),transactionFence=async()=>true;
+  const input={id:'x',action:'redacted',expectedVersion:plan.version,expectedHistoryVersion:plan.historyVersion,transactionFence};
+  const brokenDb={projectId:'demo-broken-ledger',collection:()=>({doc:()=>({})}),runTransaction:async()=>{throw Error('synthetic ledger outage');}};
+  const broken=createDeletionLedger({ledgerDb:brokenDb,primaryProjectId:'demo-okclean',ledgerProjectId:'demo-broken-ledger'});
+  await assert.rejects(processWithLedger({ledger:broken,service:api,...input}),/synthetic ledger outage/);
+  assert.equal(x.docs.get('x').name,'가상고객');assert.equal(x.audits.length,0);
+  let stale;const capture={schedulerSafety:api.schedulerSafety,async process(id,opts){stale=opts;return {result:'retry_needed'};}};
+  await processWithLedger({ledger:unitLedger(),service:capture,...input});
+  assert.equal((await api.process('x',stale)).result,'ledger_required');
+  assert.equal(x.docs.get('x').name,'가상고객');
 });

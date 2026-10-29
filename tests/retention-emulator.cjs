@@ -3,12 +3,14 @@
 const assert=require('node:assert/strict'),admin=require('firebase-admin');
 const {createRetentionService}=require('../server/retention.cjs');
 const {createScheduledRetentionHandler}=require('../server/retention-scheduler.cjs');
-const {createDeletionLedger}=require('../server/deletion-ledger.cjs');
+const {createDeletionLedger,processWithLedger}=require('../server/deletion-ledger.cjs');
 const project='demo-okclean-integration',host='127.0.0.1:8085';
 if(process.env.FIRESTORE_EMULATOR_HOST!==host||process.env.FIREBASE_AUTH_EMULATOR_HOST!=='127.0.0.1:9099'||process.env.GCLOUD_PROJECT!==project)throw Error('DEMO_EMULATOR_REQUIRED');
 async function main(){
  const app=admin.initializeApp({projectId:project},'retention-test'),db=admin.firestore(app),ref=db.collection('quote_requests').doc('synthetic-retention');
  const ledgerProject='demo-okclean-independent-ledger',ledgerApp=admin.initializeApp({projectId:ledgerProject},'retention-ledger-test'),ledgerDb=admin.firestore(ledgerApp);
+ const workLedgerProject='demo-okclean-retention-ledger',workLedgerApp=admin.initializeApp({projectId:workLedgerProject},'retention-work-ledger-test');
+ const workLedger=createDeletionLedger({ledgerDb:admin.firestore(workLedgerApp),primaryProjectId:project,ledgerProjectId:workLedgerProject});
  try{
   await ref.create({status:'종료',legalHold:false,name:'가상고객',phone:'01000000000',ownerUid:'synthetic',notes:'synthetic'});
   await ref.collection('status_history').doc('event').create({from:'상담중',to:'종료',at:new Date('2030-01-01T00:00:00Z'),actorUid:'synthetic-admin'});
@@ -27,20 +29,22 @@ async function main(){
   const page=await service.scan({limit:1});assert.deepEqual(page.ids,['synthetic-retention']);
   assert.equal((await service.process(ref.id,{apply:true,transactionFence:fence})).result,'freeze_required');
   await freezeCandidate(service,ref.id);
-  const raced=await Promise.all([service.process(ref.id,{apply:true,transactionFence:fence}),service.process(ref.id,{apply:true,transactionFence:fence})]);
-  assert.equal(raced.filter(x=>x.result==='redacted').length,1);assert.equal(raced.filter(x=>['preserved','changed'].includes(x.result)).length,1);const row=(await ref.get()).data();assert.equal(row.retentionRedacted,true);assert.equal(row.name,undefined);assert.equal(row.phone,undefined);assert.equal(row.ownerUid,undefined);
+  const frozen=await service.process(ref.id);const journaled={ledger:workLedger,service,id:ref.id,action:'redacted',expectedVersion:frozen.version,expectedHistoryVersion:frozen.historyVersion,transactionFence:fence};
+  const raced=await Promise.allSettled([processWithLedger(journaled),processWithLedger(journaled)]);
+  assert.equal(raced.filter(x=>x.status==='fulfilled'&&x.value.result==='redacted').length,1);
+  assert.equal(raced.filter(x=>x.status==='fulfilled'?['preserved','changed'].includes(x.value.result):/LEDGER_ALREADY_COMMITTED/.test(x.reason.message)).length,1);const row=(await ref.get()).data();assert.equal(row.retentionRedacted,true);assert.equal(row.name,undefined);assert.equal(row.phone,undefined);assert.equal(row.ownerUid,undefined);
   assert.equal((await ref.collection('status_history').get()).size,1);
   const later=createRetentionService({...opts,clock:()=>new Date('2030-05-01T00:00:00Z')});
-  assert.equal((await later.process(ref.id,{apply:true,transactionFence:fence})).result,'history_purged');assert.equal((await ref.collection('status_history').get()).size,0);assert.equal((await later.process(ref.id,{apply:true,transactionFence:fence})).result,'already_purged');
+  const hplan=await later.process(ref.id);assert.equal((await processWithLedger({ledger:workLedger,service:later,id:ref.id,action:'history_purged',expectedVersion:hplan.version,expectedHistoryVersion:hplan.historyVersion,transactionFence:fence})).result,'history_purged');assert.equal((await ref.collection('status_history').get()).size,0);assert.equal((await later.process(ref.id,{apply:true,transactionFence:fence})).result,'already_purged');
   // Restore an old synthetic parent and child within this isolated emulator, then
   // reapply the existing retention operation using only in-memory test IDs.
   // This does not test an independently retained ledger or enforce network isolation.
   await ref.set(beforeDelete);await ref.collection('status_history').doc('event').set(beforeDeleteHistory);
   assert.equal((await ref.get()).data().name,'가상고객');
   await freezeCandidate(later,ref.id);
-  const reapplied=await later.processBatch(recoveryIds,{apply:true,transactionFence:fence});assert.equal(reapplied.redacted,1);
+  const reapply=await workLedger.replay({service:later,isRestoreFenced:async()=>true,verifyLedgerSnapshot:async()=>true,reapply:async({id,action,ledgerPermit})=>{const plan=await later.process(id);return (await later.process(id,{apply:true,expectedAction:action,expectedVersion:plan.version,expectedHistoryVersion:plan.historyVersion,transactionFence:fence,ledgerPermit})).result===action;}});
+  assert.equal(reapply.processed,2);
   assert.equal((await ref.get()).data().name,undefined);assert.equal((await ref.get()).data().ownerUid,undefined);
-  const repurged=await later.processBatch(recoveryIds,{apply:true,transactionFence:fence});assert.equal(repurged.history_purged,1);
   assert.equal((await ref.collection('status_history').get()).size,0);
   assert.equal((await later.processBatch(recoveryIds,{apply:true,transactionFence:fence})).already_purged,1);
   const audit=await db.collection('retention_audit').get();assert.equal(audit.size,4);for(const d of audit.docs)assert.deepEqual(Object.keys(d.data()).sort(),['action','at']);
@@ -65,6 +69,6 @@ async function main(){
   const journal=await ledgerDb.collection('deletion_ledger').get();assert.equal(journal.size,1);assert.equal(journal.docs[0].data().state,'committed');
   assert.equal((await db.collection('retention_scheduler_runs').get()).size,2);
   console.log('PASS: retention and manual synthetic snapshot restore/reapply; independent ledger and isolation untested');
- }finally{await ledgerApp.delete();await app.delete();}
+ }finally{await workLedgerApp.delete();await ledgerApp.delete();await app.delete();}
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

@@ -3,6 +3,16 @@
 // deployed IAM boundary and the network isolation of a restored database must
 // be configured independently; application code cannot enforce either one.
 const {createHash}=require('node:crypto');
+// Permits are process-local capabilities, never serialised or accepted from a
+// request. Only a successful durable intent or guarded replay can mint one.
+// TRUST BOUNDARY: constructors, database adapters, restore callbacks and fences
+// must be supplied by trusted server configuration, never by HTTP callers or
+// untrusted plugins. A fabricated database adapter can fake a successful write;
+// these in-process checks cannot replace independently enforced IAM or network
+// isolation. Destructive retention is intentionally restricted to demo projects.
+const issued=new WeakMap(), ledgers=new WeakSet();
+function issuePermit(data){const token=Object.freeze({});issued.set(token,data);return token;}
+function permits(token,request){const p=token&&issued.get(token);return !!p && p.service===request.service && p.sourceProjectId===request.sourceProjectId && p.id===request.id && p.action===request.action && (p.replay===true || (p.expectedVersion===request.expectedVersion && p.expectedHistoryVersion===request.expectedHistoryVersion));}
 const idPattern=/^[A-Za-z0-9_-]{1,80}$/;
 const actions=new Set(['redacted','history_purged']);
 function valid({id,action,expectedVersion,expectedHistoryVersion}){
@@ -51,7 +61,7 @@ function createDeletionLedger({ledgerDb,primaryProjectId,ledgerProjectId,clock=(
   // The caller must enforce an external exclusive restore fence and network
   // isolation throughout this operation, including after this function returns.
   // Never expose a restored database until an independent check permits it.
-  async function replay({isRestoreFenced,verifyLedgerSnapshot,reapply,pageSize=50}){
+  async function replay({isRestoreFenced,verifyLedgerSnapshot,reapply,service=null,pageSize=50}){
     if(typeof isRestoreFenced!=='function'||typeof verifyLedgerSnapshot!=='function'||typeof reapply!=='function')throw Error('RESTORE_GUARD_REQUIRED');
     // A separate immutable checkpoint/snapshot service must verify completeness.
     // Returning from this function is not permission to make a restore public.
@@ -66,7 +76,10 @@ function createDeletionLedger({ledgerDb,primaryProjectId,ledgerProjectId,clock=(
           if(await isRestoreFenced()!==true)throw Error('RESTORE_FENCE_REQUIRED');
           valid(record);if(record.sourceProject!==primaryProjectId)throw Error('LEDGER_SOURCE_MISMATCH');if(record.state!=='committed')throw Error('LEDGER_RECONCILIATION_REQUIRED');
           if(action && record.action===action){
-            if(await reapply({id:record.id,action:record.action,expectedVersion:record.expectedVersion,expectedHistoryVersion:record.expectedHistoryVersion})!==true)throw Error('RESTORE_REAPPLY_FAILED');
+            if(service!==null && service?.schedulerSafety?.projectId!==primaryProjectId)throw Error('RESTORE_SERVICE_MISMATCH');
+            const ledgerPermit=issuePermit({sourceProjectId:primaryProjectId,id:record.id,action:record.action,replay:true,service});
+            try {if(await reapply({id:record.id,action:record.action,expectedVersion:record.expectedVersion,expectedHistoryVersion:record.expectedHistoryVersion,ledgerPermit})!==true)throw Error('RESTORE_REAPPLY_FAILED');}
+            finally {issued.delete(ledgerPermit);}
             processed++;
           }
         }
@@ -80,19 +93,23 @@ function createDeletionLedger({ledgerDb,primaryProjectId,ledgerProjectId,clock=(
     if(await verifyLedgerSnapshot()!==true)throw Error('LEDGER_SNAPSHOT_UNVERIFIED');
     return {processed};
   }
-  return {recordIntent,markCommitted,assertNoPending,page,replay,safety:Object.freeze({sourceProjectId:primaryProjectId,ledgerProjectId})};
+  const ledger=Object.freeze({recordIntent,markCommitted,assertNoPending,page,replay,safety:Object.freeze({sourceProjectId:primaryProjectId,ledgerProjectId})});
+  ledgers.add(ledger);return ledger;
 }
-module.exports={createDeletionLedger};
+module.exports={createDeletionLedger,permits};
 
 // Integrate only with a worker whose process method rechecks expectedVersion
 // inside the same transaction that modifies the original. A failed or uncertain
 // operation deliberately leaves its ledger entry pending for reconciliation.
 async function processWithLedger({ledger,service,id,action,expectedVersion,expectedHistoryVersion,transactionFence}){
-  if(!ledger?.recordIntent||!ledger?.markCommitted||!service?.process||typeof transactionFence!=='function')throw Error('INCOMPLETE_DELETION_GUARD');
+  if(!ledgers.has(ledger)||!service?.process||typeof transactionFence!=='function'||(service.schedulerSafety && service.schedulerSafety.projectId!==ledger.safety.sourceProjectId))throw Error('INCOMPLETE_DELETION_GUARD');
   const input={id,action,expectedVersion,expectedHistoryVersion};valid(input);
   if(await ledger.recordIntent(input)==='committed')throw Error('LEDGER_ALREADY_COMMITTED');
-  const result=await service.process(id,{apply:true,expectedAction:action,expectedVersion,expectedHistoryVersion,transactionFence});
-  if(result?.result===action || (action==='history_purged'&&result?.result==='already_purged'))await ledger.markCommitted(input);
-  return result;
+  const ledgerPermit=issuePermit({...input,sourceProjectId:ledger.safety.sourceProjectId,service});
+  try {
+    const result=await service.process(id,{apply:true,expectedAction:action,expectedVersion,expectedHistoryVersion,transactionFence,ledgerPermit});
+    if(result?.result===action || (action==='history_purged'&&result?.result==='already_purged'))await ledger.markCommitted(input);
+    return result;
+  } finally {issued.delete(ledgerPermit);}
 }
 module.exports.processWithLedger=processWithLedger;

@@ -64,3 +64,51 @@ function createRestoreIssuer({ledgerDb,ledger,sourceProject,ledgerProject,restor
  };
 }
 module.exports={createRestoreIssuer,validationMessage,recordBytes};
+
+// Read-only comparison for an already isolated restore. This cannot establish
+// isolation, checkpoint completeness, or authorization and never signs proof.
+// An independent authority must verify those properties and keep all writers
+// fenced from the start of this scan until the restored service is released.
+async function auditRestoredDeletionState({ledgerDb,restoredDb,sourceProject,ledgerProject,checkpoint,ledgerRevision,recordCount}){
+ if(!proj.test(sourceProject||'')||!proj.test(ledgerProject||'')||sourceProject===ledgerProject||ledgerDb?.projectId!==ledgerProject||restoredDb?.projectId!==sourceProject||!ledgerDb?.collection||!ledgerDb?.runTransaction||!restoredDb?.collection||!hex.test(checkpoint||'')||!Number.isSafeInteger(ledgerRevision)||ledgerRevision<0||!Number.isSafeInteger(recordCount)||recordCount<0||recordCount>100000)throw Error('RESTORE_AUDIT_CONFIGURATION_INVALID');
+ const entries=ledgerDb.collection('deletion_ledger'),head=ledgerDb.collection('deletion_ledger_meta').doc(sourceProject);
+ async function stable(){return ledgerDb.runTransaction(async tx=>{
+  const h=await tx.get(head),pending=await tx.get(entries.where('state','==','pending').limit(1));
+  if(!h.exists||h.data()?.revision!==ledgerRevision||pending.empty!==true)throw Error('RESTORE_LEDGER_UNSTABLE');
+ },{readOnly:true});}
+ const exactKeys=['dataMutationFrozen','legalHold','redactedAt','retentionFreeze','retentionRedacted','status','terminalAt'].sort();
+ const timeValue=x=>x instanceof Date?x.getTime():typeof x?.toDate==='function'?x.toDate().getTime():NaN;
+ const digest=crypto.createHash('sha256');let after,count=0;
+ await stable();
+ for(;;){
+  let q=entries.orderBy('__name__');if(after!==undefined)q=q.startAfter(after);
+  const page=await q.limit(100).get();if(!Array.isArray(page.docs)||page.docs.length>100)throw Error('RESTORE_LEDGER_INVALID');
+  for(const doc of page.docs){
+   const row=doc.data();
+   if(row?.sourceProject!==sourceProject)throw Error('RESTORE_LEDGER_INVALID');
+   const expected=crypto.createHash('sha256').update(sourceProject).update('\0').update(row.action||'').update('\0').update(row.id||'').digest('hex');
+   if(doc.id!==expected||(after!==undefined&&doc.id<=after))throw Error('RESTORE_LEDGER_INVALID');
+   digest.update(recordBytes(row));if(++count>100000)throw Error('RESTORE_LEDGER_INVALID');after=doc.id;
+   const ref=restoredDb.collection('quote_requests').doc(row.id),snap=await ref.get();
+   if(!snap.exists)throw Error('RESTORE_REAPPLICATION_REQUIRED');
+   const v=snap.data();
+   if(!v||JSON.stringify(Object.keys(v).sort())!==JSON.stringify(exactKeys)||v.retentionRedacted!==true||v.status!=='보유기간만료'||v.legalHold!==false||v.dataMutationFrozen!==true||v.retentionFreeze!=='retention-v1'||!Number.isFinite(timeValue(v.terminalAt))||!Number.isFinite(timeValue(v.redactedAt)))throw Error('RESTORE_REAPPLICATION_REQUIRED');
+   const cols=await ref.listCollections();
+   if(cols.some(c=>c.id!=='status_history'))throw Error('RESTORE_UNKNOWN_DEPENDENCIES');
+   const history=await ref.collection('status_history').limit(201).get();
+   // A restored history entry may contain identifying data, even under an
+   // apparently valid field name. Without an independent content checkpoint,
+   // it cannot be distinguished from a deleted or modified entry. Fail
+   // closed for both actions. This also blocks legitimately retained history
+   // until an independently verified history baseline is available.
+   if(history.size)throw Error('RESTORE_HISTORY_BASELINE_REQUIRED');
+   const afterSnap=await ref.get();
+   if(!afterSnap.exists||!snap.updateTime?.isEqual(afterSnap.updateTime))throw Error('RESTORE_DATA_CHANGED');
+  }
+  if(page.docs.length<100)break;
+ }
+ if(count!==recordCount||digest.digest('hex')!==checkpoint)throw Error('RESTORE_CHECKPOINT_MISMATCH');
+ await stable();
+ return {recordCount:count,checkpoint,ledgerRevision};
+}
+module.exports.auditRestoredDeletionState=auditRestoredDeletionState;
