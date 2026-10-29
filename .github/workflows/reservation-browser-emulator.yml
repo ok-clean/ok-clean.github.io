@@ -69,12 +69,6 @@ jobs:
           FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
           FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085
           GCLOUD_PROJECT: demo-okclean-integration
-      - name: Production client and container with loopback emulators
-        run: npx firebase emulators:exec --project demo-okclean-integration --only auth,firestore --config tests/fixtures/.reservation-e2e.json 'bash tests/server-container-integration.sh'
-        env:
-          FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
-          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085
-          GCLOUD_PROJECT: demo-okclean-integration
       - name: Retention isolation with synthetic Firestore emulator data
         run: npx firebase emulators:exec --project demo-okclean-integration --only auth,firestore --config tests/fixtures/.reservation-e2e.json 'node tests/retention-emulator.cjs'
         env:
@@ -107,6 +101,12 @@ jobs:
           GCLOUD_PROJECT: demo-okclean-integration
       - name: Member linking with synthetic Auth and Firestore emulators
         run: npx firebase emulators:exec --project demo-okclean-integration --only auth,firestore --config tests/fixtures/.reservation-e2e.json 'node tests/member-account-link-emulator.cjs'
+        env:
+          FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085
+          GCLOUD_PROJECT: demo-okclean-integration
+      - name: Production client and container with loopback emulators
+        run: npx firebase emulators:exec --project demo-okclean-integration --only auth,firestore --config tests/fixtures/.reservation-e2e.json 'bash tests/server-container-integration.sh'
         env:
           FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
           FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085

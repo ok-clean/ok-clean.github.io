@@ -23,14 +23,16 @@ async function main(){
  // loopback Firestore emulator while supplying CORS/PNA headers for the virtual
  // HTTPS site. Requests and replies are piped; no Firestore responses are faked.
  let firestoreProxyRequests=0;
+ const firestoreProxyStats={incoming:0,options:0,forwarded:0,rejectedOrigin:0,upstreamErrors:0,success:0,clientError:0,serverError:0};
  const firestoreProxy=http.createServer((req,res)=>{
-  if(req.headers.origin && req.headers.origin!==origin){res.writeHead(403);return res.end();}
+  firestoreProxyStats.incoming++;
+  if(req.headers.origin && req.headers.origin!==origin){firestoreProxyStats.rejectedOrigin++;res.writeHead(403);return res.end();}
   const cors={'access-control-allow-origin':origin,'access-control-allow-methods':'GET, POST, OPTIONS','access-control-allow-headers':req.headers['access-control-request-headers']||'content-type, authorization, x-goog-api-client, x-firebase-appcheck','access-control-allow-private-network':'true','access-control-allow-credentials':'true'};
-  if(req.method==='OPTIONS'){res.writeHead(204,cors);return res.end();}
+  if(req.method==='OPTIONS'){firestoreProxyStats.options++;res.writeHead(204,cors);return res.end();}
   if(!['GET','POST'].includes(req.method)){res.writeHead(405,cors);return res.end();}
-  firestoreProxyRequests++;
-  const upstream=http.request({host:'127.0.0.1',port:8085,path:req.url,method:req.method,headers:{...req.headers,host:'127.0.0.1:8085'}},reply=>{res.writeHead(reply.statusCode||502,{...reply.headers,...cors});reply.pipe(res);});
-  upstream.on('error',()=>{if(!res.headersSent)res.writeHead(502,cors);res.end();});
+  firestoreProxyRequests++;firestoreProxyStats.forwarded++;
+  const upstream=http.request({host:'127.0.0.1',port:8085,path:req.url,method:req.method,headers:{...req.headers,host:'127.0.0.1:8085'}},reply=>{const status=reply.statusCode||502;if(status<400)firestoreProxyStats.success++;else if(status<500)firestoreProxyStats.clientError++;else firestoreProxyStats.serverError++;res.writeHead(status,{...reply.headers,...cors});reply.pipe(res);});
+  upstream.on('error',()=>{firestoreProxyStats.upstreamErrors++;if(!res.headersSent)res.writeHead(502,cors);res.end();});
   req.on('aborted',()=>upstream.destroy());res.on('close',()=>upstream.destroy());req.pipe(upstream);
  });
  await new Promise((resolve,reject)=>{firestoreProxy.once('error',reject);firestoreProxy.listen(0,'127.0.0.1',resolve);});
@@ -65,7 +67,7 @@ async function main(){
  }
  try{
   const ctx=await context(),page=await ctx.newPage();
-  page.on('console',m=>{const x=m.text();if(x.startsWith('TEST_LOGIN_ERROR'))console.log(x);});
+  page.on('console',m=>{const x=m.text();if(x.startsWith('TEST_LOGIN_ERROR'))console.log(x);else if(m.type()==='error'){if(/cors|cross.origin/i.test(x))console.log('TEST_BROWSER_ERROR_CORS');else if(/private.network|local.network/i.test(x))console.log('TEST_BROWSER_ERROR_LOCAL_NETWORK');else if(/mixed.content/i.test(x))console.log('TEST_BROWSER_ERROR_MIXED_CONTENT');}});
   page.on('pageerror',e=>console.log('TEST_PAGE_ERROR',e.name));
   page.on('requestfailed',r=>{const u=new URL(r.url());if(u.hostname==='127.0.0.1'||u.hostname==='www.gstatic.com')console.log('TEST_REQUEST_FAILED',u.hostname,u.port||'',r.failure()?.errorText||'unknown');});
   await page.goto(origin+'/',{waitUntil:'load'});
@@ -128,6 +130,6 @@ async function main(){
   await reserveCard.locator('select').selectOption('예약확정');await reserveCard.getByRole('button',{name:'상태 저장'}).click();await rp.getByText('상태가 저장되었습니다.').waitFor();
   assert.equal((await db.collection('quote_requests').doc(id).get()).data().status,'예약확정');
   await reserveOnly.close();await manager.close();await next.close();await ctx.close();console.log('PASS production client -> container server -> Firebase emulators, App Check test double');
- }finally{await browser.close();firestoreProxy.closeAllConnections();await new Promise(resolve=>firestoreProxy.close(resolve));await fb.delete();}
+ }finally{console.log('TEST_PROXY_COUNTS',JSON.stringify(firestoreProxyStats));await browser.close();firestoreProxy.closeAllConnections();await new Promise(resolve=>firestoreProxy.close(resolve));await fb.delete();}
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});
