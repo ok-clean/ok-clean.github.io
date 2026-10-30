@@ -91,6 +91,7 @@ def head(c, title, desc, path, depth=0, ld=None):
     return f"""<!doctype html>
 <html lang="ko"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
 <title>{e(title)}</title>
 <meta name="description" content="{e(desc)}">
 <link rel="canonical" href="{e(url)}">
@@ -125,6 +126,11 @@ def ld_tags(ld):
 
 
 def analytics(c):
+    # Pause configured analytics while membership privacy is being reviewed.
+    # Keep the implementation below for a separately reviewed reactivation.
+    ANALYTICS_PAUSED = True
+    if ANALYTICS_PAUSED:
+        return ""
     a = c.get("analytics") or {}
     out = ""
     if a.get("ga"):
@@ -195,8 +201,16 @@ def services_html(c, depth=0):
     return f'<div class="cats" role="group" aria-label="분류">{chips}</div><ul class="svc" id="svcList">{"".join(rows)}</ul>'
 
 
+def current_faq(c):
+    # Keep displayed FAQ and structured data consistent while new membership
+    # is suspended; preserve the original text in the configuration.
+    return [{**f, "a": "신규 회원가입은 개인정보 처리 절차 확인을 위해 일시 중지 중이에요. 회원 혜택에 관해서는 전화나 카카오톡으로 문의해 주세요."}
+            if "회원" in f.get("q", "") or "가입" in f.get("q", "") else f
+            for f in c.get("faq", [])]
+
+
 def faq_html(c):
-    return "".join(f'<details><summary>{e(f["q"])}</summary><p>{e(f["a"])}</p></details>' for f in c.get("faq", []))
+    return "".join(f'<details><summary>{e(f["q"])}</summary><p>{e(f["a"])}</p></details>' for f in current_faq(c))
 
 
 def won_text(x):
@@ -207,8 +221,8 @@ def member_badge(c):
     m = c.get("member")
     if not m:
         return ""
-    return (f'<button class="member-badge" type="button" data-join><b>회원가입하면 {won_text(m["coupon"])} 할인</b>'
-            f'<span>+ 무료 서비스 1가지 · 30초 가입</span></button>')
+    return ('<button class="member-badge" type="button" data-join><b>회원가입 일시 중지</b>'
+            '<span>회원 혜택 안내 보기</span></button>')
 
 
 def member_section(c):
@@ -220,17 +234,17 @@ def member_section(c):
     grades = "".join(f'<tr><td><b>{e(g["name"])}</b></td><td>{e(g["rule"])}</td><td>{e(g["perk"])}</td></tr>' for g in m.get("grades", []))
     return f"""<section class="s" id="member"><div class="wrap">
   <h2>회원 혜택</h2>
-  <p class="d">가입하는 순간 쓸 수 있는 쿠폰부터, 이용할수록 쌓이는 포인트까지 준비했어요.</p>
+  <p class="d">회원 혜택을 안내해 드려요. 신규 회원가입은 개인정보 처리 절차 확인을 위해 일시 중지 중이에요.</p>
   <div class="perks">
     <div class="perk"><span class="pk">가입 즉시</span><b>{won_text(m["coupon"])} 할인 쿠폰</b><p>{e(m.get("couponTerms", ""))}</p></div>
     <div class="perk"><span class="pk">가입 즉시</span><b>무료 서비스 1가지</b><ul>{frees}</ul></div>
     <div class="perk"><span class="pk">후기 선물</span><b>{e(m.get("reviewGift", ""))}</b><p>{e(m.get("reviewTerms", ""))}</p>{f'<a class="btn line small" href="{e(c["naverPlace"])}" target="_blank" rel="noopener">네이버 플레이스에 리뷰 남기기</a>' if c.get("naverPlace") else ''}</div>
-    {f'<div class="perk"><span class="pk">친구 초대</span><b>{won(ref["point"]).replace("만", "만")}P 적립</b><p>{e(ref.get("text", ""))}</p><button class="btn line small" type="button" data-invite>내 초대 링크 보내기</button></div>' if ref else ''}
+    {f'<div class="perk"><span class="pk">친구 초대</span><b>{won(ref["point"]).replace("만", "만")}P 적립</b><p>{e(ref.get("text", ""))}</p><button class="btn line small" type="button" data-invite>친구 초대 일시 중지</button></div>' if ref else ''}
   </div>
   <h3 class="sub">등급과 포인트</h3>
   <div class="tbl-wrap"><table class="grade"><thead><tr><th>등급</th><th>조건</th><th>혜택</th></tr></thead><tbody>{grades}</tbody></table></div>
   <p class="note">{e(m.get("pointTerms", ""))}</p>
-  <button class="btn glove" type="button" data-join>회원가입하고 쿠폰 받기</button>
+  <button class="btn glove" type="button" data-join>회원가입 일시 중지 안내</button>
 </div></section>"""
 
 
@@ -243,7 +257,7 @@ def join_modal(c):
     regions = "".join(f"<option>{e(r)}</option>" for r in c.get("areaChoices", c.get("regions", [])))
     return f"""<div class="modal" id="join" role="dialog" aria-modal="true" aria-labelledby="joinT" hidden><div class="modal-box">
 <button class="x" type="button" data-close aria-label="닫기">×</button>
-<div id="joinForm">
+<div id="joinForm" hidden inert>
   <p class="eyebrow-less">{e(c["name"])} 회원가입</p>
   <h2 id="joinT">지금 가입하면 <em>{won_text(m["coupon"])} 할인</em> + 무료 서비스</h2>
   <p class="ref-b" id="jRef" hidden></p>
@@ -275,7 +289,7 @@ def promises_section(c, cases):
     ps = c.get("promises") or []
     if not ps:
         return ""
-    n = sum(1 for x in cases if x.get("kind", "case") == "case")
+    n = sum(1 for x in cases if x.get("kind", "case") == "case" and safe_case_link(x.get("link")))
     stat = f'<div class="stat"><b>{n}건</b><span>블로그에 공개한 시공 기록</span></div>' if n else ""
     items = "".join(f'<li><b>{e(x["t"])}</b><span>{e(x["d"])}</span></li>' for x in ps)
     return f"""<section class="s trust" id="promise"><div class="wrap">
@@ -306,7 +320,7 @@ def index_page(c, cases=()):
     desc = f"{', '.join(regions)} 입주청소, 거주청소, 사무실·준공 청소, 에어컨·세탁기 분해세척. 평수만 넣으면 예상 견적을 바로 볼 수 있어요."
     cfg = json.dumps(c, ensure_ascii=False).replace("</", "<\\/")
     faq_ld = {"@context": "https://schema.org", "@type": "FAQPage",
-              "mainEntity": [{"@type": "Question", "name": f["q"], "acceptedAnswer": {"@type": "Answer", "text": f["a"]}} for f in c.get("faq", [])]}
+              "mainEntity": [{"@type": "Question", "name": f["q"], "acceptedAnswer": {"@type": "Answer", "text": f["a"]}} for f in current_faq(c)]}
     return head(c, title, desc, "", 0, [biz_ld(c), faq_ld]) + f"""
 <main>
 <section class="hero"><div class="wrap hero-in">
@@ -395,6 +409,40 @@ def index_page(c, cases=()):
 """
 
 
+def safe_case_link(value):
+    """수집한 사례 링크는 사용자 정보가 없는 절대 http(s) URL만 허용한다."""
+    import re
+    if not isinstance(value, str) or not re.match(r"^https?://", value, re.I):
+        return False
+    if any(ch.isspace() or ord(ch) < 32 or ord(ch) in (127, 0xFEFF) or ch == "\\" for ch in value):
+        return False
+    authority = re.match(r"^https?://([^/?#]*)", value, re.I).group(1)
+    if "%" in authority:
+        return False
+    try:
+        parts = urllib.parse.urlsplit(value)
+        if parts.scheme.lower() not in ("http", "https") or not parts.hostname or parts.username is not None or parts.password is not None:
+            return False
+        _ = parts.port  # 잘못된 포트는 ValueError
+        if ":" in parts.hostname:
+            import ipaddress
+            ipaddress.IPv6Address(parts.hostname)
+        else:
+            ascii_host = parts.hostname.encode("idna").decode("ascii")
+            if not re.fullmatch(r"[a-z0-9.-]+", ascii_host, re.I):
+                return False
+            if re.fullmatch(r"(?:0x[0-9a-f]+|\d+)(?:\.(?:0x[0-9a-f]+|\d+))*", ascii_host.rstrip("."), re.I) and "x" in ascii_host.lower():
+                return False
+            if re.search(r"(?:^|\.)\d+$", ascii_host.rstrip(".")):
+                import ipaddress
+                if parts.hostname.rstrip(".").lower() != ascii_host.rstrip(".").lower():
+                    return False
+                ipaddress.IPv4Address(ascii_host.rstrip("."))
+        return True
+    except (ValueError, UnicodeError):
+        return False
+
+
 def service_page(c, s, cases=()):
     a, b = price_from(s)
     regions = c.get("regions", [])
@@ -405,7 +453,7 @@ def service_page(c, s, cases=()):
     same = [x for x in c["services"] if x["cat"] == s["cat"] and x["id"] != s["id"]]
     rooms = "".join(f'<div class="room"><b>{e(r["name"])}</b><ul>{"".join(f"<li>{e(i)}</li>" for i in r["items"])}</ul></div>' for r in s.get("rooms", []))
     excl = "".join(f"<li>{e(x)}</li>" for x in s.get("excludes", []))
-    mine = [x for x in cases if x.get("svc") == s["id"] and x.get("kind", "case") == "case"][:4]
+    mine = [x for x in cases if x.get("svc") == s["id"] and x.get("kind", "case") == "case" and safe_case_link(x.get("link"))][:4]
     kakao = c.get("kakao", "")
     base = c.get("siteUrl", "").rstrip("/")
     ld = {"@context": "https://schema.org", "@type": "Service", "name": s["name"], "description": s["summary"], "serviceType": s["name"],
@@ -456,7 +504,7 @@ def case_card(x):
 def area_page(c, r, cases):
     title = f"{r} 입주청소·에어컨 청소 | {c['name']}"
     desc = f"{r} 지역 입주청소, 거주청소, 사무실·준공 청소, 에어컨·세탁기 분해세척을 {c['name']}에서 맡아요. 평수만 넣으면 예상 견적을 볼 수 있어요."
-    mine = [x for x in cases if x.get("region") == r and x.get("kind", "case") == "case"][:8]
+    mine = [x for x in cases if x.get("region") == r and x.get("kind", "case") == "case" and safe_case_link(x.get("link"))][:8]
     case_html = "".join(case_card(x) for x in mine)
     return head(c, title, desc, area_file(r), 1) + f"""
 <main class="wrap page">
@@ -464,7 +512,7 @@ def area_page(c, r, cases):
 <h1>{e(r)} 청소, {e(c['name'])}이 맡아요</h1>
 <p class="lead" style="color:var(--muted);font-size:17px;margin:0">{e(r)} 어디든 방문해요. 서비스를 고르면 작업 범위와 가격 기준을 볼 수 있어요.</p>
 <div class="box">{services_html(c, 1)}</div>
-<a class="btn glove" href="../index.html#quote">{e(r)} 견적 계산하기</a>
+<a class="btn glove" href="../index.html?area={e(urllib.parse.quote(r, safe=''))}#quote">{e(r)} 견적 계산하기</a>
 {f'<div class="box"><h2>{e(r)} 시공 사례</h2><div class="cases">{case_html}</div></div>' if case_html else ''}
 <div class="box"><h2>다른 지역</h2><div class="links">{''.join(f'<a href="{urllib.parse.quote(x)}.html">{e(x)}</a>' for x in c.get('regions', []) if x != r)}</div></div>
 </main>
@@ -477,23 +525,55 @@ def area_page(c, r, cases):
 def privacy_page(c):
     b = c.get("business") or {}
     who = b.get("company") or c["name"]
+    delete_notice = ""
+    if c.get("member"):
+        delete_notice = "<p>회원가입 일시중지 안내 화면의 '이 기기에 저장된 회원정보 직접 지우기'를 통해 이 브라우저의 회원정보와 쿠폰번호를 직접 지울 수 있습니다. 클립보드, 카카오톡 대화와 이미 접수된 서버 정보는 이 기능으로 삭제되지 않습니다.</p>\n"
     return head(c, f"개인정보처리방침 | {c['name']}", "개인정보처리방침", "privacy.html") + f"""
 <main class="wrap page">
 <h1>개인정보처리방침</h1>
+<p role="note" data-privacy-draft><b>개정 검토안 · 시행 전</b><br>무응답 상담 30일 임시 종결과 일반 상담정보 종료 후 90일 보유 원칙은 운영자 승인 완료입니다. 실제 파기 절차·법적 보존 대상·외부 처리 현황과 시행일은 미확정이므로 실제 게시·운영 배포용 최종 처리방침으로 승인되지 않았습니다.</p>
+<p data-privacy-effective-date><b>제안 시행일: 2026-11-01 · 실제 시행일: 미확정</b><br>필수 고지와 실제 운영 조건을 확인하기 전에는 이 개정안을 시행 중인 방침으로 적용하지 않습니다. 제안일 도래만으로 시행·자동 삭제·배포가 시작되지 않습니다.</p>
 <div class="box">
 <h2>1. 수집하는 항목과 목적</h2>
-<p>{e(who)}(이하 '업체')는 회원가입 시 <b>이름, 연락처, 지역, 선택한 무료 서비스, 추천인 코드(초대 링크로 가입한 경우), 이벤트 수신 동의 여부</b>를 받아요. 회원 관리, 쿠폰·포인트 지급, 예약 상담과 작업 진행에만 써요.</p>
+<p>{e(who)}(이하 '업체')의 운영자 확인 기준 실제 고객 회원가입은 없습니다. 회원 기능의 입력 항목은 이름, 연락처, 지역, 선택한 무료 서비스, 추천인 코드, 이벤트 수신 동의 여부이며, 현재 홈페이지의 신규 회원가입 접수는 일시 중지 중입니다. 실제 고객 회원자료가 보관 중인 것으로 안내하지 않습니다.</p>
+<p>청소 견적 상담, 서비스 문의, 상담 후 연락 및 일정 협의를 위해 상담에 필요한 <b>이름, 연락처, 청소 장소, 현장 사진, 기타 요청사항, 청소 희망일</b>을 선택적으로 처리할 수 있습니다. 모든 상담에서 모든 항목을 받는 것은 아닙니다.</p>
 <h2>2. 수집 방법</h2>
-<p>가입 정보는 이용자 기기에 저장됩니다. 회원 관리 연동을 활성화한 경우 가입 버튼을 누르면 Google 스프레드시트 기반 관리자 대장에도 전송되어 보관되며, 미연동 시 카카오톡으로 직접 전송한 경우에만 업체가 받습니다. 견적 계산기에 입력한 내용은 이용자 기기에 저장되며 상담 전송 시에만 업체가 받습니다.</p>
-<h2>3. 보관 기간과 파기</h2>
-<p>회원 정보는 탈퇴 요청 시 또는 마지막 이용 후 2년이 지나면 지체 없이 파기해요. 관리자 대장에 저장된 회원정보도 동일한 기준으로 삭제합니다. 법령에 따라 보관해야 하는 거래 기록은 정해진 기간 동안 보관해요.</p>
+<p>이전에 가입한 회원정보와 쿠폰번호가 이 브라우저에 남아 있을 수 있습니다. 견적 계산기에 입력한 내용도 이 브라우저에 저장될 수 있습니다. 이 화면에서 신규 회원가입 접수를 중지합니다. 현재 홈페이지에서는 신규 예약 접수 기능을 제공하지 않으며, 전화·카카오톡 상담은 가능합니다. 이전에 열린 화면과 이미 접수된 정보는 별도 확인이 필요합니다. 기존 회원정보의 조회·수정 기능도 일시 중지 중입니다.</p>
+<p>상담은 전화·문자·카카오톡 오픈채팅을 통해 이루어질 수 있습니다. 상담 관련 정보는 카카오톡 대화와 전화·문자 내역에 남을 수 있습니다. Google 기기 백업 기능의 활성화는 확인됐으나 고객자료 포함 여부와 삭제 범위는 미확인입니다.</p>
+<p>운영자 확인 기준 상담자료는 운영자 본인만 열람·관리하며, 현장 사진은 휴대폰 갤러리·PC에 별도로 저장합니다. 업무폰에는 지문·비밀번호 잠금을 사용하고 업무 PC에는 로그인 비밀번호를 설정하여 사용합니다. 이는 운영자가 설명한 현재 보호 방식이며 기기·계정 전수조사나 모든 저장소의 접근 제한 검증 결과는 아닙니다.</p>
+<p>견적 내용은 상담을 위해 이용자가 직접 클립보드나 카카오톡 등으로 공유할 수 있습니다. 브라우저 자동완성, 클립보드, 카카오톡 대화와 이미 접수된 정보는 서로 별도로 관리됩니다. 기존 정보의 열람·수정·삭제는 아래 연락처로 요청해 주세요.</p>
+{delete_notice}<h2>3. 보관 기간과 파기</h2>
+<p>운영자 확인 기준 실제 고객 회원가입과 실제 청소 계약·결제는 없습니다. 따라서 실제 고객 회원자료나 청소 계약·결제 자료를 현재 보존 중인 것으로 안내하지 않습니다. 이 확인을 모든 상담·시험 자료·기기 사본·다른 저장소의 부재로 확대하지 않습니다. 자동 삭제가 이루어진다고 안내할 수 없으며, 정보의 보관·삭제에 관한 문의는 아래 연락처로 해 주세요.</p>
+<p><b>승인된 정책 원칙 · 실제 시행 전</b>: 일반 상담정보는 재견적, 일정 재협의, 상담 후속 대응을 목적으로 상담 종료 후 90일 보유하는 원칙을 운영자가 승인했습니다. 법적 보존 의무와 실제 삭제 가능 범위 등 시행 조건은 확인이 필요하며, 원칙 승인만으로 현재 시행 중인 보유·파기 정책으로 안내하지 않습니다.</p>
+<p><b>90일은 법정 의무기간이 아닙니다.</b> 30일·90일은 사업자 운영 기준입니다. 이 원칙 승인은 필요한 처리 근거 확인을 대체하거나 기존 정보의 보유기간 연장 근거가 되지 않습니다. 기존 회원정보, 법적 보존 의무가 적용되는 계약·결제·분쟁 자료, 실제 보관 위치나 처리 목적이 확인되지 않은 자료에는 90일 기준을 일괄 적용하지 않습니다. 시행 전 필요한 항목과 적법한 처리 근거를 확인해야 합니다.</p>
+<p>고객이 종료 의사를 밝히거나 견적 안내 및 일정 협의가 완료되어 추가 연락이 필요하지 않으면 상담을 종료할 수 있습니다. 무응답 상담은 마지막 회신 요청 후 30일이 지나면 임시 종결하고, 재문의가 발생하면 새로운 상담으로 관리합니다. 최종 연락일·마지막 회신 요청일과 실제 상담 종료일은 구분해 기록하며, 재문의만으로 기존 자료의 보유기간을 자동 연장하지 않습니다. 이 종료 기준도 승인된 원칙이며 실제 시행은 앞서 안내한 운영 조건 확인 후 확정합니다.</p>
+<p>계약·결제·분쟁 관련 보존 자료는 일반 상담자료와 구분하여 적용 법령과 필요한 항목·기간을 확인합니다. 상담이 계약으로 전환됐다는 이유만으로 현장 사진이나 대화 전체를 같은 기간 보관하는 것으로 정하지 않습니다. 삭제 요청은 90일 경과를 기다리는 절차가 아니며, 요청 시 보존 의무와 삭제 가능한 범위를 별도로 검토합니다.</p>
+<p>시행 후 보유기간이 만료되면 사업자가 통제할 수 있는 자료를 적법한 절차에 따라 파기하는 원칙입니다. 카카오톡·문자·사진 등 관리 가능한 자료와 상대방·서비스 제공자가 별도로 보유하는 사본을 구분합니다. 현재 실제 업무폰·PC, 연결 기기·휴지통·클라우드 백업과 복원 가능성에 대한 실기기 파기 시험은 미완료입니다. 이 개정은 실제 고객정보 삭제나 자동 삭제 기능 활성화를 포함하지 않습니다.</p>
+<p>파기 절차는 본인 확인과 법적 보존 대상 검토 후 사업자가 관리하는 각 보관 위치에서 복구가 어렵도록 삭제 가능한 방법과 범위를 확인하는 방식으로 준비 중입니다. 카카오톡 대화·문자·전화 기록과 별도로 저장한 사진, 다른 기기 및 백업은 각각 보관 위치와 삭제 가능 범위를 확인해야 합니다. 다른 사람의 사본이나 서비스 제공자의 보관분까지 삭제 완료되었다고 보장하지 않습니다.</p>
+<p>실제 고객 회원가입이 없다는 확인과 기기에 남아 있을 수 있는 시험 입력값은 구분합니다. 별도 자료가 확인되는 경우 그 목적·보존 의무·파기 기준을 확인하며 일반 상담정보 90일을 일괄 적용하지 않습니다. 이번 개정으로 기존 회원정보를 임의 삭제하거나 자동 삭제하지 않습니다. 미확정 상태 자체가 무기한 보관의 근거는 아니며, 열람·정정·삭제 등 요청은 아래 담당자가 접수합니다.</p>
+<p>현재 확인된 삭제 방법은 휴대폰에서 수동 삭제하고, PC 사진은 파일 삭제 후 휴지통을 비우는 방식입니다. 이는 현재 운영 방식에 대한 설명이며 연결 기기·백업·모든 사본의 삭제나 복구 불가능성까지 검증된 방법이라는 뜻은 아닙니다. 휴대폰 또는 PC에서 삭제했다는 사실만으로 다른 사본까지 삭제되거나 복구 불가능한 파기가 완료된 것으로 안내하지 않습니다.</p>
+<p><b>파기 운영 절차안 · 실행 전 확정 필요</b>: 담당자가 보관 위치별 대상과 사본을 목록화하고, 목적 달성 여부·보존 의무·삭제 권한을 확인한 뒤 승인된 대상만 처리합니다. 법령에 따라 보존하는 자료는 해당 근거·항목·기간을 기록하고 일반 상담자료와 분리하여 관리하는 절차를 확정해야 합니다.</p>
+<ul>
+<li><b>문자·전화 내역</b>: 업체가 관리하는 단말·연동 기기와 앱의 내역, 첨부파일, 휴지통을 각각 확인합니다. 승인 후 삭제·휴지통 비우기 및 동기화 사본 확인이 가능한지 합성 자료로 시험합니다. 통신사 보관분은 업체 단말 삭제와 별개입니다.</li>
+<li><b>카카오톡 오픈채팅</b>: 업체 계정의 대화·첨부파일·다운로드 사본과 연결 기기를 구분합니다. 대화방 나가기만으로 모든 사본이 파기됐다고 판단하지 않으며, 해당 서비스에서 지원하는 삭제 범위와 제한을 확인합니다. 상대방 사본·서비스 제공자 보관분의 삭제를 보장하지 않습니다.</li>
+<li><b>현장 사진·전자파일</b>: 사진첩·다운로드·문서·동기화 저장소·휴지통의 사본을 구분합니다. 단순 파일 삭제만으로 복구 불가능한 파기를 완료했다고 판단하지 않습니다. 저장매체에 맞는 복구·재생 방지 삭제 기능을 합성 자료로 검증하고, 지원하지 않으면 적합한 파기 방법을 확정하기 전 완료 처리하지 않습니다.</li>
+<li><b>백업</b>: 사용 여부·보관 위치·접근권한·보존 주기와 개별 삭제 가능 여부를 먼저 확인합니다. 개별 삭제가 불가능한 경우 접근 제한, 확정된 만료·덮어쓰기 일정, 복원 시 삭제 대상 재반영 절차를 검토하되 이를 즉시 파기 완료로 표시하지 않습니다. 타인 정보가 포함된 백업을 임의로 일괄 삭제하지 않습니다.</li>
+</ul>
+<p>실행 후에는 대상의 보관 위치·처리일·처리 방법·담당자·잔존 사본 및 제한 사유를 필요한 최소 범위로 기록하고 재확인하는 절차를 확정해야 합니다. 위 절차는 도입 전 검토안이며, 현재 실행·삭제 완료 또는 복구 불가능성을 보증하는 안내가 아닙니다.</p>
 <h2>4. 제3자 제공</h2>
-<p>이용자의 동의 없이 개인정보를 외부에 판매하거나 제3자에게 제공하지 않아요. 관리자 대장 연동 시 Google 서비스를 저장·처리 수단으로 이용할 수 있습니다.</p>
+<p>기존에 접수된 정보의 외부 처리·제3자 제공·처리 위탁 및 국외 이전 해당 여부는 확인 중입니다. 카카오 오픈채팅을 통해 이용자가 직접 공유한 내용은 해당 서비스에서도 처리될 수 있습니다.</p>
+<p>운영자는 기존에 확인된 서비스 외에 추가 고객자료 처리업체·서비스는 없다고 답변했습니다. 이 답변은 기기·계정 전수조사 결과가 아니며 기존 전화·문자·카카오 상담 및 Google 기기 백업 사용 사실을 부정하지 않습니다. 추가 서비스가 없다는 답변을 외부 서비스 이용·위탁·국외 이전이 모두 없다는 뜻으로 확대하지 않습니다.</p>
+<p>제3자 제공과 처리 위탁은 실제 정보 흐름, 처리 목적 및 계약상 역할에 따라 구분해야 합니다. 카카오톡·문자 서비스를 이용한다는 사실만으로 모두 위탁이거나 제3자 제공이 없다고 판단하지 않습니다. 기존 서비스의 실제 위탁·제공·국외 이전 해당 여부는 미확정입니다. 해당하는 경우 수령자·수탁자, 목적·업무, 항목·기간 등 필수 고지와 국외 이전 여부를 실제 확인한 후 기재해야 합니다. 단순히 '확인 중'이라고 기재한 상태는 필수 고지 완료가 아닙니다.</p>
+<p>홈페이지의 카카오 상담은 오픈채팅 링크로 이동한 뒤 이용자가 상담 내용을 선택하여 보내는 방식입니다. 카카오는 메시지 전송 등 자체 서비스 운영을 위해 정보를 처리하며 <a href="https://www.kakao.com/policy/privacy" target="_blank" rel="noopener">카카오 개인정보 처리방침</a>이 적용됩니다. 카카오 자체 처리와 업체가 보관·이용하는 상담자료는 구분됩니다. 카카오의 자체 위탁·국외 이전 안내를 그대로 업체의 위탁·이전 현황으로 간주하지 않습니다.</p>
 <h2>5. 이용자의 권리</h2>
-<p>언제든지 개인정보 열람·수정·삭제와 이벤트 수신 거부를 요청할 수 있어요. 아래 연락처로 말씀해 주세요.</p>
+<p>정보주체와 법정대리인은 아래 담당 연락처로 개인정보 열람·정정·삭제·처리정지·동의 철회 및 이벤트 수신 거부를 요청할 수 있습니다. 대리인을 통한 요청은 대리권 확인이 필요할 수 있습니다. 홈페이지 회원 조회·수정이 중지된 동안에도 전화로 요청을 접수합니다.</p>
+<p>담당자는 요청 내용과 본인·대리인 여부를 필요한 최소 범위로 확인하고, 적용 법령에 따른 처리 결과를 안내합니다. 법령상 보존 의무 등으로 요청을 제한해야 하는 경우에는 그 사유와 가능한 처리 범위를 안내해야 합니다. 이 절차안은 모든 자료의 즉시 삭제를 약속하지 않습니다.</p>
+<p>정정·삭제 요구에 대해서는 지체 없이 조사·조치하고, 개인정보 보호법 시행령 제43조에 따라 요구받은 날부터 10일 이내에 조치 사실 또는 삭제 제한 사실·이유·이의제기방법을 통지하는 절차를 준비합니다. 접수일·요청 범위·확인 결과·처리 및 통지 결과를 최소한으로 기록하며, 본인 확인이 끝나지 않았거나 삭제에 실패한 대상을 완료로 안내하지 않습니다.</p>
 <h2>6. 문의</h2>
+<p>개인정보 문의 및 열람·정정·삭제 요청 접수처: 오케이청소 개인정보 담당자 · <a href="tel:0339114457">033-911-4457</a></p>
+<p>담당 부서: 오케이청소 개인정보 담당자. 위 번호로 열람·정정·삭제 요청을 실제 접수·처리할 수 있음을 운영자가 확인했습니다.</p>
 <p>{e(who)} · 대표 {e(b.get('owner', ''))} · {e(c.get('phone', ''))} {e(b.get('email', ''))}</p>
-<p style="color:var(--muted);font-size:14px">사이트 이용 통계를 위해 방문 기록(접속 기기, 방문 페이지 등)이 익명으로 수집될 수 있어요.</p>
+<p style="color:var(--muted);font-size:14px">현재 사이트 방문 통계 스크립트의 자동 수집은 일시 중지 중입니다.</p>
 </div>
 </main>
 {foot(c)}
@@ -530,10 +610,9 @@ def run():
         "icons": [{"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
                   {"src": "logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}]}, ensure_ascii=False, indent=1)
     base = c.get("siteUrl", "").rstrip("/") + "/"
-    today = datetime.now(KST).strftime("%Y-%m-%d")
     urls = [""] + [f"services/{s['id']}.html" for s in c["services"]] + [area_file(r) for r in c.get("regions", [])]
     files["sitemap.xml"] = ('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-                            + "".join(f"<url><loc>{e(base + u)}</loc><lastmod>{today}</lastmod></url>\n" for u in urls) + "</urlset>\n")
+                            + "".join(f"<url><loc>{e(base + u)}</loc></url>\n" for u in urls) + "</urlset>\n")
     files["robots.txt"] = f"User-agent: *\nAllow: /\nSitemap: {base}sitemap.xml\n"
     for path, text in files.items():
         if write(path, text):

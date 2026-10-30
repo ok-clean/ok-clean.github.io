@@ -1,0 +1,21 @@
+{
+  "executed_at_utc": "2026-10-30T05:13:10.933639+00:00",
+  "scope": "offline_synthetic_files_and_request_model_only",
+  "passed": 7,
+  "checks": [
+    "unverified_request_does_not_delete",
+    "missing_operator_approval_does_not_delete",
+    "unresolved_retention_hold_blocks_deletion",
+    "backup_failure_remains_partial",
+    "approved_scope_only_and_other_record_preserved",
+    "restored_copy_removed_before_reuse",
+    "minimal_audit_records_do_not_rewrite_old_outcomes"
+  ],
+  "not_tested": [
+    "native_kakao_sms_photos_calls",
+    "real_device_or_cloud_backup",
+    "production_firestore",
+    "physical_recovery_resistance",
+    "live_identity_check_or_request_notification"
+  ]
+}

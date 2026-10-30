@@ -1,0 +1,16 @@
+// TEST ONLY — proposal derived from the repository snapshot. Never deploy this file.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAdmin() {
+      // Literal test placeholder: the real operating administrator is not verified.
+      return request.auth != null && request.auth.uid == 'REPLACE_WITH_ADMIN_UID';
+    }
+    match /member_requests/{id} {
+      allow read, update, delete: if isAdmin();
+      // Signup is paused for ALL client identities, including an admin client.
+      allow create: if false;
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}
