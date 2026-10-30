@@ -134,14 +134,17 @@ class PrivacyPageTest(unittest.TestCase):
     def test_consultation_retention_and_contact_are_truthful(self):
         page = build.privacy_page(self.base)
         retention = section(page, 3)
-        for value in ("상담 종료 후 90일 보유를 원칙으로 검토", "법적 보존 의무와 실제 삭제 가능 범위",
-                      "구체적인 보유기간이나 자동 파기 방법은 정해지지 않았습니다"):
+        for value in ("상담 종료 후 90일 보유하는 원칙을 운영자가 승인", "법적 보존 의무와 실제 삭제 가능 범위",
+                      "재견적, 일정 재협의, 상담 후속 대응", "실제 시행 전"):
             self.assertIn(value, retention)
-        self.assertNotIn("30일", retention)
-        self.assertIn("상담 종료 후 90일 보유를 원칙으로 검토", retention)
-        self.assertIn("이는 확정된 보유기간이 아니며 기존 회원정보에 일괄 적용하지 않습니다", retention)
-        self.assertIn("법적 보존 의무와 실제 삭제 가능 범위를 확인하고 운영자가 최종 확정하기 전까지 적용되지 않은 검토안", retention)
-        self.assertIn("장기간 답변이 없는 경우의 종료 기준은 별도 확정", retention)
+        self.assertIn("마지막 회신 요청 후 30일이 지나면 임시 종결", retention)
+        self.assertIn("재문의가 발생하면 새로운 상담으로 관리", retention)
+        self.assertIn("최종 연락일·마지막 회신 요청일과 실제 상담 종료일은 구분", retention)
+        self.assertIn("90일 기준을 일괄 적용하지 않습니다", retention)
+        for excluded in ("기존 회원정보", "계약·결제·분쟁 자료", "실제 보관 위치나 처리 목적이 확인되지 않은 자료"):
+            self.assertIn(excluded, retention)
+        self.assertNotIn("90일 보유를 원칙으로 검토", retention)
+        self.assertIn("실기기 파기 시험은 미완료", retention)
         self.assertIn("다른 사람의 사본이나 서비스 제공자의 보관분까지 삭제 완료되었다고 보장하지 않습니다", retention)
         self.assertIn("처리 위탁 및 국외 이전 해당 여부는 확인 중", section(page, 4))
         contact = section(page, 6)
@@ -156,6 +159,9 @@ class PrivacyPageTest(unittest.TestCase):
         page = build.privacy_page(self.base)
         self.assertIn('data-privacy-draft', page)
         self.assertIn('개정 검토안 · 시행 전', page)
+        self.assertIn('원칙은 운영자 승인 완료', page)
+        self.assertIn('제안 시행일: 2026-11-01 · 실제 시행일: 미확정', page)
+        self.assertIn('제안일 도래만으로 시행·자동 삭제·배포가 시작되지 않습니다', page)
         self.assertIn('실제 게시·운영 배포용 최종 처리방침으로 승인되지 않았습니다', page)
         retention = section(page, 3)
         self.assertIn('90일은 법정 의무기간이 아닙니다', retention)

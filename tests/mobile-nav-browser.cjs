@@ -110,6 +110,8 @@ const base = 'http://127.0.0.1:8765';
           await page.waitForLoadState('load');
           assert.ok(await page.locator('.page h1').isVisible(), 'privacy heading visible');
           assert.match(await page.locator('[data-privacy-draft]').innerText(), /개정 검토안 · 시행 전/);
+          assert.match(await page.locator('[data-privacy-draft]').innerText(), /원칙은 운영자 승인 완료/);
+          assert.match(await page.locator('[data-privacy-effective-date]').innerText(), /제안 시행일: 2026-11-01 · 실제 시행일: 미확정/);
           const privacy = await page.evaluate(() => ({
             pageWidth:document.documentElement.scrollWidth,
             viewportWidth:innerWidth,
@@ -121,7 +123,9 @@ const base = 'http://127.0.0.1:8765';
           for(const expected of ['청소 장소','현장 사진','청소 희망일','선택적으로 처리','전화·문자·카카오톡',
             '오케이청소 개인정보 담당자','033-911-4457','90일은 법정 의무기간이 아닙니다',
             '파기 운영 절차안 · 실행 전 확정 필요','문자·전화 내역','카카오톡 오픈채팅',
-            '현장 사진·전자파일','백업','실제 접수·처리할 수 있음을 운영자가 확인']) {
+            '현장 사진·전자파일','백업','실제 접수·처리할 수 있음을 운영자가 확인',
+            '마지막 회신 요청 후 30일이 지나면 임시 종결','상담 종료 후 90일 보유하는 원칙을 운영자가 승인',
+            '실기기 파기 시험은 미완료']) {
             assert.ok(privacy.bodyText.includes(expected), `privacy text missing: ${expected}`);
           }
           for(const item of await page.locator('.page .box li').all()) {
