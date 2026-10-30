@@ -101,7 +101,7 @@ class PrivacyPageTest(unittest.TestCase):
     def test_unconfirmed_retention_does_not_promise_automatic_deletion(self):
         generated = build.privacy_page(self.base)
         text = section(generated, 3)
-        self.assertIn("보관 기간 및 파기 절차는 확인 중", text)
+        self.assertIn("실제 고객 회원가입과 실제 청소 계약·결제는 없습니다", text)
         self.assertIn("자동 삭제가 이루어진다고 안내할 수 없", text)
         self.assertNotIn("2년", text)
         self.assertEqual(text, section((ROOT / "privacy.html").read_text("utf-8"), 3))
@@ -191,6 +191,18 @@ class PrivacyPageTest(unittest.TestCase):
         contact = section(page, 6)
         self.assertIn('실제 접수·처리할 수 있음을 운영자가 확인', contact)
         self.assertIn('href="tel:0339114457"', contact)
+
+    def test_operator_confirmed_facts_do_not_overstate_deletion_or_storage_scope(self):
+        page = build.privacy_page(self.base)
+        for fact in ('실제 고객 회원가입은 없습니다', '상담자료는 운영자 본인만 열람',
+                     '휴대폰 갤러리·PC에 별도로 저장', '지문·비밀번호 잠금',
+                     '실제 고객 회원가입과 실제 청소 계약·결제는 없습니다',
+                     '현재 확인된 삭제 방법은 휴대폰에서 수동 삭제',
+                     'PC 저장 사진·휴지통·연결 기기·백업의 삭제 범위와 복원 가능성은 미확인'):
+            self.assertIn(fact, page)
+        self.assertIn('모든 상담·시험 자료·기기 사본·다른 저장소의 부재로 확대하지 않습니다', page)
+        self.assertIn('다른 사본까지 삭제되거나 복구 불가능한 파기가 완료된 것으로 안내하지 않습니다', page)
+        self.assertEqual(page, (ROOT / 'privacy.html').read_text('utf-8'))
 
 
 if __name__ == "__main__":
