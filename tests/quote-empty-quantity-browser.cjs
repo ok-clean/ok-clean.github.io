@@ -43,7 +43,7 @@ const home = source.replace(/(<script id="cfg" type="application\/json">)([\s\S]
       assert.match(await page.locator('#qQtyNote').innerText(), /입력/);
       assert.equal(await page.locator('#qV').innerText(), '수량 입력');
       assert.match(await page.locator('#qN').innerText(), /수량을 입력/);
-      assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('quote')).qty), '');
+      assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('quote_public_selection_v1')).qty), '');
       await page.locator('#qOpt input').first().check();
       assert.equal(await page.locator('#qV').innerText(), '수량 입력', 'options do not produce a price without quantity');
       for(const button of ['#qCopy','#qKakao','#qSms']){
@@ -97,7 +97,8 @@ const home = source.replace(/(<script id="cfg" type="application\/json">)([\s\S]
       await page.evaluate(() => localStorage.setItem('member',JSON.stringify({name:'가상고객',code:'OK-ABC234',free:'가상'})));
       await page.reload({waitUntil:'load'});
       assert.equal(await page.locator('#qQty').inputValue(), '');
-      assert.match(await page.locator('#qMem').innerText(), /수량을 입력하면 회원 쿠폰 적용 금액/);
+      assert.match(await page.locator('#qMem').innerText(), /회원가입 일시 중지/);
+      assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('member')).code), 'OK-ABC234');
       assert.equal(await page.locator('#qV').innerText(), '수량 입력');
       assert.deepEqual(errors, []);
       await context.close();

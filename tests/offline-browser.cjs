@@ -61,13 +61,14 @@ const server = http.createServer((req, res) => {
       await page.evaluate(async () => {
         await (await caches.open('other-app')).put('/foreign-only.json', new Response('foreign data'));
         await (await caches.open('okclean-v0')).put('/obsolete.json', new Response('old data'));
+        await (await caches.open('okclean-v1')).put('/old-member-script.js', new Response('old code'));
       });
       await page.goto(base + '/index.html', {waitUntil:'load'});
       await page.evaluate(() => navigator.serviceWorker.ready);
       assert.deepEqual(await page.evaluate(async () => {
         const keys = await caches.keys();
-        return [keys.includes('other-app'), keys.includes('okclean-v0')];
-      }), [true, false], 'activation only removes obsolete okclean caches');
+        return [keys.includes('other-app'), keys.includes('okclean-v0'), keys.includes('okclean-v1')];
+      }), [true, false, false], 'activation removes old site caches and preserves other apps');
       await page.waitForFunction(() => !document.getElementById('caseList'));
       const beforeReloadCount = appCaseRequests.length;
       await page.reload({waitUntil:'load'});
@@ -84,12 +85,12 @@ const server = http.createServer((req, res) => {
         return result.map(r => r.status);
       }), [200, 200, 200, 500, 404]);
       await page.waitForFunction(async () => {
-        const c = await caches.open('okclean-v1');
+        const c = await caches.open('okclean-v2');
         return (await Promise.all(['/index.html','/site.js','/app.js','/style.css','/fixture-data.json','/area/cached.html','/services/cached.html'].map(x => c.match(x)))).every(Boolean);
       });
       // A legacy timestamped entry is deliberately kept and must not be overwritten.
       await page.evaluate(async () => {
-        const cache = await caches.open('okclean-v1');
+        const cache = await caches.open('okclean-v2');
         await cache.put('/cases.json?t=777', new Response(JSON.stringify({cases:[],version:0}), {headers:{'Content-Type':'application/json'}}));
       });
       caseVersion = 1;
@@ -103,24 +104,26 @@ const server = http.createServer((req, res) => {
         const urls = ['/cases.json?t=404','/cases.json?t=500'];
         return Promise.all(urls.map(async url => (await fetch(url)).status));
       }), [404, 500]);
-      // Other queries and paths retain the previous cache policy.
-      await page.evaluate(async () => Promise.all(['/cases.json?other=1','/cases.json?t=1&x=2','/cases.json?t=1&t=2','/nested/cases.json?t=101'].map(url => fetch(url))));
-      await page.waitForFunction(async () => {
-        const c = await caches.open('okclean-v1');
-        return (await Promise.all(['/cases.json?other=1','/cases.json?t=1&x=2','/cases.json?t=1&t=2','/nested/cases.json?t=101'].map(url => c.match(url)))).every(Boolean);
-      });
+      // Query-bearing requests can contain user data and are never saved.
+      await page.evaluate(async () => Promise.all(['/cases.json?other=1','/cases.json?t=1&x=2','/cases.json?t=1&t=2','/nested/cases.json?t=101','/?ref=synthetic'].map(url => fetch(url))));
+      await page.waitForTimeout(300);
+      assert.deepEqual(await page.evaluate(async () => {
+        const c = await caches.open('okclean-v2');
+        return Promise.all(['/cases.json?other=1','/cases.json?t=1&x=2','/cases.json?t=1&t=2','/nested/cases.json?t=101','/?ref=synthetic'].map(async url => !!(await c.match(url))));
+      }), [false, false, false, false, false]);
       // The cache write in the worker is asynchronous; inspect after it had time to run.
       await page.waitForTimeout(300);
       assert.deepEqual(await page.evaluate(async () => {
-        const cache = await caches.open('okclean-v1');
+        const cache = await caches.open('okclean-v2');
         const urls = ['/cases.json?t=101','/cases.json?t=102','/cases.json?t=103','/cases.json?t=404','/cases.json?t=500'];
         return [await (await cache.match('/cases.json?t=777')).json(), ...await Promise.all(urls.map(async url => !!(await cache.match(url))))];
       }), [{cases:[],version:0}, false, false, false, false, false]);
       assert.deepEqual(await page.evaluate(async urls => Promise.all(urls.map(async url => !!(await caches.match(url)))), appCaseRequests), appCaseRequests.map(() => false));
-      // A direct document navigation with the same query keeps its old policy.
+      // Direct navigation with a query is also excluded from caching.
       const direct = await context.newPage();
       assert.equal((await direct.goto(base + '/cases.json?t=99991')).status(), 200);
-      await page.waitForFunction(async () => !!(await caches.match('/cases.json?t=99991')));
+      await page.waitForTimeout(300);
+      assert.equal(await page.evaluate(async () => !!(await caches.match('/cases.json?t=99991'))), false);
       await direct.close();
       assert.equal(await page.evaluate(async () => !!(await caches.match('/index.html?area=%EC%B6%98%EC%B2%9C'))), false);
       assert.deepEqual(await page.evaluate(async () => Promise.all(
@@ -199,15 +202,15 @@ const server = http.createServer((req, res) => {
       await subPage.goto(base + '/subpath/services/cached.html', {waitUntil:'load'});
       await subPage.goto(base + '/subpath/index.html', {waitUntil:'load'});
       await subPage.waitForFunction(async () => {
-        const c = await caches.open('okclean-v1');
+        const c = await caches.open('okclean-v2');
         return (await Promise.all(['/subpath/index.html','/subpath/app.js','/subpath/site.js','/subpath/style.css','/subpath/services/cached.html'].map(x => c.match(x)))).every(Boolean);
       });
       await subPage.evaluate(async () => {
         await fetch('/subpath/cases.json?t=101');
         await fetch('/cases.json?t=202');
       });
-      await subPage.waitForFunction(async () => !!(await caches.match('/cases.json?t=202')));
       await subPage.waitForTimeout(300);
+      assert.equal(await subPage.evaluate(async () => !!(await caches.match('/cases.json?t=202'))), false);
       assert.equal(await subPage.evaluate(async () => !!(await caches.match('/subpath/cases.json?t=101'))), false);
       assert.equal(await subPage.evaluate(async () => !!(await caches.match('/subpath/?area=%EC%B6%98%EC%B2%9C'))), false);
       networkDown = true;
@@ -228,3 +231,4 @@ const server = http.createServer((req, res) => {
     await new Promise(resolve => server.close(resolve));
   }
 })().catch(error => { console.error(error); server.close(); process.exitCode = 1; });
+

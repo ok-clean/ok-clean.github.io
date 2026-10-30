@@ -91,6 +91,7 @@ def head(c, title, desc, path, depth=0, ld=None):
     return f"""<!doctype html>
 <html lang="ko"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
 <title>{e(title)}</title>
 <meta name="description" content="{e(desc)}">
 <link rel="canonical" href="{e(url)}">
@@ -125,6 +126,11 @@ def ld_tags(ld):
 
 
 def analytics(c):
+    # Pause configured analytics while membership privacy is being reviewed.
+    # Keep the implementation below for a separately reviewed reactivation.
+    ANALYTICS_PAUSED = True
+    if ANALYTICS_PAUSED:
+        return ""
     a = c.get("analytics") or {}
     out = ""
     if a.get("ga"):
@@ -195,8 +201,16 @@ def services_html(c, depth=0):
     return f'<div class="cats" role="group" aria-label="분류">{chips}</div><ul class="svc" id="svcList">{"".join(rows)}</ul>'
 
 
+def current_faq(c):
+    # Keep displayed FAQ and structured data consistent while new membership
+    # is suspended; preserve the original text in the configuration.
+    return [{**f, "a": "신규 회원가입은 개인정보 처리 절차 확인을 위해 일시 중지 중이에요. 회원 혜택에 관해서는 전화나 카카오톡으로 문의해 주세요."}
+            if "회원" in f.get("q", "") or "가입" in f.get("q", "") else f
+            for f in c.get("faq", [])]
+
+
 def faq_html(c):
-    return "".join(f'<details><summary>{e(f["q"])}</summary><p>{e(f["a"])}</p></details>' for f in c.get("faq", []))
+    return "".join(f'<details><summary>{e(f["q"])}</summary><p>{e(f["a"])}</p></details>' for f in current_faq(c))
 
 
 def won_text(x):
@@ -207,8 +221,8 @@ def member_badge(c):
     m = c.get("member")
     if not m:
         return ""
-    return (f'<button class="member-badge" type="button" data-join><b>회원가입하면 {won_text(m["coupon"])} 할인</b>'
-            f'<span>+ 무료 서비스 1가지 · 30초 가입</span></button>')
+    return ('<button class="member-badge" type="button" data-join><b>회원가입 일시 중지</b>'
+            '<span>회원 혜택 안내 보기</span></button>')
 
 
 def member_section(c):
@@ -220,17 +234,17 @@ def member_section(c):
     grades = "".join(f'<tr><td><b>{e(g["name"])}</b></td><td>{e(g["rule"])}</td><td>{e(g["perk"])}</td></tr>' for g in m.get("grades", []))
     return f"""<section class="s" id="member"><div class="wrap">
   <h2>회원 혜택</h2>
-  <p class="d">가입하는 순간 쓸 수 있는 쿠폰부터, 이용할수록 쌓이는 포인트까지 준비했어요.</p>
+  <p class="d">회원 혜택을 안내해 드려요. 신규 회원가입은 개인정보 처리 절차 확인을 위해 일시 중지 중이에요.</p>
   <div class="perks">
     <div class="perk"><span class="pk">가입 즉시</span><b>{won_text(m["coupon"])} 할인 쿠폰</b><p>{e(m.get("couponTerms", ""))}</p></div>
     <div class="perk"><span class="pk">가입 즉시</span><b>무료 서비스 1가지</b><ul>{frees}</ul></div>
     <div class="perk"><span class="pk">후기 선물</span><b>{e(m.get("reviewGift", ""))}</b><p>{e(m.get("reviewTerms", ""))}</p>{f'<a class="btn line small" href="{e(c["naverPlace"])}" target="_blank" rel="noopener">네이버 플레이스에 리뷰 남기기</a>' if c.get("naverPlace") else ''}</div>
-    {f'<div class="perk"><span class="pk">친구 초대</span><b>{won(ref["point"]).replace("만", "만")}P 적립</b><p>{e(ref.get("text", ""))}</p><button class="btn line small" type="button" data-invite>내 초대 링크 보내기</button></div>' if ref else ''}
+    {f'<div class="perk"><span class="pk">친구 초대</span><b>{won(ref["point"]).replace("만", "만")}P 적립</b><p>{e(ref.get("text", ""))}</p><button class="btn line small" type="button" data-invite>친구 초대 일시 중지</button></div>' if ref else ''}
   </div>
   <h3 class="sub">등급과 포인트</h3>
   <div class="tbl-wrap"><table class="grade"><thead><tr><th>등급</th><th>조건</th><th>혜택</th></tr></thead><tbody>{grades}</tbody></table></div>
   <p class="note">{e(m.get("pointTerms", ""))}</p>
-  <button class="btn glove" type="button" data-join>회원가입하고 쿠폰 받기</button>
+  <button class="btn glove" type="button" data-join>회원가입 일시 중지 안내</button>
 </div></section>"""
 
 
@@ -243,7 +257,7 @@ def join_modal(c):
     regions = "".join(f"<option>{e(r)}</option>" for r in c.get("areaChoices", c.get("regions", [])))
     return f"""<div class="modal" id="join" role="dialog" aria-modal="true" aria-labelledby="joinT" hidden><div class="modal-box">
 <button class="x" type="button" data-close aria-label="닫기">×</button>
-<div id="joinForm">
+<div id="joinForm" hidden inert>
   <p class="eyebrow-less">{e(c["name"])} 회원가입</p>
   <h2 id="joinT">지금 가입하면 <em>{won_text(m["coupon"])} 할인</em> + 무료 서비스</h2>
   <p class="ref-b" id="jRef" hidden></p>
@@ -306,7 +320,7 @@ def index_page(c, cases=()):
     desc = f"{', '.join(regions)} 입주청소, 거주청소, 사무실·준공 청소, 에어컨·세탁기 분해세척. 평수만 넣으면 예상 견적을 바로 볼 수 있어요."
     cfg = json.dumps(c, ensure_ascii=False).replace("</", "<\\/")
     faq_ld = {"@context": "https://schema.org", "@type": "FAQPage",
-              "mainEntity": [{"@type": "Question", "name": f["q"], "acceptedAnswer": {"@type": "Answer", "text": f["a"]}} for f in c.get("faq", [])]}
+              "mainEntity": [{"@type": "Question", "name": f["q"], "acceptedAnswer": {"@type": "Answer", "text": f["a"]}} for f in current_faq(c)]}
     return head(c, title, desc, "", 0, [biz_ld(c), faq_ld]) + f"""
 <main>
 <section class="hero"><div class="wrap hero-in">
@@ -511,39 +525,27 @@ def area_page(c, r, cases):
 def privacy_page(c):
     b = c.get("business") or {}
     who = b.get("company") or c["name"]
-    member_enabled = bool(c.get("member"))
-    firebase = c.get("firebase")
-    firebase_used = member_enabled and isinstance(firebase, dict) and bool(firebase.get("apiKey") and firebase.get("projectId"))
-    backend = c.get("memberBackendUrl")
-    script_used = member_enabled and isinstance(backend, str) and backend.startswith("https://script.google.com/macros/s/")
-    remote_notice = ""
-    if firebase_used:
-        remote_notice += "<p>회원가입 버튼을 누르면 가입 정보를 Google Firebase의 Cloud Firestore로 전송하려고 합니다. 연결 오류 등으로 전송되지 않을 수도 있습니다.</p>\n"
-    if script_used:
-        remote_notice += "<p>설정된 Google Apps Script 연동 주소로도 가입 정보를 전송하려고 합니다. 전송 성공 여부는 카카오톡 상담으로 확인해 주세요.</p>\n"
-    if not firebase_used and not script_used:
-        remote_notice = "<p>회원가입 정보의 자동 전송은 설정되어 있지 않습니다.</p>\n"
     delete_notice = ""
-    if member_enabled:
-        delete_notice = "<p>회원가입 완료 화면의 '이 기기의 회원정보 지우기'에서 확인을 거쳐 이 브라우저에 저장된 회원정보와 쿠폰번호를 지울 수 있습니다. 다른 열린 탭은 먼저 닫아 주세요. 브라우저 자동완성, 클립보드, 카카오톡 대화와 관리자에게 전송 중이거나 이미 접수된 정보는 이 기능으로 삭제되지 않습니다. 서버에 접수된 정보의 삭제는 아래 연락처로 요청해 주세요.</p>\n"
+    if c.get("member"):
+        delete_notice = "<p>회원가입 일시중지 안내 화면의 '이 기기에 저장된 회원정보 직접 지우기'를 통해 이 브라우저의 회원정보와 쿠폰번호를 직접 지울 수 있습니다. 클립보드, 카카오톡 대화와 이미 접수된 서버 정보는 이 기능으로 삭제되지 않습니다.</p>\n"
     return head(c, f"개인정보처리방침 | {c['name']}", "개인정보처리방침", "privacy.html") + f"""
 <main class="wrap page">
 <h1>개인정보처리방침</h1>
 <div class="box">
 <h2>1. 수집하는 항목과 목적</h2>
-<p>{e(who)}(이하 '업체')는 회원가입 시 <b>이름, 연락처, 지역, 선택한 무료 서비스, 추천인 코드(초대 링크로 가입한 경우), 이벤트 수신 동의 여부</b>를 받아요. 회원 관리, 쿠폰·포인트 지급, 예약 상담과 작업 진행에만 써요.</p>
+<p>{e(who)}(이하 '업체')는 기존 회원가입 과정에서 <b>이름, 연락처, 지역, 선택한 무료 서비스, 추천인 코드, 이벤트 수신 동의 여부</b>를 처리했을 수 있습니다. 현재 홈페이지의 신규 회원가입 접수는 일시 중지 중입니다.</p>
 <h2>2. 수집 방법</h2>
-<p>가입 정보와 쿠폰번호는 이 브라우저에 저장될 수 있습니다. 견적 계산기에 입력한 내용도 이 브라우저에 저장될 수 있습니다.</p>
-{remote_notice}<p>카카오톡 가입 버튼을 누르면 가입 내용이 클립보드에 복사될 수 있으며, 이용자가 직접 붙여넣어 전송할 수 있습니다. 견적 내용도 이용자가 상담을 위해 직접 공유할 수 있습니다.</p>
+<p>이전에 가입한 회원정보와 쿠폰번호가 이 브라우저에 남아 있을 수 있습니다. 견적 계산기에 입력한 내용도 이 브라우저에 저장될 수 있습니다. 이 화면에서 신규 회원가입 접수를 중지합니다. 이전에 열린 화면과 이미 접수된 정보는 별도 확인이 필요합니다.</p>
+<p>견적 내용은 상담을 위해 이용자가 직접 클립보드나 카카오톡 등으로 공유할 수 있습니다. 브라우저 자동완성, 클립보드, 카카오톡 대화와 이미 접수된 정보는 서로 별도로 관리됩니다. 기존 정보의 열람·수정·삭제는 아래 연락처로 요청해 주세요.</p>
 {delete_notice}<h2>3. 보관 기간과 파기</h2>
-<p>회원 정보는 탈퇴 요청 시 또는 마지막 이용 후 2년이 지나면 지체 없이 파기해요. 관리자 대장에 저장된 회원정보도 동일한 기준으로 삭제합니다. 법령에 따라 보관해야 하는 거래 기록은 정해진 기간 동안 보관해요.</p>
+<p>기존 회원정보와 관리자 대장의 보관 기간 및 파기 절차는 확인 중입니다. 자동 삭제가 이루어진다고 안내할 수 없으며, 정보의 보관·삭제에 관한 문의는 아래 연락처로 해 주세요. 법령상 보존 대상과 보존 기간도 별도로 확인이 필요합니다.</p>
 <h2>4. 제3자 제공</h2>
-<p>이용자의 동의 없이 개인정보를 외부에 판매하거나 제3자에게 제공하지 않아요. 연동 설정에 따라 Google 서비스를 저장·처리 수단으로 이용할 수 있습니다.</p>
+<p>기존에 접수된 정보의 외부 처리·제공 현황은 확인 중입니다. 카카오톡 상담에서 이용자가 직접 공유한 내용은 해당 서비스에서도 처리될 수 있습니다.</p>
 <h2>5. 이용자의 권리</h2>
 <p>언제든지 개인정보 열람·수정·삭제와 이벤트 수신 거부를 요청할 수 있어요. 아래 연락처로 말씀해 주세요.</p>
 <h2>6. 문의</h2>
 <p>{e(who)} · 대표 {e(b.get('owner', ''))} · {e(c.get('phone', ''))} {e(b.get('email', ''))}</p>
-<p style="color:var(--muted);font-size:14px">사이트 이용 통계를 위해 방문 기록(접속 기기, 방문 페이지 등)이 익명으로 수집될 수 있어요.</p>
+<p style="color:var(--muted);font-size:14px">현재 사이트 방문 통계 스크립트의 자동 수집은 일시 중지 중입니다.</p>
 </div>
 </main>
 {foot(c)}

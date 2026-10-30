@@ -1,5 +1,6 @@
 // 홈 화면 앱용 서비스 워커: 항상 최신 내용을 먼저 받고, 인터넷이 끊겼을 때만 저장본을 보여줌
-const CACHE = "okclean-v1";
+// 이전 버전의 회원 수집 코드 및 URL 캐시를 최신 서비스 워커가 활성화될 때 비웁니다.
+const CACHE = "okclean-v2";
 const CACHE_PREFIX = "okclean-";
 self.addEventListener("install", e => self.skipWaiting());
 self.addEventListener("activate", e => e.waitUntil(
@@ -9,14 +10,13 @@ self.addEventListener("fetch", e => {
   const req = e.request;
   const url = new URL(req.url);
   if(req.method !== "GET" || url.origin !== location.origin) return;
-  // 사례 목록은 요청마다 시각이 달라 매번 새로운 캐시 항목이 생깁니다.
-  const timestampedCases = req.mode !== "navigate" &&
-    url.pathname === new URL("cases.json", self.registration.scope).pathname && /^\?t=[0-9]+$/.test(url.search);
+  // 쿼리에는 추천 코드나 이용자 입력이 들어갈 수 있으므로 캐시에 보관하지 않습니다.
+  const hasQuery = url.search !== "";
   const network = fetch(req);
   // 응답은 바로 전달하되 캐시 저장이 끝날 때까지 작업자를 유지합니다.
   // 저장 공간 부족 등 캐시 실패는 성공한 네트워크 응답을 바꾸지 않습니다.
   e.waitUntil(network.then(res => {
-    if(res.ok && !timestampedCases){
+    if(res.ok && !hasQuery){
       const copy = res.clone();
       return caches.open(CACHE).then(c => c.put(req, copy));
     }
@@ -32,3 +32,4 @@ self.addEventListener("fetch", e => {
     })).then(r => r || Response.error()))
   );
 });
+

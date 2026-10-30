@@ -20,7 +20,7 @@ function worker({network, put, cached} = {}) {
     clients: {claim:async()=>{}}, skipWaiting:()=>{},
     addEventListener: (name, listener) => { handlers[name] = listener; }
   };
-  const caches = {open:async name => { assert.equal(name,'okclean-v1'); return cache; }};
+  const caches = {open:async name => { assert.equal(name,'okclean-v2'); return cache; }};
   vm.runInNewContext(fs.readFileSync('sw.js','utf8'), {
     self, caches, URL, Response, location:{origin:'https://example.test'},
     fetch:network
@@ -63,8 +63,8 @@ test('cache storage rejection does not replace a successful network response', a
   assert.equal(rig.calls.puts, 1);
 });
 
-test('failed HTTP responses and timestamped case requests are never cached', async () => {
-  for (const [path, status] of [['/missing',404], ['/cases.json?t=123',200]]) {
+test('failed HTTP responses and requests with any query are never cached', async () => {
+  for (const [path, status] of [['/missing',404], ['/cases.json?t=123',200], ['/?ref=synthetic',200], ['/index.html?phone=synthetic',200]]) {
     const rig = worker({network:async()=>new Response('result',{status}), put:async()=>{}});
     const event = rig.request(path);
     assert.equal((await event.response).status, status);
@@ -80,3 +80,4 @@ test('network failure falls back to the current site cache', async () => {
   await event.lifetime;
   assert.equal(rig.calls.puts, 0);
 });
+

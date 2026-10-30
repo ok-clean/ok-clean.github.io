@@ -88,17 +88,13 @@ const home = source.replace(/(<script id="cfg" type="application\/json">)([\s\S]
       assert.equal(await sheet.isHidden(), true);
       assert.equal(await page.evaluate(() => document.activeElement.id), 'qKakao');
 
-      // 가입 경로의 가짜 정보와 복사 실패 후 성공 흐름도 유지합니다.
+      // 가입 중에는 개인정보 복사나 회원 대장 전송을 시작하지 않습니다.
+      await page.evaluate(() => {window.fakeClipboard='';});
       await page.locator('[data-join]').first().click();
-      await page.locator('#jName').fill('가상고객'); await page.locator('#jPhone').fill('01000000000');
-      await page.locator('#jAgree').check(); await page.locator('#jSubmit').click();
-      await page.locator('#jKakao').click();
-      await page.waitForTimeout(100);
-      assert.match(await sheet.locator('.send-pre').innerText(), /가상고객/);
-      await again.focus(); await page.evaluate(() => {window.copyMode='allow';});
-      await page.keyboard.press('Enter');
-      await page.waitForFunction(() => document.querySelector('[data-copy-status]')?.textContent.includes('복사했어요'));
-      assert.match(await page.evaluate(() => window.fakeClipboard), /가상고객/);
+      await page.locator('#join').waitFor({state:'visible'});
+      assert.match(await page.locator('#join').innerText(), /일시\s*중지/);
+      assert.equal(await page.locator('#joinForm').isVisible(), false);
+      assert.equal(await page.evaluate(() => window.fakeClipboard), '');
       await page.keyboard.press('Escape');
 
       // 공통 공유 창에서 임시 복사 칸 사용 후에도 버튼 포커스를 유지합니다.

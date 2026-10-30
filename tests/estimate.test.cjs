@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync('app.js', 'utf8');
 const config = JSON.parse(fs.readFileSync('config.json', 'utf8'));
-const calculator = source.slice(source.indexOf('const isQuote ='), source.indexOf('function summary()'));
+const calculator = source.slice(source.indexOf('const isQuote ='), source.indexOf('function summary('));
 function calculate(id, state = {}) {
   const service = config.services.find(s => s.id === id);
   const cur = {v: 0, t: 0, qty: 1, opts: [], ...state};
@@ -38,9 +38,9 @@ function restoredDate(saved) {
   return element.value;
 }
 assert.equal(restoredDate('2026-10-26'), '');
-assert.equal(restoredDate('2026-10-27'), '2026-10-27');
-assert.equal(restoredDate('2026-11-01'), '2026-11-01');
-console.log('과거·당일·미래 날짜 복원 검사 통과');
+assert.equal(restoredDate('2026-10-27'), '');
+assert.equal(restoredDate('2026-11-01'), '');
+console.log('기존 날짜 자동 복원 중지 검사 통과');
 const dateHandlerCode = source.slice(source.indexOf('$("qDate").addEventListener("change"'), source.indexOf('window.goSms'));
 let changeDate, notices = [], recalculations = 0;
 const dateInput = {min: '', value: ''};

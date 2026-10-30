@@ -25,16 +25,19 @@ const won = x => { x = Math.round(x / 1000) * 1000; return x >= 10000 ? (+(x / 1
 const BLOGS = [].concat(C.blog || []).filter(Boolean);
 const phoneDigits = (C.phone || "").replace(/[^0-9+]/g, "");
 const M = C.member || null;
-let MEMBER = store.get("member", null);
+// 신규 회원 접수와 인증되지 않은 기존 회원정보 조회는 검증 전까지 중지합니다.
+// 값을 지우거나 덮어쓰지 않으며, 재활성화 전 별도의 보안 검토가 필요합니다.
+const MEMBER_SIGNUP_PAUSED = true;
+let MEMBER = MEMBER_SIGNUP_PAUSED ? null : store.get("member", null);
 // 메모리에만 있는 회원정보와 마지막 기기 저장 결과를 구분합니다.
 let memberSaved = !!MEMBER;
 const memberStorageWarning = "최근 회원정보를 이 기기에 저장하지 못했어요. 새로고침하거나 창을 닫으면 쿠폰 정보가 사라질 수 있어요. 쿠폰번호를 확인한 뒤 카톡으로 가입을 완료해 주세요.";
 // 명시된 추천 링크는 현재 방문에서 우선하며, 잘못된 링크에 이전 코드를 대체하지 않습니다.
-const refParams = new URLSearchParams(location.search).getAll("ref");
+const refParams = MEMBER_SIGNUP_PAUSED ? [] : new URLSearchParams(location.search).getAll("ref");
 const validRef = code => typeof code === "string" && /^OK-[A-Z0-9]{6}$/.test(code);
 const ownRef = code => !!MEMBER && typeof MEMBER.code === "string" && MEMBER.code.toUpperCase() === code;
 const refQ = refParams.length === 1 ? refParams[0].toUpperCase() : "";
-const storedRef = store.get("ref", "");
+const storedRef = MEMBER_SIGNUP_PAUSED ? "" : store.get("ref", "");
 let REF = "", refNotice = "";
 // 오래된 코드가 다음 화면에 잘못 복원되지 않도록 최선을 다해 지웁니다.
 const clearStoredRef = () => { try { localStorage.removeItem("ref"); return localStorage.getItem("ref") === null; } catch(_) { return false; } };
@@ -60,7 +63,8 @@ if(refParams.length){
 // ── 견적 계산기 ──
 const SV = C.services;
 // 오래된 형식이나 손상된 저장값도 계산기 전체를 멈추지 않도록 확인합니다.
-const savedQuote = store.get("quote", {});
+// 이전 회원/견적 저장값은 보존하고, 새로 저장하는 선택에는 지역·날짜를 넣지 않습니다.
+const savedQuote = store.get("quote_public_selection_v1", null) ?? store.get("quote", {});
 const Q = savedQuote && typeof savedQuote === "object" && !Array.isArray(savedQuote) ? savedQuote : {};
 const serviceParams = new URLSearchParams(location.search).getAll("svc");
 let urlSvc = null, serviceLinkIssue = "";
@@ -130,9 +134,8 @@ if(areaParams.length){
     $("qArea").setAttribute("aria-describedby", note.id);
     $("qArea").addEventListener("change", () => { note.remove(); $("qArea").removeAttribute("aria-describedby"); }, {once:true});
   }
-} else if(typeof Q.area === "string" && Q.area) $("qArea").value = Q.area;
+}
 const today = new Date(); $("qDate").min = new Date(today.getTime() + 9*3600e3).toISOString().slice(0, 10);
-if(typeof Q.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(Q.date) && Q.date >= $("qDate").min) $("qDate").value = Q.date;
 
 // 가격 방식: tiers(집 크기별 정액, 입주청소) / variants(종류 × 수량) / quote(현장 견적)
 // 금액에 hi 가 없으면 '~부터' 금액, quote:true 는 현장 견적 항목
@@ -191,7 +194,7 @@ function estimate(){
   if(s.min){ lo = Math.max(lo, s.min); if(hi != null) hi = Math.max(hi, s.min); }
   return {lo, hi, v, q, t, onSite: opts.filter(o => o.quote).map(o => o.name)};
 }
-function summary(){
+function summary({includeLocation = true} = {}){
   const s = svc(), r = estimate();
   const lines = [`[${C.name} 견적 문의]`, `서비스: ${s.name}`];
   const os = cur.opts.map(i => (s.options || [])[i]).filter(Boolean).map(o => o.name);
@@ -208,10 +211,10 @@ function summary(){
     if(os.length) lines.push(`추가: ${os.join(", ")}`);
     lines.push("현장 사진을 보내드릴게요. 견적 부탁드려요.");
   }
-  if($("qArea").value) lines.push(`지역: ${$("qArea").value}`);
-  if($("qDate").value) lines.push(`희망 날짜: ${$("qDate").value}`);
-  if(MEMBER && M) lines.push(`회원 쿠폰: ${MEMBER.code} (${won(M.coupon)}원 할인 + 무료 서비스: ${MEMBER.free})`);
-  else if(REF) lines.push(`추천인 코드: ${REF}`);
+  if(includeLocation && $("qArea").value) lines.push(`지역: ${$("qArea").value}`);
+  if(includeLocation && $("qDate").value) lines.push(`희망 날짜: ${$("qDate").value}`);
+  if(!MEMBER_SIGNUP_PAUSED && MEMBER && M) lines.push(`회원 쿠폰: ${MEMBER.code} (${won(M.coupon)}원 할인 + 무료 서비스: ${MEMBER.free})`);
+  else if(!MEMBER_SIGNUP_PAUSED && REF) lines.push(`추천인 코드: ${REF}`);
   lines.push("상세 주소·현장 사진은 대화로 보내드릴게요.");
   return lines.join("\n");
 }
@@ -257,9 +260,9 @@ function calc(){
   if(M){
     const box = $("qMem"); box.hidden = false;
     if(MEMBER) box.innerHTML = needsQty ? `🎟 수량을 입력하면 회원 쿠폰 적용 금액을 확인할 수 있어요.` : r ? `🎟 회원 쿠폰 적용 시 <b>${priceText(Math.max(0, r.lo - M.coupon), r.hi == null ? null : Math.max(0, r.hi - M.coupon))}</b> + ${esc(MEMBER.free)} 무료` : `🎟 회원 쿠폰 ${won(M.coupon)}원 할인 + ${esc(MEMBER.free)} 무료가 적용돼요`;
-    else box.innerHTML = `<button type="button" class="mem-join" data-join>🎟 회원가입하면 여기서 <b>${won(M.coupon)}원 더 할인</b> + 무료 서비스 →</button>`;
+    else box.innerHTML = MEMBER_SIGNUP_PAUSED ? `<button type="button" class="mem-join" data-join>🎟 회원가입 일시 중지 · 회원 혜택 안내 →</button>` : `<button type="button" class="mem-join" data-join>🎟 회원가입하면 여기서 <b>${won(M.coupon)}원 더 할인</b> + 무료 서비스 →</button>`;
   }
-  const saved = store.set("quote", {svc: cur.svc, v: cur.v, t: cur.t, qty: cur.qty, opts: cur.opts, area: $("qArea").value, date: $("qDate").value});
+  const saved = store.set("quote_public_selection_v1", {svc: cur.svc, v: cur.v, t: cur.t, qty: cur.qty, opts: cur.opts});
   let warning = $("qStorageNote");
   if(!saved && !warning){
     warning = document.createElement("p");
@@ -317,11 +320,11 @@ window.goSms = u => { location.href = u; };
 // 문자로 견적 보내기: 견적 내용이 미리 적힌 문자 창을 엶 (아이폰은 &body=, 안드로이드는 ?body=)
 if($("qSms")) $("qSms").onclick = async () => {
   if(!validateQuoteDateBeforeSend()) return;
-  const num = (C.sms || "").replace(/[^0-9]/g, ""), body = encodeURIComponent(summary());
+  const num = (C.sms || "").replace(/[^0-9]/g, ""), body = encodeURIComponent(summary({includeLocation:false}));
   const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const MOBILE = IOS || /Android/i.test(navigator.userAgent);
   if(!MOBILE){   // PC에서는 문자 앱이 없어서 번호와 내용을 안내
-    const copied = await copy(summary());
+    const copied = await copy(summary({includeLocation:false}));
     toast(copied ? `문의 내용을 복사했어요. 휴대폰에서 ${C.sms} 로 문자 보내주세요.` : `복사하지 못했어요. 견적 내용을 확인해 ${C.sms} 로 문자 보내주세요.`);
     return;
   }
@@ -437,7 +440,25 @@ if(nowEl) $("months").scrollLeft = Math.max(0, nowEl.offsetLeft - 20);
 
 // ── 회원가입 (팝업) ──
 // 연동 URL이 설정된 경우 관리자 대장으로도 가입 정보를 전송합니다. 카톡 확인 방식은 유지합니다.
+function showJoinPaused(){
+  const join = $("join"), d = $("joinDone"), form = $("joinForm");
+  form.hidden = true; form.inert = true; d.hidden = false;
+  join.setAttribute("aria-labelledby", "joinPausedTitle");
+  d.innerHTML = `<h2 id="joinPausedTitle">회원가입 일시 중지</h2>
+    <p>개인정보 처리 절차를 확인하는 동안 신규 가입을 받지 않아요. 회원 혜택과 청소 상담은 계속 확인하실 수 있어요.</p>
+    <p>이 기기에 이전에 저장된 회원정보는 그대로 보존되며, 본인 확인을 마칠 때까지 표시하거나 전송하지 않아요.</p>
+    <button class="link member-clear" type="button" id="jClearPaused">이 기기에 저장된 회원정보 직접 지우기</button>
+    <button class="btn line" type="button" data-close>닫기</button>`;
+  $("jClearPaused").onclick = () => {
+    if(!window.confirm("이 기기에 저장된 회원정보를 지울까요? 관리자에게 이미 접수된 정보와 카카오톡 대화는 지워지지 않아요.")) return;
+    try { localStorage.removeItem("member"); if(localStorage.getItem("member") !== null) throw Error("DELETE_FAILED"); }
+    catch(_) { toast("기기 정보 삭제에 실패했어요. 브라우저 설정을 확인해 주세요."); return; }
+    if(typeof window.clearHiddenMemberSheet === "function") window.clearHiddenMemberSheet();
+    toast("이 기기에 저장된 회원정보를 지웠어요.");
+  };
+}
 function joinDone(){
+  if(MEMBER_SIGNUP_PAUSED){ showJoinPaused(); return; }
   const d = $("joinDone"), m = MEMBER;
   $("joinForm").hidden = true; d.hidden = false;
   d.innerHTML = `<p class="done-k">가입을 환영해요, ${esc(m.name)}님</p>
@@ -489,6 +510,7 @@ function joinDone(){
 }
 // 친구 초대: 내 쿠폰번호가 들어간 링크를 공유 (친구가 가입하면 카톡 가입 메시지에 추천인 코드가 함께 와요)
 async function invite(){
+  if(MEMBER_SIGNUP_PAUSED){ toast("회원가입과 친구 초대는 일시 중지 중이에요."); return; }
   if(!MEMBER){ openJoin(); return; }
   const url = (C.siteUrl || location.origin).replace(/\/$/, "") + "/?ref=" + MEMBER.code;
   const text = `${C.name} 회원가입하면 ${won(M.coupon)}원 할인 쿠폰 + 무료 서비스 1가지를 바로 줘요. 내 초대 링크로 가입해 봐요!`;
@@ -501,6 +523,7 @@ let joinOpened = false;
 function openJoin(){
   if(!M) return;
   joinOpened = true;
+  if(MEMBER_SIGNUP_PAUSED){ showJoinPaused(); openModal("join"); return; }
   if(MEMBER) joinDone(); else {
     $("joinForm").hidden = false; $("joinDone").hidden = true;
     const rb = $("jRef");
@@ -512,6 +535,7 @@ function openJoin(){
   openModal("join");
 }
 if(M){
+  if(MEMBER_SIGNUP_PAUSED){ $("joinForm").hidden = true; $("joinForm").inert = true; }
   document.addEventListener("click", e => {
     if(e.target.closest("[data-join]")){ e.preventDefault(); openJoin(); }
     if(e.target.closest("[data-later]")){ store.set("joinLater", Date.now()); closeModal($("join")); }
@@ -522,6 +546,7 @@ if(M){
     e.target.value = d.length < 4 ? d : d.length < 8 ? `${d.slice(0, 3)}-${d.slice(3)}` : `${d.slice(0, 3)}-${d.slice(3, d.length - 4)}-${d.slice(-4)}`;
   });
   $("jSubmit").onclick = () => {
+    if(MEMBER_SIGNUP_PAUSED){ showJoinPaused(); return; }
     const name = $("jName").value.trim(), phone = $("jPhone").value.trim();
     const err = msg => { $("jErr").textContent = msg; };
     if(!name) return err("이름을 적어 주세요.");
@@ -563,7 +588,7 @@ if(M){
   };
   // 처음 방문한 사람에게 한 번 띄우기 (가입했거나 '다음에'를 누른 뒤 7일 동안은 안 띄움)
   const later = store.get("joinLater", 0);
-  if(!MEMBER && Date.now() - later > 7 * 864e5 && !/src=app/.test(location.search)){
+  if(!MEMBER_SIGNUP_PAUSED && !MEMBER && Date.now() - later > 7 * 864e5 && !/src=app/.test(location.search)){
     // 최초 대기 시간은 유지하고, 둘러보거나 입력하는 동안에는 방해하지 않습니다.
     let busy = 0, waitingForVisibility = false;
     const markBusy = () => { busy = Date.now(); };

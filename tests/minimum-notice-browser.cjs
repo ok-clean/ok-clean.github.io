@@ -35,7 +35,7 @@ const home = source.replace(/(<script id="cfg" type="application\/json">)([\s\S]
       await page.locator('#qOpt input').first().check();
       assert.equal((await page.locator('#qV').innerText()).replace(/\s/g,''), '15만원');
       assert.match(await page.locator('#qN').innerText(), /할인 전 예상 금액은 기본 금액과 금액이 표시된 추가 옵션.*최소 금액 15만원.*옵션을 선택해도 표시 금액이 그대로일 수/s);
-      assert.match(await page.locator('#qMem').innerText(), /14만원/);
+      assert.match(await page.locator('#qMem').innerText(), /회원가입 일시 중지/);
       await page.locator('#quote').screenshot({path:`/tmp/okclean-minimum-notice-${viewport.width}.png`});
       await page.locator('#qCopy').click();
       assert.match(await page.evaluate(() => window.fakeCopy), /추가: 냉장고 내부/);

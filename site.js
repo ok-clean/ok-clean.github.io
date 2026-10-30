@@ -1,5 +1,14 @@
 // 모든 페이지 공통: 공유하기, 휴대폰 앱(홈 화면) 설치, 팝업 창
 (function(){
+  // 가입 중지 동안 기존 추천 링크의 코드를 주소창에 남기지 않습니다.
+  // 이미 전송된 최초 HTTP 요청은 이 코드가 되돌릴 수 없습니다.
+  try {
+    const current = new URL(location.href);
+    if(current.searchParams.has("ref")){
+      current.searchParams.delete("ref");
+      history.replaceState(history.state, "", current.pathname + current.search + current.hash);
+    }
+  } catch(_) {}
   const S = window.SITE || {};
   const $ = id => document.getElementById(id);
   const esc = s => String(s ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
@@ -125,8 +134,11 @@
 
   // ── 공유하기 ──
   const shareUrl = () => {
-    let myCode = ""; try { myCode = (JSON.parse(localStorage.getItem("member") || "null") || {}).code || ""; } catch(e){}
-    return (S.url || location.origin).replace(/\/$/, "") + (myCode ? "/?ref=" + myCode : "/?src=share");
+    // 가입과 추천 접수가 중지된 동안에는 저장된 회원 식별자를 공유하지 않습니다.
+    const url = new URL(S.url || location.origin, location.origin);
+    url.pathname = url.pathname.replace(/\/+$/, "") + "/";
+    url.search = ""; url.hash = ""; url.searchParams.set("src", "share");
+    return url.href;
   };
   const shareText = `${S.name} · ${S.tagline}\n평수만 넣으면 청소 견적이 바로 나와요.`;
   async function share(){
@@ -155,7 +167,8 @@
   let deferred = null;
   const showInstall = on => document.querySelectorAll("[data-install]").forEach(b => b.hidden = !on);
   if(!STANDALONE) showInstall(true);
-  const installUrl = () => { const u = new URL(location.href); u.searchParams.set("install", "1"); u.hash = ""; return u.toString(); };
+  // 주소에 남아 있는 추천 코드나 기타 입력값을 외부 브라우저로 넘기지 않습니다.
+  const installUrl = () => { const u = new URL(location.href); u.search = ""; u.searchParams.set("install", "1"); u.hash = ""; return u.toString(); };
   function openOutside(){
     const url = installUrl();
     if(IS_KAKAO){ location.href = "kakaotalk://web/openExternal?url=" + encodeURIComponent(url); return true; }   // 카톡: 기본 브라우저로 열기
@@ -203,3 +216,4 @@
 
   if("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register((S.root || "") + "sw.js").catch(() => {}));
 })();
+

@@ -40,7 +40,7 @@ function makeHome(changeConfig){
         await page.goto(base+'/',{waitUntil:'load'});
         return {context,page,errors};
       }
-      // 정상 UI로 직접 고른 견적과 저장된 값에서 복원한 견적이 같습니다.
+      // 공개 견적 선택만 저장하며 지역·날짜는 재방문 시 자동 복원하지 않습니다.
       const normal=await open(null);
       await normal.page.locator('#qSvc').selectOption('aircon');
       await normal.page.locator('#qVar [data-v="2"]').click();
@@ -53,22 +53,23 @@ function makeHome(changeConfig){
       const expectedPrice=await normal.page.locator('#qV').innerText();
       await normal.page.locator('#qCopy').click();
       const expectedCopy=await normal.page.evaluate(()=>window.fakeCopy);
-      const saved=await normal.page.evaluate(()=>JSON.parse(localStorage.getItem('quote')));
+      const saved=await normal.page.evaluate(()=>JSON.parse(localStorage.getItem('quote_public_selection_v1')));
+      assert.deepEqual(Object.keys(saved).sort(),['opts','qty','svc','t','v']);
       await normal.context.close();
       const restored=await open(saved);
       assert.equal(await restored.page.locator('#qSvc').inputValue(),'aircon');
       assert.equal(await restored.page.locator('#qQty').inputValue(),'3');
-      assert.equal(await restored.page.locator('#qArea').inputValue(),area);
-      assert.equal(await restored.page.locator('#qDate').inputValue(),'2099-01-01');
+      assert.equal(await restored.page.locator('#qArea').inputValue(),'');
+      assert.equal(await restored.page.locator('#qDate').inputValue(),'');
       assert.equal(await restored.page.locator('#qVar [data-v="2"]').getAttribute('aria-pressed'),'true');
       assert.equal(await restored.page.locator('#qOpt input').first().isChecked(),true);
       assert.equal(await restored.page.locator('#qV').innerText(),expectedPrice);
       await restored.page.locator('#qCopy').click();
-      assert.equal(await restored.page.evaluate(()=>window.fakeCopy),expectedCopy);
+      assert.equal(await restored.page.evaluate(()=>window.fakeCopy),expectedCopy.split('\n').filter(line=>!line.startsWith('지역: ')&&!line.startsWith('희망 날짜: ')).join('\n'));
       await restored.page.reload({waitUntil:'load'});
       assert.equal(await restored.page.locator('#qV').innerText(),expectedPrice);
-      assert.equal(await restored.page.locator('#qArea').inputValue(),area);
-      assert.equal(await restored.page.locator('#qDate').inputValue(),'2099-01-01');
+      assert.equal(await restored.page.locator('#qArea').inputValue(),'');
+      assert.equal(await restored.page.locator('#qDate').inputValue(),'');
       assert.deepEqual(restored.errors,[]);await restored.context.close();
       // 옵션 저장값이 배열이 아니어도 나머지 정상 선택과 견적을 사용할 수 있습니다.
       for(const opts of [{bad:1},42,'0']){
@@ -85,7 +86,7 @@ function makeHome(changeConfig){
       assert.equal(await invalid.page.locator('#qVar [data-v="0"]').getAttribute('aria-pressed'),'true');
       const tier=await invalid.page.locator('#qTier [aria-pressed="true"]').count();assert.equal(tier,1);
       assert.equal(await invalid.page.locator('#qOpt input').first().isChecked(),true);
-      assert.deepEqual((await invalid.page.evaluate(()=>JSON.parse(localStorage.getItem('quote')))).opts,[0]);
+      assert.deepEqual((await invalid.page.evaluate(()=>JSON.parse(localStorage.getItem('quote_public_selection_v1')))).opts,[0]);
       await invalid.page.locator('#qCopy').click();assert.match(await invalid.page.evaluate(()=>window.fakeCopy),/예상 금액/);
       assert.deepEqual(invalid.errors,[]);await invalid.context.close();
       // 설정에서 종류와 옵션이 줄어든 경우에만 범위를 벗어난 값을 버립니다.
@@ -93,7 +94,7 @@ function makeHome(changeConfig){
         const s=cfg.services.find(x=>x.id==='aircon');s.variants=s.variants.slice(0,1);s.options=[];
       });
       assert.equal(await changed.page.locator('#qQty').inputValue(),'3');
-      const recovered=await changed.page.evaluate(()=>JSON.parse(localStorage.getItem('quote')));
+      const recovered=await changed.page.evaluate(()=>JSON.parse(localStorage.getItem('quote_public_selection_v1')));
       assert.equal(recovered.v,0);assert.deepEqual(recovered.opts,[]);
       await changed.page.locator('#qCopy').click();assert.match(await changed.page.evaluate(()=>window.fakeCopy),/예상 금액/);
       assert.deepEqual(changed.errors,[]);await changed.context.close();

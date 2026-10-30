@@ -33,9 +33,9 @@ const vm = require('node:vm');
     ['https://example.test/sub/cases.json?t=99', 'navigate'],
   ];
   for(const args of ordinary) assert.equal(await request(...args), true);
-  assert.deepEqual(written, ordinary.map(x => x[0]));
+  assert.deepEqual(written, ['https://example.test/sub/cases.json']);
   assert.equal(await request('https://elsewhere.test/sub/cases.json?t=123'), false);
   assert.equal(await request('https://example.test/sub/cases.json?t=123', 'cors', 'POST'), false);
-  assert.equal(written.length, ordinary.length);
+  assert.equal(written.length, 1);
   console.log('case cache scope and request policy PASS');
 })().catch(error => {console.error(error); process.exitCode = 1;});
