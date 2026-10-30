@@ -110,7 +110,7 @@ class PrivacyPageTest(unittest.TestCase):
         generated = build.privacy_page(self.base)
         self.assertIn("방문 통계 스크립트의 자동 수집은 일시 중지", generated)
         self.assertNotIn("익명으로 수집될 수", generated)
-        self.assertIn("외부 처리·제공 및 처리 위탁 현황은 확인 중", section(generated, 4))
+        self.assertIn("외부 처리·제3자 제공·처리 위탁 및 국외 이전 해당 여부는 확인 중", section(generated, 4))
         self.assertNotIn("이용자의 동의 없이 개인정보를 외부에 판매하거나", generated)
 
 
@@ -125,7 +125,7 @@ class PrivacyPageTest(unittest.TestCase):
 
     def test_consultation_channels_and_inactive_membership_management(self):
         text = section(build.privacy_page(self.base), 2)
-        for value in ("전화·문자·카카오톡", "카카오톡 대화와 전화·문자 내역",
+        for value in ("전화·문자·카카오톡 오픈채팅", "카카오톡 대화와 전화·문자 내역",
                       "다른 보관 장소와 백업 이용 여부는 확인이 필요",
                       "기존 회원정보의 조회·수정 기능도 일시 중지",
                       "신규 회원가입 접수를 중지", "신규 예약 접수 기능을 제공하지 않"):
@@ -134,12 +134,16 @@ class PrivacyPageTest(unittest.TestCase):
     def test_consultation_retention_and_contact_are_truthful(self):
         page = build.privacy_page(self.base)
         retention = section(page, 3)
-        for value in ("상담정보의 보유기간과 파기 절차·방법", "법적 의무와 운영 필요성",
+        for value in ("상담 종료 후 90일 보유를 원칙으로 검토", "법적 보존 의무와 실제 삭제 가능 범위",
                       "구체적인 보유기간이나 자동 파기 방법은 정해지지 않았습니다"):
             self.assertIn(value, retention)
         self.assertNotIn("30일", retention)
-        self.assertNotIn("90일", retention)
-        self.assertIn("처리 위탁 현황은 확인 중", section(page, 4))
+        self.assertIn("상담 종료 후 90일 보유를 원칙으로 검토", retention)
+        self.assertIn("이는 확정된 보유기간이 아니며 기존 회원정보에 일괄 적용하지 않습니다", retention)
+        self.assertIn("법적 보존 의무와 실제 삭제 가능 범위를 확인하고 운영자가 최종 확정하기 전까지 적용되지 않은 검토안", retention)
+        self.assertIn("장기간 답변이 없는 경우의 종료 기준은 별도 확정", retention)
+        self.assertIn("다른 사람의 사본이나 서비스 제공자의 보관분까지 삭제 완료되었다고 보장하지 않습니다", retention)
+        self.assertIn("처리 위탁 및 국외 이전 해당 여부는 확인 중", section(page, 4))
         contact = section(page, 6)
         for value in ("오케이청소 개인정보 담당자", "033-911-4457", "tel:0339114457",
                       "열람·정정·삭제 요청 접수처"):
