@@ -2,6 +2,7 @@
 // Synthetic canaries only. No remote traffic or actual calls/messages.
 const {chromium}=require('playwright');
 const assert=require('node:assert/strict');
+const fs=require('node:fs');
 const base=process.env.OKCLEAN_TEST_BASE || 'http://127.0.0.1:8765';
 const secrets=['PRIVATECANARYNAME','01000001111','OK-CANARY','PRIVATECANARYAREA'];
 const member=JSON.stringify({name:secrets[0],phone:secrets[1],area:secrets[3],code:secrets[2],free:'synthetic',sent:false});
@@ -16,6 +17,7 @@ const hasSecret=value=>secrets.some(s=>String(value??'').includes(s)||String(val
    for(const legacy of [false,true]){
     const context=await browser.newContext({viewport,serviceWorkers:'block'});
     const leaks=[],remoteRequests=[],pageErrors=[];
+    let firstDocumentObserved=false;
     try{
      await context.addInitScript(({legacy,member,quote,ref,mobile})=>{
       if(legacy&&!sessionStorage.getItem('__qa_seeded')){
@@ -28,15 +30,36 @@ const hasSecret=value=>secrets.some(s=>String(value??'').includes(s)||String(val
      },{legacy,member,quote,ref,mobile:viewport.width===390});
      await context.route('**/*',async route=>{
       const r=route.request(),url=r.url(),body=r.postData()||'',headers=r.headers();
-      if(hasSecret(url)||hasSecret(body)||hasSecret(headers.referer))leaks.push('network');
-      const u=new URL(url);if(u.hostname==='127.0.0.1'&&u.port==='8765')return route.continue();
-      remoteRequests.push(u.hostname);return route.abort();
+      const u=new URL(url);
+      // A pre-existing referral is intentionally present in the first HTTP
+      // navigation; client-side code cannot erase that already-sent request.
+      const firstDocument=!firstDocumentObserved&&r.isNavigationRequest()&&r.resourceType()==='document'&&u.origin===base;
+      if(firstDocument){firstDocumentObserved=true;if(u.searchParams.get('ref')!==secrets[2])leaks.push('initial-navigation');}
+      if((!firstDocument&&hasSecret(url))||hasSecret(body)||hasSecret(headers.referer))leaks.push('network');
+      if(u.origin===base){
+       if(u.pathname==='/site.js'){
+        // Expose the unchanged private helper only in this isolated test, so
+        // the actual install destination can be inspected without leaving the page.
+        const site=fs.readFileSync('site.js','utf8');
+        const marker='const installUrl = () =>';
+        assert.ok(site.includes(marker),'install helper must exist');
+        return route.fulfill({status:200,contentType:'application/javascript',body:site.replace(marker,'const installUrl = window.__testInstallUrl = () =>')});
+       }
+       return route.continue();
+      }
+      const target=u.hostname+u.pathname;
+      remoteRequests.push(hasSecret(target)?'[redacted]':target);return route.abort();
      });
      const page=await context.newPage();
      page.on('console',m=>{if(hasSecret(m.text()))leaks.push('console');});
      page.on('pageerror',e=>{pageErrors.push(e.name);if(hasSecret(e.message))leaks.push('pageerror');});
-     await page.goto(base+'/',{waitUntil:'domcontentloaded'});
+     await page.goto(base+'/?ref='+encodeURIComponent(secrets[2]),{waitUntil:'domcontentloaded'});
      await page.locator('#qSvc').waitFor();
+     assert.equal(firstDocumentObserved,true);
+     assert.equal(new URL(page.url()).searchParams.has('ref'),false,'legacy referral must be removed from the address');
+     const installUrl=await page.evaluate(()=>window.__testInstallUrl());
+     assert.equal(hasSecret(installUrl),false,'installation destination must omit the old referral');
+     assert.equal(new URL(installUrl).searchParams.get('install'),'1');
      const initial=await page.evaluate(()=>({member:localStorage.getItem('member'),quote:localStorage.getItem('quote'),ref:localStorage.getItem('ref')}));
      if(legacy)assert.deepEqual(initial,{member,quote,ref},'existing data must be preserved');
      else assert.equal(initial.member,null);
@@ -57,6 +80,13 @@ const hasSecret=value=>secrets.some(s=>String(value??'').includes(s)||String(val
      await page.waitForTimeout(300);
      await page.keyboard.press('Escape');
      assert.equal(await page.locator('#join').isVisible(),false);
+     // A stale member script calling the new shared helper must not copy data.
+     await page.evaluate(async ()=>{
+      await window.kakaoSend('카톡으로 가입 완료하기','PRIVATECANARYNAME 01000001111','',{memberData:true});
+      await window.kakaoSend('다른 제목','PRIVATECANARYNAME 01000001111','',{memberData:true});
+     });
+     assert.equal(await page.locator('#sheet').isVisible(),false);
+     assert.deepEqual(await page.evaluate(()=>window.__testCopies),[]);
 
      // The estimator continues to work and exports no legacy member canary.
      assert.equal(await page.locator('#qSvc option').count(),12);
@@ -97,7 +127,7 @@ const hasSecret=value=>secrets.some(s=>String(value??'').includes(s)||String(val
      assert.equal(hasSecret(data.html),false);
      assert.deepEqual(leaks,[]);
      assert.deepEqual(pageErrors,[]);
-     assert.equal(remoteRequests.some(x=>/firestore|firebase|script\.google\.com/i.test(x)),false,'no membership backend request');
+     assert.equal(remoteRequests.some(x=>/firestore|firebase|firebasejs|script\.google\.com/i.test(x)),false,'no membership backend request');
      await page.reload({waitUntil:'domcontentloaded'});
      const afterReload=await page.evaluate(()=>({member:localStorage.getItem('member'),quote:localStorage.getItem('quote'),ref:localStorage.getItem('ref')}));
      if(legacy)assert.deepEqual(afterReload,{member,quote,ref},'existing data must persist after reload');
