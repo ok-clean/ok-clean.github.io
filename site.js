@@ -98,7 +98,8 @@
     sheet(title, `${notice ? `<p class="err" role="status">${esc(notice)}</p>` : ""}<p class="${ok ? "send-ok" : "err"}" data-copy-status role="status">${ok ? "✓ 아래 내용을 복사해 두었어요" : "자동 복사하지 못했어요. 아래 내용을 선택해 복사해 주세요. 휴대폰에서는 길게 눌러 복사할 수 있어요."}</p>
       <pre class="send-pre">${esc(text)}</pre>
       <ol class="send-steps"><li>아래 <b>카톡 열기</b>를 누르세요.</li><li>대화 입력칸을 <b>길게 눌러 '붙여넣기'</b> 하세요.</li><li><b>전송</b>하면 끝! 현장 사진도 함께 보내주시면 더 정확해요.</li></ol>
-      <a class="btn glove" href="${esc(S.kakao)}" target="_blank" rel="noopener" data-close>카톡 열기</a>
+      <p class="hint">카카오톡이 열리지 않으면 홈페이지의 전화 버튼으로 문의해 주세요.</p>
+      <a class="btn glove" href="${esc(S.kakao)}" target="_blank" rel="noopener" data-kakao-open data-close>카톡 열기</a>
       ${ok ? "" : `<button class="btn line small" type="button" data-copy-again style="width:100%;margin-top:8px">다시 복사하기</button>`}`, opener);
     sheetHasMemberData = options.memberData === true;
     const again = $("sheet").querySelector("[data-copy-again]");
@@ -116,6 +117,7 @@
     };
   };
   document.addEventListener("click", e => {
+    if(e.target.closest("[data-kakao-open]")) window.toast("카카오톡이 열리지 않으면 홈페이지의 전화 버튼으로 문의해 주세요.");
     if(e.target.closest("[data-close]") || e.target.classList.contains("modal")) window.closeModal(e.target.closest(".modal"));
   });
   document.addEventListener("keydown", e => {

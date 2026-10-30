@@ -12,7 +12,15 @@ self.addEventListener("fetch", e => {
   if(req.method !== "GET" || url.origin !== location.origin) return;
   // 쿼리에는 추천 코드나 이용자 입력이 들어갈 수 있으므로 캐시에 보관하지 않습니다.
   const hasQuery = url.search !== "";
-  const network = fetch(req);
+  // Navigation and membership/consultation scripts must not repopulate this
+  // new worker cache from a still-fresh old browser HTTP-cache entry.
+  // The service-worker cache remains the offline fallback; this cannot force
+  // an already-open page to reload or invalidate an upstream CDN cache.
+  const protectedScript = ["app.js", "site.js", "member-sync.js"]
+    .some(name => url.pathname === new URL(name, self.registration.scope).pathname);
+  const network = (req.mode === "navigate" || protectedScript)
+    ? fetch(req, {cache: "no-store"})
+    : fetch(req);
   // 응답은 바로 전달하되 캐시 저장이 끝날 때까지 작업자를 유지합니다.
   // 저장 공간 부족 등 캐시 실패는 성공한 네트워크 응답을 바꾸지 않습니다.
   e.waitUntil(network.then(res => {

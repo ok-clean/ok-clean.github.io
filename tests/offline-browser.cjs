@@ -16,6 +16,7 @@ home = home.replace(/(<script id="cfg" type="application\/json">)([\s\S]*?)(<\/s
 const scripts = Object.fromEntries(['sw.js', 'app.js', 'site.js', 'style.css'].map(name => [name, fs.readFileSync(name, 'utf8')]));
 let networkDown = false;
 let caseVersion = 1;
+let httpCacheVersion = 0;
 const server = http.createServer((req, res) => {
   // Playwright's page offline emulation may not apply to the service worker's
   // own network fetch. Force an actual connection failure for both contexts.
@@ -36,6 +37,10 @@ const server = http.createServer((req, res) => {
   }
   if(path === '/fixture-data.json') { res.writeHead(200, {'Content-Type':'application/json'}); return res.end('{"example":true}'); }
   const file = path.slice(1);
+  if(file === 'app.js' && httpCacheVersion){
+    res.writeHead(200, {'Content-Type':'application/javascript', 'Cache-Control':'public, max-age=600'});
+    return res.end(`/* synthetic-http-cache-version:${httpCacheVersion} */`);
+  }
   if(Object.hasOwn(scripts, file)) { res.writeHead(200, {'Content-Type':file.endsWith('.css') ? 'text/css' : 'application/javascript'}); return res.end(scripts[file]); }
   if(path === '/fixture-500') { res.writeHead(500); return res.end('temporary error'); }
   res.writeHead(404); return res.end('not found');
@@ -226,6 +231,23 @@ const server = http.createServer((req, res) => {
       networkDown = false;
       console.log('offline PASS ' + viewport.width);
     }
+    // Use a separate context without route interception: routing disables
+    // Chromium's HTTP cache. The local fixture never executes this script.
+    const freshContext = await browser.newContext();
+    try {
+      const freshPage = await freshContext.newPage();
+      httpCacheVersion = 1;
+      await freshPage.goto(base + '/bootstrap');
+      assert.match(await freshPage.evaluate(async () => (await fetch('/app.js')).text()), /synthetic-http-cache-version:1/);
+      httpCacheVersion = 2;
+      assert.match(await freshPage.evaluate(async () => (await fetch('/app.js', {cache:'force-cache'})).text()), /synthetic-http-cache-version:1/,
+        'positive control must prove the browser HTTP cache contains the old script');
+      await freshPage.evaluate(async () => { await navigator.serviceWorker.register('/sw.js'); await navigator.serviceWorker.ready; });
+      await freshPage.reload();
+      await freshPage.waitForFunction(() => !!navigator.serviceWorker.controller);
+      assert.match(await freshPage.evaluate(async () => (await fetch('/app.js')).text()), /synthetic-http-cache-version:2/,
+        'new worker must not return a fresh-but-stale HTTP-cache entry');
+    } finally { httpCacheVersion = 0; await freshContext.close(); }
   } finally {
     await browser.close();
     await new Promise(resolve => server.close(resolve));

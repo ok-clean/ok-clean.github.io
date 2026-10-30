@@ -81,3 +81,13 @@ test('network failure falls back to the current site cache', async () => {
   assert.equal(rig.calls.puts, 0);
 });
 
+test('critical scripts and navigation bypass a simulated stale browser HTTP cache', async () => {
+  for (const [path, mode] of [['/app.js','cors'], ['/site.js','cors'], ['/member-sync.js','cors'], ['/index.html','navigate']]) {
+    const rig = worker({network:async (_req, options) => new Response(options?.cache === 'no-store' ? 'new' : 'stale'), put:async()=>{}});
+    const event = rig.request(path, mode);
+    assert.equal(await (await event.response).text(), 'new');
+    await event.lifetime;
+    assert.equal(rig.calls.puts, 1);
+  }
+});
+

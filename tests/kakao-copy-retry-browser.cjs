@@ -49,6 +49,8 @@ const home = source.replace(/(<script id="cfg" type="application\/json">)([\s\S]
       assert.match(await status.innerText(), /자동 복사하지 못했어요/);
       assert.equal(await status.getAttribute('role'), 'status');
       assert.equal(await sheet.locator('a[href="https://example.test/chat"]').isVisible(), true);
+      assert.match(await sheet.innerText(), /카카오톡이 열리지 않으면.*홈페이지의 전화 버튼/);
+      assert.equal(await sheet.locator('[data-kakao-open]').getAttribute('target'), '_blank');
       const original = await sheet.locator('.send-pre').innerText();
       assert.match(original, /견적 문의/);
       await again.focus(); await page.keyboard.press('Enter');
@@ -87,6 +89,17 @@ const home = source.replace(/(<script id="cfg" type="application\/json">)([\s\S]
       await page.keyboard.press('Escape');
       assert.equal(await sheet.isHidden(), true);
       assert.equal(await page.evaluate(() => document.activeElement.id), 'qKakao');
+
+      // 실제 외부 앱을 열지 않고도 연결 대안이 남는지 확인합니다.
+      await page.locator('#qKakao').click();
+      await sheet.waitFor({state:'visible'});
+      await page.evaluate(() => document.querySelector('[data-kakao-open]').addEventListener('click', e => e.preventDefault(), {once:true}));
+      await sheet.locator('[data-kakao-open]').click();
+      assert.equal(await sheet.isHidden(), true);
+      assert.match(await page.locator('.toast').innerText(), /카카오톡이 열리지 않으면.*홈페이지의 전화 버튼/);
+      const phone = page.locator('a[href^="tel:"]:visible').first();
+      assert.equal(await phone.count(), 1);
+      assert.match(await phone.getAttribute('href'), /^tel:\+?[0-9]+$/);
 
       // 가입 중에는 개인정보 복사나 회원 대장 전송을 시작하지 않습니다.
       await page.evaluate(() => {window.fakeClipboard='';});
