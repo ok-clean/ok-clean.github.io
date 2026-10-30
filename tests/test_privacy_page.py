@@ -110,8 +110,43 @@ class PrivacyPageTest(unittest.TestCase):
         generated = build.privacy_page(self.base)
         self.assertIn("방문 통계 스크립트의 자동 수집은 일시 중지", generated)
         self.assertNotIn("익명으로 수집될 수", generated)
-        self.assertIn("외부 처리·제공 현황은 확인 중", section(generated, 4))
+        self.assertIn("외부 처리·제공 및 처리 위탁 현황은 확인 중", section(generated, 4))
         self.assertNotIn("이용자의 동의 없이 개인정보를 외부에 판매하거나", generated)
+
+
+    def test_consultation_discloses_actual_optional_fields_and_purposes(self):
+        page = build.privacy_page(self.base)
+        text = section(page, 1)
+        for value in ("이름", "연락처", "청소 장소", "현장 사진", "기타 요청사항", "청소 희망일",
+                      "청소 견적 상담", "서비스 문의", "상담 후 연락", "일정 협의",
+                      "선택적으로 처리", "모든 상담에서 모든 항목을 받는 것은 아닙니다"):
+            self.assertIn(value, text)
+        self.assertEqual(text, section((ROOT / "privacy.html").read_text("utf-8"), 1))
+
+    def test_consultation_channels_and_inactive_membership_management(self):
+        text = section(build.privacy_page(self.base), 2)
+        for value in ("전화·문자·카카오톡", "카카오톡 대화와 전화·문자 내역",
+                      "다른 보관 장소와 백업 이용 여부는 확인이 필요",
+                      "기존 회원정보의 조회·수정 기능도 일시 중지",
+                      "신규 회원가입 접수를 중지", "신규 예약 접수 기능을 제공하지 않"):
+            self.assertIn(value, text)
+
+    def test_consultation_retention_and_contact_are_truthful(self):
+        page = build.privacy_page(self.base)
+        retention = section(page, 3)
+        for value in ("상담정보의 보유기간과 파기 절차·방법", "법적 의무와 운영 필요성",
+                      "구체적인 보유기간이나 자동 파기 방법은 정해지지 않았습니다"):
+            self.assertIn(value, retention)
+        self.assertNotIn("30일", retention)
+        self.assertNotIn("90일", retention)
+        self.assertIn("처리 위탁 현황은 확인 중", section(page, 4))
+        contact = section(page, 6)
+        for value in ("오케이청소 개인정보 담당자", "033-911-4457", "tel:0339114457",
+                      "열람·정정·삭제 요청 접수처"):
+            self.assertIn(value, contact)
+        saved = (ROOT / "privacy.html").read_text("utf-8")
+        for number in (3, 4, 6):
+            self.assertEqual(section(page, number), section(saved, number))
 
 
 if __name__ == "__main__":

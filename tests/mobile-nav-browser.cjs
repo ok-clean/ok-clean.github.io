@@ -106,6 +106,35 @@ const base = 'http://127.0.0.1:8765';
         `quote anchor hidden at ${width}px: before=${JSON.stringify(anchorBefore)}, after=${JSON.stringify(anchorAfter)}, titleVisible=${titleVisible}, fixedHeaderOverlap=${fixedHeaderOverlap}`);
       for(const path of ['/services/aircon.html','/area/' + encodeURIComponent('춘천') + '.html','/privacy.html']) {
         await page.goto(base + path, {waitUntil:'domcontentloaded'});
+        if(path === '/privacy.html' && [320,390].includes(width)) {
+          await page.waitForLoadState('load');
+          assert.ok(await page.locator('.page h1').isVisible(), 'privacy heading visible');
+          const privacy = await page.evaluate(() => ({
+            pageWidth:document.documentElement.scrollWidth,
+            viewportWidth:innerWidth,
+            headingCount:document.querySelectorAll('.page .box h2').length,
+            bodyText:document.querySelector('.page .box').innerText,
+          }));
+          assert.ok(privacy.pageWidth <= privacy.viewportWidth + 1, `privacy page overflows at ${width}px`);
+          assert.equal(privacy.headingCount, 6);
+          for(const expected of ['청소 장소','현장 사진','청소 희망일','선택적으로 처리','전화·문자·카카오톡',
+            '오케이청소 개인정보 담당자','033-911-4457']) {
+            assert.ok(privacy.bodyText.includes(expected), `privacy text missing: ${expected}`);
+          }
+          const contact = page.locator('.page .box a[href="tel:0339114457"]');
+          assert.equal(await contact.count(), 1);
+          await contact.evaluate(el => el.scrollIntoView({block:'center', inline:'nearest'}));
+          await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+          const rects = await contact.evaluate(el => {
+            const contact = el.getBoundingClientRect(), dock = document.querySelector('.dock').getBoundingClientRect();
+            return {top:contact.top,bottom:contact.bottom,left:contact.left,right:contact.right,
+              viewportWidth:innerWidth,viewportHeight:innerHeight,dockTop:dock.top,dockBottom:dock.bottom};
+          });
+          assert.ok(rects.top >= 0 && rects.bottom <= rects.viewportHeight && rects.left >= 0 &&
+            rects.right <= rects.viewportWidth, `privacy contact outside viewport: ${JSON.stringify(rects)}`);
+          assert.ok(rects.bottom <= rects.dockTop || rects.top >= rects.dockBottom,
+            `privacy contact hidden by dock: ${JSON.stringify(rects)}`);
+        }
         assert.equal(await page.locator('.top nav').isVisible(), true);
         assert.equal(await page.locator('.top nav a').count(), 5);
         assert.equal(await page.locator('.top nav a').nth(3).getAttribute('href'), (path === '/privacy.html' ? '' : '../') + 'index.html#member');
