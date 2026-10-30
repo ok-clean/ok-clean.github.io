@@ -109,6 +109,7 @@ const base = 'http://127.0.0.1:8765';
         if(path === '/privacy.html' && [320,390].includes(width)) {
           await page.waitForLoadState('load');
           assert.ok(await page.locator('.page h1').isVisible(), 'privacy heading visible');
+          assert.match(await page.locator('[data-privacy-draft]').innerText(), /개정 검토안 · 시행 전/);
           const privacy = await page.evaluate(() => ({
             pageWidth:document.documentElement.scrollWidth,
             viewportWidth:innerWidth,
@@ -118,8 +119,15 @@ const base = 'http://127.0.0.1:8765';
           assert.ok(privacy.pageWidth <= privacy.viewportWidth + 1, `privacy page overflows at ${width}px`);
           assert.equal(privacy.headingCount, 6);
           for(const expected of ['청소 장소','현장 사진','청소 희망일','선택적으로 처리','전화·문자·카카오톡',
-            '오케이청소 개인정보 담당자','033-911-4457']) {
+            '오케이청소 개인정보 담당자','033-911-4457','90일은 법정 의무기간이 아닙니다',
+            '파기 운영 절차안 · 실행 전 확정 필요','문자·전화 내역','카카오톡 오픈채팅',
+            '현장 사진·전자파일','백업','실제 접수·처리할 수 있음을 운영자가 확인']) {
             assert.ok(privacy.bodyText.includes(expected), `privacy text missing: ${expected}`);
+          }
+          for(const item of await page.locator('.page .box li').all()) {
+            const box = await item.boundingBox();
+            assert.ok(box && box.x >= 0 && box.x + box.width <= width + 1, 'privacy deletion text fits mobile');
+            assert.ok(parseFloat(await item.evaluate(el => getComputedStyle(el).fontSize)) >= 14, 'privacy text readable');
           }
           const contact = page.locator('.page .box a[href="tel:0339114457"]');
           assert.equal(await contact.count(), 1);

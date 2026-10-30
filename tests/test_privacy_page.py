@@ -152,6 +152,40 @@ class PrivacyPageTest(unittest.TestCase):
         for number in (3, 4, 6):
             self.assertEqual(section(page, number), section(saved, number))
 
+    def test_draft_cannot_be_mistaken_for_effective_policy(self):
+        page = build.privacy_page(self.base)
+        self.assertIn('data-privacy-draft', page)
+        self.assertIn('개정 검토안 · 시행 전', page)
+        self.assertIn('실제 게시·운영 배포용 최종 처리방침으로 승인되지 않았습니다', page)
+        retention = section(page, 3)
+        self.assertIn('90일은 법정 의무기간이 아닙니다', retention)
+        self.assertIn('기존 정보의 보유기간 연장 근거가 되지 않습니다', retention)
+        self.assertIn('임의 삭제하거나 자동 삭제하지 않습니다', retention)
+        self.assertIn('무기한 보관의 근거는 아니', retention)
+        self.assertEqual(page, (ROOT / 'privacy.html').read_text('utf-8'))
+
+    def test_deletion_proposal_separates_media_and_completion_limits(self):
+        retention = section(build.privacy_page(self.base), 3)
+        for expected in ('파기 운영 절차안 · 실행 전 확정 필요', '문자·전화 내역',
+                         '카카오톡 오픈채팅', '현장 사진·전자파일', '백업',
+                         '합성 자료로 시험', '복구·재생 방지', '복원 시 삭제 대상 재반영',
+                         '즉시 파기 완료로 표시하지 않습니다', '처리일·처리 방법·담당자',
+                         '해당 근거·항목·기간'):
+            self.assertIn(expected, retention)
+
+    def test_external_roles_require_evidence_and_rights_have_a_working_contact(self):
+        page = build.privacy_page(self.base)
+        external = section(page, 4)
+        self.assertIn('실제 정보 흐름, 처리 목적 및 계약상 역할', external)
+        self.assertIn('외부 저장 서비스의 운영 여부도 미확정', external)
+        self.assertIn('필수 고지 완료가 아닙니다', external)
+        rights = section(page, 5)
+        for expected in ('법정대리인', '처리정지·동의 철회', '전화로 요청을 접수', '최소 범위', '그 사유'):
+            self.assertIn(expected, rights)
+        contact = section(page, 6)
+        self.assertIn('실제 접수·처리할 수 있음을 운영자가 확인', contact)
+        self.assertIn('href="tel:0339114457"', contact)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
