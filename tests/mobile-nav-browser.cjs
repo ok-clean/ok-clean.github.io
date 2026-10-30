@@ -125,7 +125,8 @@ const base = 'http://127.0.0.1:8765';
             '파기 운영 절차안 · 실행 전 확정 필요','문자·전화 내역','카카오톡 오픈채팅',
             '현장 사진·전자파일','백업','실제 접수·처리할 수 있음을 운영자가 확인',
             '마지막 회신 요청 후 30일이 지나면 임시 종결','상담 종료 후 90일 보유하는 원칙을 운영자가 승인',
-            '실기기 파기 시험은 미완료']) {
+            '실기기 파기 시험은 미완료','업무 PC에는 로그인 비밀번호',
+            'PC 사진은 파일 삭제 후 휴지통을 비우는 방식','추가 고객자료 처리업체·서비스는 없다고 답변']) {
             assert.ok(privacy.bodyText.includes(expected), `privacy text missing: ${expected}`);
           }
           for(const item of await page.locator('.page .box li').all()) {

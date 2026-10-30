@@ -126,7 +126,7 @@ class PrivacyPageTest(unittest.TestCase):
     def test_consultation_channels_and_inactive_membership_management(self):
         text = section(build.privacy_page(self.base), 2)
         for value in ("전화·문자·카카오톡 오픈채팅", "카카오톡 대화와 전화·문자 내역",
-                      "다른 보관 장소와 백업 이용 여부는 확인이 필요",
+                      "Google 기기 백업 기능의 활성화는 확인됐으나 고객자료 포함 여부와 삭제 범위는 미확인",
                       "기존 회원정보의 조회·수정 기능도 일시 중지",
                       "신규 회원가입 접수를 중지", "신규 예약 접수 기능을 제공하지 않"):
             self.assertIn(value, text)
@@ -183,7 +183,9 @@ class PrivacyPageTest(unittest.TestCase):
         page = build.privacy_page(self.base)
         external = section(page, 4)
         self.assertIn('실제 정보 흐름, 처리 목적 및 계약상 역할', external)
-        self.assertIn('외부 저장 서비스의 운영 여부도 미확정', external)
+        self.assertIn('추가 고객자료 처리업체·서비스는 없다고 답변', external)
+        self.assertIn('기존 서비스의 실제 위탁·제공·국외 이전 해당 여부는 미확정', external)
+        self.assertIn('모두 없다는 뜻으로 확대하지 않습니다', external)
         self.assertIn('필수 고지 완료가 아닙니다', external)
         rights = section(page, 5)
         for expected in ('법정대리인', '처리정지·동의 철회', '전화로 요청을 접수', '최소 범위', '그 사유'):
@@ -198,7 +200,9 @@ class PrivacyPageTest(unittest.TestCase):
                      '휴대폰 갤러리·PC에 별도로 저장', '지문·비밀번호 잠금',
                      '실제 고객 회원가입과 실제 청소 계약·결제는 없습니다',
                      '현재 확인된 삭제 방법은 휴대폰에서 수동 삭제',
-                     'PC 저장 사진·휴지통·연결 기기·백업의 삭제 범위와 복원 가능성은 미확인'):
+                     '업무 PC에는 로그인 비밀번호를 설정하여 사용',
+                     'PC 사진은 파일 삭제 후 휴지통을 비우는 방식',
+                     '연결 기기·백업·모든 사본의 삭제나 복구 불가능성까지 검증된 방법이라는 뜻은 아닙니다'):
             self.assertIn(fact, page)
         self.assertIn('모든 상담·시험 자료·기기 사본·다른 저장소의 부재로 확대하지 않습니다', page)
         self.assertIn('다른 사본까지 삭제되거나 복구 불가능한 파기가 완료된 것으로 안내하지 않습니다', page)
