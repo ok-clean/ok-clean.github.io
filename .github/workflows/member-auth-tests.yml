@@ -4,6 +4,7 @@ on:
     paths:
       - 'member-sync.js'
       - 'tests/member-auth-ready.test.cjs'
+      - 'tests/member-auth-browser.cjs'
       - '.github/workflows/member-auth-tests.yml'
 permissions:
   contents: read
@@ -17,6 +18,20 @@ jobs:
         with:
           node-version: '20'
       - run: node --test tests/member-auth-ready.test.cjs
+  auth-browser:
+    name: Homepage member authentication (mobile and desktop)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-save --no-package-lock playwright@1.56.1
+      - run: npx playwright install --with-deps chromium
+      - name: Start loopback server
+        run: python3 -m http.server 8765 --bind 127.0.0.1 > /tmp/okclean-test-server.log 2>&1 &
+      - run: node tests/member-auth-browser.cjs
   existing-regression:
     name: Existing homepage regression (${{ matrix.revision }})
     runs-on: ubuntu-latest
