@@ -1,0 +1,63 @@
+name: Member auth restoration review
+on:
+  pull_request:
+    paths:
+      - 'member-sync.js'
+      - 'tests/member-auth-ready.test.cjs'
+      - '.github/workflows/member-auth-tests.yml'
+permissions:
+  contents: read
+jobs:
+  auth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node --test tests/member-auth-ready.test.cjs
+  existing-regression:
+    name: Existing homepage regression (${{ matrix.revision }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        revision: [candidate, baseline]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.revision == 'baseline' && github.event.pull_request.base.sha || github.event.pull_request.head.sha }}
+      - uses: actions/checkout@v4
+        with:
+          ref: c56873d5e600a590045e377391c2a7a8149a95b6
+          path: .regression-source
+      - name: Reuse unchanged PR 51 regression tests
+        run: |
+          mkdir -p tests
+          cp .regression-source/tests/estimate.test.cjs .regression-source/tests/browser-smoke.cjs tests/
+          rm -rf .regression-source
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Existing estimate regression
+        id: estimate
+        continue-on-error: true
+        run: node tests/estimate.test.cjs
+      - run: npm install --no-save --no-package-lock playwright@1.56.1
+      - run: npx playwright install --with-deps chromium
+      - name: Start loopback server
+        run: python3 -m http.server 8765 --bind 127.0.0.1 > /tmp/okclean-test-server.log 2>&1 &
+      - name: Existing homepage browser regression
+        id: browser
+        continue-on-error: true
+        run: node tests/browser-smoke.cjs
+      - name: Report actual regression outcome
+        if: always()
+        env:
+          ESTIMATE: ${{ steps.estimate.outcome }}
+          BROWSER: ${{ steps.browser.outcome }}
+        run: |
+          echo "Revision: ${{ matrix.revision }}; estimate: $ESTIMATE; browser: $BROWSER" >> "$GITHUB_STEP_SUMMARY"
+          test "$ESTIMATE" = success && test "$BROWSER" = success

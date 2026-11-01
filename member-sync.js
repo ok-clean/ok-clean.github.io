@@ -4,7 +4,17 @@ import {getAuth, signInAnonymously} from 'https://www.gstatic.com/firebasejs/10.
 import {getFirestore, doc, setDoc, serverTimestamp} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 export async function submitMember(config, m){
   const app=getApps().length?getApp():initializeApp(config);
-  const auth=getAuth(app); if(!auth.currentUser) await signInAnonymously(auth);
+  const auth=getAuth(app);
+  // 처음에는 저장된 로그인 상태가 아직 복원 중일 수 있습니다.
+  // 복원이 끝나지 않으면 호출자가 카카오톡 확인을 안내하도록 중단합니다.
+  let readyTimer;
+  try {
+    await Promise.race([
+      auth.authStateReady(),
+      new Promise((_,reject)=>{ readyTimer=setTimeout(()=>reject(new Error('회원 인증 준비 시간 초과')),10000); })
+    ]);
+  } finally { clearTimeout(readyTimer); }
+  if(!auth.currentUser) await signInAnonymously(auth);
   const db=getFirestore(app);
   // 쿠폰번호는 편의 식별자일 뿐, 할인 사용 승인 권한을 부여하지 않습니다.
   const id=crypto.randomUUID();
