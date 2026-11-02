@@ -1,0 +1,90 @@
+name: Preserved member auth and paused static review
+on:
+  pull_request:
+    paths:
+      - 'member-sync.js'
+      - 'tests/member-auth-preserved.cjs'
+      - 'tests/member-auth-ready.test.cjs'
+      - 'tests/member-auth-browser.cjs'
+      - '.github/workflows/member-auth-tests.yml'
+permissions:
+  contents: read
+jobs:
+  auth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Load fixed pre-pause homepage fixture (never deployed)
+        uses: actions/checkout@v4
+        with:
+          ref: fc52d243b3a3878ed4d9d73882f078e222d29cf6
+          path: tests/fixtures/auth-homepage
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node tests/member-sync-paused.test.cjs
+      - run: node --test tests/member-auth-ready.test.cjs
+  auth-browser:
+    name: Preserved auth candidate in archived homepage (mobile and desktop)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Load fixed pre-pause homepage fixture (never deployed)
+        uses: actions/checkout@v4
+        with:
+          ref: fc52d243b3a3878ed4d9d73882f078e222d29cf6
+          path: tests/fixtures/auth-homepage
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-save --no-package-lock playwright@1.56.1
+      - run: npx playwright install --with-deps chromium
+      - name: Start loopback server
+        run: python3 -m http.server 8765 --bind 127.0.0.1 --directory tests/fixtures/auth-homepage > /tmp/okclean-test-server.log 2>&1 &
+      - run: node tests/member-auth-browser.cjs
+  existing-regression:
+    name: Current paused homepage regression (${{ matrix.revision }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        revision: [candidate, baseline]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.revision == 'baseline' && github.event.pull_request.base.sha || github.event.pull_request.head.sha }}
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: .regression-source
+      - name: Reuse current static candidate regression tests (PR57 dependency)
+        run: |
+          mkdir -p tests
+          cp .regression-source/tests/estimate.test.cjs .regression-source/tests/browser-smoke.cjs tests/
+          rm -rf .regression-source
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Existing estimate regression
+        id: estimate
+        continue-on-error: true
+        run: node tests/estimate.test.cjs
+      - run: npm install --no-save --no-package-lock playwright@1.56.1
+      - run: npx playwright install --with-deps chromium
+      - name: Start loopback server
+        run: python3 -m http.server 8765 --bind 127.0.0.1 > /tmp/okclean-test-server.log 2>&1 &
+      - name: Existing homepage browser regression
+        id: browser
+        continue-on-error: true
+        run: node tests/browser-smoke.cjs
+      - name: Report actual regression outcome
+        if: always()
+        env:
+          ESTIMATE: ${{ steps.estimate.outcome }}
+          BROWSER: ${{ steps.browser.outcome }}
+        run: |
+          echo "Revision: ${{ matrix.revision }}; estimate: $ESTIMATE; browser: $BROWSER" >> "$GITHUB_STEP_SUMMARY"
+          test "$ESTIMATE" = success && test "$BROWSER" = success
