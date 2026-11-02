@@ -11,7 +11,16 @@ const assert=require('node:assert/strict');
       assert.match(await page.locator('[role=status]').innerText(),/登録|등록되지 않았습니다/);
       assert.equal(await page.locator('a[rel*=sponsored]').count(),0);
       assert.equal(await page.locator('input,form').count(),0);
-      assert.equal(await page.locator('a').getAttribute('href'),'../../index.html#quote');
+      assert.equal(await page.locator('a[href="../../index.html#quote"]').count(),1);
+      assert.equal(await page.locator('a[href="../navigation-preview/index.html"]').count(),1);
+      await page.locator('a[href="../navigation-preview/index.html"]').click();
+      assert.match(await page.locator('h1').innerText(),/이동 검증/);
+      await page.getByRole('link',{name:'청소용품 추천관 살펴보기'}).click();
+      assert.match(await page.locator('h1').innerText(),/청소용품 추천관/);
+      await page.locator('a[href="../../index.html#quote"]').click();
+      assert.ok(page.url().includes('/index.html#quote'));
+      await page.goBack();
+      assert.match(await page.locator('h1').innerText(),/청소용품 추천관/);
       assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
       await context.close();console.log('추천관 미승인 링크 차단·가로 넘침 검사 PASS',width);
     }
