@@ -126,7 +126,7 @@ class PrivacyPageTest(unittest.TestCase):
     def test_consultation_channels_and_inactive_membership_management(self):
         text = section(build.privacy_page(self.base), 2)
         for value in ("전화·문자·카카오톡 오픈채팅", "카카오톡 대화와 전화·문자 내역",
-                      "Google 기기 백업 기능의 활성화는 확인됐으나 고객자료 포함 여부와 삭제 범위는 미확인",
+                      "Google 기기 백업과 Google 포토 사진 백업은 현재 모두 꺼져 있습니다",
                       "기존 회원정보의 조회·수정 기능도 일시 중지",
                       "신규 회원가입 접수를 중지", "신규 예약 접수 기능을 제공하지 않"):
             self.assertIn(value, text)
@@ -207,6 +207,17 @@ class PrivacyPageTest(unittest.TestCase):
         self.assertIn('모든 상담·시험 자료·기기 사본·다른 저장소의 부재로 확대하지 않습니다', page)
         self.assertIn('다른 사본까지 삭제되거나 복구 불가능한 파기가 완료된 것으로 안내하지 않습니다', page)
         self.assertEqual(page, (ROOT / 'privacy.html').read_text('utf-8'))
+
+    def test_backup_off_and_method_approval_do_not_imply_erasure_or_implementation(self):
+        page = build.privacy_page(self.base)
+        for fact in ('2026-11-02 운영자 확인 기준', '과거 백업·다른 계정·연결 기기의 사본이 없거나 삭제 완료됐다는 뜻은 아닙니다',
+                     '파기 방식 채택·도입 준비 승인 · 실제 도입·시행 미확인',
+                     '이 승인은 실제 고객정보 삭제·도입 완료·시행일 확정을 의미하지 않습니다',
+                     '모든 백업을 통제할 수 있다고 안내하지 않습니다',
+                     '일부 개인정보만 파기하면서 일반 파기방법을 적용하기 어려운 경우',
+                     '현재의 파일 삭제·휴지통 비우기·비밀번호 사용만으로 요건 충족이나 파기 완료를 판단하지 않습니다'):
+            self.assertIn(fact, page)
+        self.assertNotIn('Google 기기 백업 기능의 활성화는 확인됐으나', page)
 
 
 if __name__ == "__main__":
