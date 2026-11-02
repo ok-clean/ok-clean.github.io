@@ -31,6 +31,14 @@ class PagesStagingTest(unittest.TestCase):
             'services/aircon.html': '<script src="../site.js"></script>',
             'area/춘천.html': '<a href="../index.html">홈</a>',
             'admin/index.html': '가상 관리자',
+            'build.py': 'development script',
+            'update.py': 'development script',
+            'firestore.rules': 'security rules',
+            'admin-setup/Code.gs': 'installation script',
+            'admin-setup/설치방법.txt': 'installation notes',
+            '관리자앱_설치방법.txt': 'installation notes',
+            'admin/debug.js': 'unexpected admin asset',
+            'unexpected.html': 'unexpected root page',
             'admin-setup/index.html': '가상 설정 안내',
             '.well-known/icon.png': '가상 아이콘',
             '.nojekyll': '',
@@ -128,7 +136,9 @@ class PagesStagingTest(unittest.TestCase):
                      'icon-192.png', 'google07dda5d448de1982.html'):
             self.assertIn(name, names)
         for name in ('docs/internal.md', 'tests/test.js', 'prototype/index.html', '.git/config',
-                     '.github/workflows/example.yml', 'scripts/stage_pages.py'):
+                     '.github/workflows/example.yml', 'scripts/stage_pages.py',
+                     'build.py', 'update.py', 'firestore.rules', 'admin-setup/Code.gs',
+                     'admin-setup/설치방법.txt', '관리자앱_설치방법.txt', 'admin/debug.js', 'unexpected.html'):
             self.assertNotIn(name, names)
 
     def test_checkout_is_byte_identical_except_explicit_exclusions(self):
