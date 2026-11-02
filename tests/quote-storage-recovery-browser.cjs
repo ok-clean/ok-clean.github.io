@@ -1,7 +1,7 @@
 const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const base = 'http://127.0.0.1:8765';
+const base = process.env.OKCLEAN_TEST_URL || 'http://127.0.0.1:8765';
 const source = fs.readFileSync('index.html','utf8');
 function makeHome(changeConfig){
   return source.replace(/(<script id="cfg" type="application\/json">)([\s\S]*?)(<\/script>)/, (_,start,raw,end)=>{
@@ -70,6 +70,17 @@ function makeHome(changeConfig){
       assert.equal(await restored.page.locator('#qArea').inputValue(),area);
       assert.equal(await restored.page.locator('#qDate').inputValue(),'2099-01-01');
       assert.deepEqual(restored.errors,[]);await restored.context.close();
+      // 수량 경계에서 입력 표시·계산 상태·저장값·상담 내용이 같아야 합니다.
+      const bounded=await open(null);
+      await bounded.page.locator('#qSvc').selectOption('aircon');
+      for(const [raw,expected] of [['1000','999'],['0','1'],['-5','1'],['2.9','2']]){
+        await bounded.page.locator('#qQty').fill(raw);
+        assert.equal(await bounded.page.locator('#qQty').inputValue(),expected);
+        assert.equal(await bounded.page.evaluate(()=>JSON.parse(localStorage.getItem('quote')).qty),Number(expected));
+        await bounded.page.locator('#qCopy').click();
+        assert.ok((await bounded.page.evaluate(()=>window.fakeCopy)).includes(expected+'대'));
+      }
+      await bounded.context.close();
       // 옵션 저장값이 배열이 아니어도 나머지 정상 선택과 견적을 사용할 수 있습니다.
       for(const opts of [{bad:1},42,'0']){
         const rig=await open({svc:'aircon',v:2,qty:3,t:null,opts});
