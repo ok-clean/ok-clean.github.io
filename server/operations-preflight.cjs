@@ -54,7 +54,7 @@ function inspect(m,env,site,now=Date.now()){
  for(const [name,value] of Object.entries(env)){if(value&&/PRIVATE_KEY|ACCESS_TOKEN|REFRESH_TOKEN|CLIENT_SECRET/i.test(name))errors.push('SECRET_ENV_FORBIDDEN');}
  const encoded=JSON.stringify(m);
  need(!/-----BEGIN [^-]*PRIVATE KEY-----|"(?:private_key|privateKey|access_token|refresh_token|client_secret|password|idToken|authorization)"\s*:/i.test(encoded),'SECRET_MATERIAL_FORBIDDEN');
- return {staticValid:errors.length===0,productionVerified:false,deployAllowed:false,errors:[...new Set(errors)],blockers:['LIVE_IAM_APPCHECK_UNVERIFIED','EXTERNAL_FENCE_WORM_UNVERIFIED','KEY_LIFECYCLE_ADAPTER_UNIMPLEMENTED','RETENTION_SCOPE_EFFECTIVE_DATE_UNAPPROVED','PRODUCTION_ISSUER_HARDGUARD']};
+ return {staticValid:errors.length===0,productionVerified:false,deployAllowed:false,errors:[...new Set(errors)],blockers:['LIVE_IAM_APPCHECK_UNVERIFIED','EXTERNAL_FENCE_WORM_UNVERIFIED','LIVE_KEY_LIFECYCLE_PROVIDER_UNVERIFIED','RETENTION_SCOPE_EFFECTIVE_DATE_UNAPPROVED','PRODUCTION_ISSUER_HARDGUARD']};
 }
 function run(argv,env){
  // No raw paths, supplied values, exception messages or tokens in diagnostics.

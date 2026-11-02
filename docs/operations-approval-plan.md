@@ -1,7 +1,8 @@
 # 운영 연결 준비 / 승인 경계
 
 이 문서는 PR #62의 준비용 계약이다. 클라우드 설정이나 실제 고객자료를 변경하지 않는다.
-운영 controller, WORM 저장 어댑터, 키 상태/폐기 조회 어댑터는 미구현이다.
+v4 공급자 주입형 키 수명주기·쓰기 격리·체크포인트 어댑터와 읽기 전용 점검기는 구현한다.
+실제 클라우드 SDK 공급자 연결, 외부 writer 격리 및 WORM 보장은 운영 인프라 검증 전까지 미확정이다.
 설정에 true를 적는 것으로 실제 격리·권한·불변성을 증명할 수 없다.
 
 ## 실행과 판정
@@ -74,7 +75,7 @@ debug token 사용 현황, KMS algorithm/state/version, bucket retention/lock/IA
    되돌릴 수 없는 변경 가능성이 있으므로 기간·비용 검토 후 개별 승인 대상으로 둔다.
 4. 독립 서명/검증 권한과 키 버전 allowlist를 구현한다. 알 수 없는/폐기/비활성 키는 거부하고,
    rotation은 새 버전 검토→검증자 반영→발급 전환 순서로 설계한다. 기존 proof 만료와 폐기
-   상태 재조회 실패를 fail-closed 처리하는 실제 어댑터가 필요하다.
+   상태 재조회 실패는 v4 키 어댑터에서 차단한다. 실제 KMS/원장 공급자 연결은 별도 검증한다.
 5. 중복 요청/동시 요청/중단 재시도/lease 소실/부분 실패/관리자 폐기/변조/재사용/키교체를
    격리된 staging에서 검증한다. demo 가드를 제거해 운영 어댑터로 재사용하지 않는다.
 6. 실패 시 발급 차단과 격리를 유지한다. 이전 서비스 revision 복귀도 승인 범위에서 실행한다.
@@ -93,7 +94,7 @@ debug token 사용 현황, KMS algorithm/state/version, bucket retention/lock/IA
 ## 승인 ④ 배포와 PR 의존 관계
 
 62 base는 56 작업브랜치이며 main 직접 대상이 아니다. 51/52/53/58을 중복 구현/병합하지 않는다.
-현재 추가 파일은 운영 preflight/검사/CI/이 문서뿐이다. 기존 페이지·가격·고객 API·데모 어댑터 변경 없음.
+v4 추가 파일은 운영 어댑터와 관련 검사이며 기존 운영 진입점은 변경하지 않는다. 기존 페이지·가격·고객 API·데모 어댑터 변경 없음.
 62→56 정렬, 57 개인정보 변경과 충돌 조정, 최신 main 회귀, 운영 보안 실증 후 main/서버 배포를
 각각 승인한다. 승인 전 기존 PR 병합/종료, Firebase/IAM 변경, 키 발급, 데이터 파기는 금지한다.
 320/390/1440 UI는 이전 동일 구현의 성공 증거를 재사용한다. 새 HEAD CI는 별도로 기록한다.
@@ -112,3 +113,53 @@ manifest/site 파일은 각각 64KiB 이내여야 하며, camelCase privateKey/i
 실제 운영 구현에는 여전히 고객/관리자/재적용 writer별 fencing token과 멱등성 본문 결속,
 commit 직전 권한 재검증, 키 폐기 조회 실패 시 차단, generation에 결속된 전체 checkpoint,
 append-only 감사 기록이 필요하다. 승인만으로 이 구현이 완료되는 것은 아니다.
+
+
+## v4 구현 및 공급자 계약
+
+모든 신규 모듈은 운영 진입점에 연결하지 않는다. 테스트 공급자는 메모리에서 거래를 직렬화하고
+rollback을 모사하며, 이를 실제 여러 서버/여러 DB의 원자성이나 WORM 증거로 해석하지 않는다.
+production hardguard와 --deployment 실패는 그대로다. 모의 검증 성공은 실제 운영 검증이 아니다.
+
+| 모듈 | 구현 범위 | 실제 연결 시 입증할 경계 |
+|---|---|---|
+| key-lifecycle-adapter.cjs | 역할/목적/키버전/내용/자원 해시 결속, 키 교체·폐기 상태, 발급 영수증, 과거 검증과 실행 권한 분리 | 독립 KMS 권한, 정확한 버전 상태·공개키 지문, 내구성 있는 원자적 registry와 감사, 모든 발급 경로 적용 |
+| write-isolation-adapter.cjs | 생성/수정/복원/삭제 구분, 권한·App Check 재확인, 멱등 영수증, revision/fencing token, tombstone | 원본과 다른 격리 DB, 모든 writer 통제, control/권한/본문/영수증/감사의 단일 원자적 commit 및 deadline |
+| checkpoint-store-adapter.cjs | 기존 checkpointMessage 검증, 순서/이전 해시/외부 anchor, 생성 전용 기록, 보존기간·legal hold, 재시도 | 객체/anchor/감사 원자성, 독립 anchor 보호, IAM overwrite/delete 차단 및 실제 저장소 retention lock |
+| operations-restore-bridge.cjs | 현재 control 키 검증 + 요청별 issuer 증명 + 저장된 체크포인트를 연결, 요청/작업/revision 결속 | 여러 공급자 사이 원자성을 외부 격리가 보장해야 함; historical 검증만으로 실행 허용 금지 |
+| operations-readiness-reader.cjs | 신선한 자원/IAM/App Check/쓰기 정책 스냅샷 비교, 시작/종료 revision·토큰 검증 | 신뢰할 수 있는 읽기 전용 SDK 공급자, 상속/그룹/조건/impersonation을 포함한 실효권한 전개 |
+
+읽기 전용 점검기의 provider는 readRevision/readInventory/readEffectiveIam/readAppCheck/
+readDatabasePolicy만 제공한다. 정규화된 값의 project/revision/observedAt를 모두 결속한다.
+mode=synthetic은 기본값이며 live-readonly라도 productionVerified/deployAllowed는 false이다.
+체크 성공은 해당 읽기 검사 범위만 의미한다. 외부 fence/WORM·전체 운영 통합을 대신하지 않는다.
+토큰은 SDK 검증기에만 전달하고 결과/감사/예외에 원문을 반환하지 않는다.
+
+키 폐기는 신규 발급/운영 권한을 차단한다. 보관된 공개키와 발급 영수증을 유지하여 과거 기록의
+서명을 검사할 수 있지만, 그 결과는 historicalOnly/authorizesOperation=false로 한정한다.
+과거 검증 성공을 복원 허가로 바꾸지 않는다. 키 원문 생성·폐기 API는 없다.
+기존 legacy 서명 경로가 자동으로 신규 키 수명주기 보호를 얻지는 않는다. 승인된 연결 작업은
+모든 서명/검증 경로를 신규 계약으로 연결하고 누락된 우회 경로를 검사해야 한다.
+
+## 운영 승인표 — 실제 값 확정 후 실행
+
+| 승인 | 적용 대상 및 변경 | 위험 | 검증 방법 | 복구 계획 |
+|---|---|---|---|---|
+| A 자원 | source/ledger/control 프로젝트, DB ID/UUID, KMS 버전, bucket/anchor/sink, 모든 writer 목록 확정 | 잘못된 대상 접근, 원본/복원 혼동 | metadata와 repo 설정 대조, DB 재생성 UUID 검사 | 아직 변경 없음; 불일치 시 중단 |
+| B 조회 | 위 자원의 제한된 읽기 권한과 operations_auditor 주체 확정 | 과도한 조회, 상속권한 누락 | 실효권한 전개와 allowlist, App Check 및 revoked token 실증 | 점검 주체 권한 회수, 발급 차단 유지 |
+| B 적용 | 독립 SA/KMS 권한, 외부 쓰기 격리, 변경 방지 저장소 정책 적용 | 서비스 중단, 비용, 비가역 retention lock | 별도 staging 장애·재시도·경합·키교체·삭제불가 실증 | 이전 서비스 revision 복귀; lock은 되돌릴 수 있다고 약속하지 않음 |
+| C 개인정보 | 유형별 파기 범위·보존 예외·시행일·과거 백업 처리 확정 | 오삭제 또는 과보존 | 합성자료로 preview와 legal hold, 복원 후 재삭제 검증 | 파기 전 차단 유지; 실제 삭제를 코드 rollback으로 복구하지 않음 |
+| D 연동 | 공급자 SDK 연결과 설정 적용, staging/실운영 연동 검사 | SDK 원자성/권한 차이, 신규 비용·쓰기 | 대상·변경·합성자료 범위를 명시한 별도 승인 후 실행 | 격리/issuer 차단, 이전 revision, 원본/원장/epoch 보존 |
+| D 배포 | 검증된 HEAD의 PR 병합과 홈페이지/서버 배포 | 기존 기능 회귀 | 최종 HEAD CI·320/390/1440·권한·운영 점검 | 배포별 역순 revision 복귀; 고객자료/백업 복원은 별도 승인 |
+
+다음 단계는 운영 자원과 공급자 경계를 확정한 뒤 SDK 연결 및 staging 통합을 수행하는 것이다.
+자원 선택을 코드가 임의로 만들어내지 않으며, 공급자 계약 테스트를 실제 IAM·원자성 입증으로
+대체하지 않는다. 운영 발급 활성화/main 병합/배포는 이 문서나 테스트 통과로 승인되지 않는다.
+
+
+v4 복원 연결은 비소비형 키 검증(consume:false)과 DB 내 요청 영수증을 조합한다.
+키 검증을 먼저 소비한 다음 DB가 실패하면 재시도를 막는 문제가 있으므로, 키 검증 결과 자체는
+실행 권한을 반환하지 않는다. operations-restore-bridge가 현재 control/issuer 키와 요청별
+내용·checkpoint 결속을 확인한 뒤 격리된 쓰기만 승인한다. writer는 거래 안에서 다시 확인하고,
+요청 영수증·본문·감사를 함께 저장한다. 독립 공급자 사이의 폐기/쓰기 원자성은 이 코드만으로
+보장하지 않으며 외부 fence와 실제 공급자 통합 검사가 필수다.
