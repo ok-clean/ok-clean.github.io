@@ -11,7 +11,7 @@ const indexPath=require.resolve('../server/index.cjs');
 const {message}=require('../server/restore-gate.cjs');
 
 test('production index refuses missing gate settings and places verified gate ahead of reservation handler',async()=>{
-  const originalLoad=Module._load,originalEnv={...process.env},stack=[];
+  const originalLoad=Module._load,originalEnv={...process.env},stack=[];let handlerOptions;
   const pair=crypto.generateKeyPairSync('ed25519');
   const pub=pair.publicKey.export({type:'spki',format:'pem'});
   let called=0,listened=0,attestation=null,headRevision=1,pending=false,controlInit=0,selectedDatabase='(default)';const posted=[];
@@ -32,13 +32,13 @@ test('production index refuses missing gate settings and places verified gate ah
   const passthrough=async(req,res)=>{called++;res.statusCode=204;res.end('')};
   const fake={
     express,
-    'firebase-admin/app':{initializeApp:({projectId})=>({projectId}),applicationDefault:()=>({})},
-    'firebase-admin/auth':{getAuth:()=>({})},
+    'firebase-admin/app':{initializeApp:({projectId})=>({projectId,options:{projectId}}),applicationDefault:()=>({})},
+    'firebase-admin/auth':{getAuth:()=>({marker:'account-method-preserved',getUser(){return this.marker;},verifyIdToken:async()=>({})})},
     'firebase-admin/app-check':{getAppCheck:()=>({verifyToken:async()=>({})})},
     'firebase-admin/firestore':{getFirestore:(app,databaseId)=>app?.projectId==='sample-ledger-prod'?ledger:app?.projectId==='sample-control-prod'?(controlInit++,{projectId:'sample-control-prod',collection:()=>({doc:()=>({})}),runTransaction:async f=>f({get:async()=>({exists:false,data:()=>null}),set(){}})}):{projectId:'sample-clean-prod',databaseId:databaseId||'(default)'}},
     'google-auth-library':{GoogleAuth:class{async getClient(){return {request:async()=>({data:{name:'projects/sample-clean-prod/databases/'+selectedDatabase,uid:'123e4567-e89b-42d3-a456-426614174000'}})}} async getIdTokenClient(){return {request:async()=>({status:503,data:{status:'unavailable'}})}}}},
     './services.json':[{id:'synthetic'}],
-    './handler.cjs':{createHttpHandler:()=>passthrough},
+    './handler.cjs':{createHttpHandler:options=>{handlerOptions=options;return passthrough;}},
     './rate-limit.cjs':{createRateLimit:()=>async()=>true},
     './demo-retention-route.cjs':{attachDemoRetentionRoute:()=>false,createGoogleOidcVerifier:()=>async()=>({})},
     './account-withdrawal.cjs':{createWithdrawalRecoveryHandler:()=>async()=>{}}
@@ -56,6 +56,9 @@ test('production index refuses missing gate settings and places verified gate ah
     process.env.OKCLEAN_RESTORE_PUBLIC_KEY=pub;
     delete require.cache[indexPath];require(indexPath);
     assert.equal(listened,1);
+    assert.equal(handlerOptions.auth.getUser(),'account-method-preserved');
+    await assert.rejects(handlerOptions.auth.verifyIdToken('synthetic-invalid'),/SDK_IDENTITY_REJECTED/);
+    await assert.rejects(handlerOptions.appCheck.verifyToken('synthetic-invalid'),/SDK_APPCHECK_REJECTED/);
     async function send(){const res={statusCode:200,body:null,headers:{},setHeader(k,v){this.headers[k]=v},end(v){this.body=v}};let pos=0;async function next(){const fn=stack[pos++];if(fn && fn.length<4)await fn({method:'POST'},res,next);}await next();return res;}
     let res=await send();assert.equal(res.statusCode,503);assert.equal(called,0);
     const now=Date.now();attestation={sourceProject:'sample-clean-prod',ledgerProject:'sample-ledger-prod',restoreId:'synthetic-epoch-001',servedDatabaseId:'(default)',servedDatabaseUid:'123e4567-e89b-42d3-a456-426614174000',checkpoint:'a'.repeat(64),ledgerRevision:1,issuedAt:now,expiresAt:now+60000,state:'cleared'};

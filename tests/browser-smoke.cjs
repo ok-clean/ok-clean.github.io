@@ -1,6 +1,8 @@
 const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const {createHash} = require('node:crypto');
+const expectedAppHash=createHash('sha256').update(fs.readFileSync('app.js')).digest('hex');
 const config = JSON.parse(fs.readFileSync('config.json', 'utf8'));
 (async () => {
   const browser = await chromium.launch({headless: true});
@@ -14,6 +16,13 @@ const config = JSON.parse(fs.readFileSync('config.json', 'utf8'));
       });
       const page = await context.newPage();
       const errors = [];
+      let servedAppHash;
+      page.on('response', async response => {
+        if(new URL(response.url()).pathname === '/app.js') {
+          try {servedAppHash=createHash('sha256').update(await response.body()).digest('hex');}
+          catch {servedAppHash='BODY_UNAVAILABLE';}
+        }
+      });
       page.on('pageerror', e => errors.push(e.message));
       await page.goto('http://127.0.0.1:8765/', {waitUntil: 'domcontentloaded'});
       for (const [saved, expected] of [[1000, '999'], [-5, '1'], [2.9, '2']]) {
@@ -83,6 +92,10 @@ const config = JSON.parse(fs.readFileSync('config.json', 'utf8'));
       assert.match(await page.locator('#jErr').innerText(), /이름/);
       await page.locator('#jName').fill('테스트');
       await page.locator('#jPhone').fill('01000000000');
+      const syntheticPhone=await page.locator('#jPhone').inputValue();
+      console.log('SYNTHETIC_MEMBER_DIAGNOSTIC',JSON.stringify({viewport:viewport.width,phone:syntheticPhone,servedAppHash,expectedAppHash,pageErrors:errors}));
+      assert.equal(servedAppHash,expectedAppHash,'browser must execute the reviewed app source');
+      assert.equal(syntheticPhone,'010-0000-0000','synthetic phone must be formatted before consent validation');
       await page.locator('#jSubmit').click();
       assert.match(await page.locator('#jErr').innerText(), /동의/);
       await page.locator('#jAgree').check();

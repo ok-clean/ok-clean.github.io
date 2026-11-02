@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "mode": "readonly",
+  "environment": "staging",
+  "timeoutMs": 5000,
+  "projectId": "REPLACE_ME",
+  "projectNumber": "REPLACE_ME",
+  "region": "REPLACE_ME",
+  "appId": "REPLACE_ME",
+  "databases": [{"id": "REPLACE_ME", "uid": "REPLACE_ME"}, {"id": "REPLACE_ME", "uid": "REPLACE_ME"}],
+  "readerServiceAccount": "REPLACE_ME",
+  "serviceAccounts": ["REPLACE_ME_CONTROL", "REPLACE_ME_VALIDATOR", "REPLACE_ME_ISSUER"],
+  "allowedProjectRoles": {"REPLACE_ME_CONTROL": [], "REPLACE_ME_VALIDATOR": [], "REPLACE_ME_ISSUER": []},
+  "bucket": "REPLACE_ME",
+  "kms": {"role": "control", "keyVersions": [{"name": "REPLACE_ME_FULL_VERSION_RESOURCE", "publicKeySha256": "REPLACE_ME_SPKI_SHA256", "protectionLevel": "SOFTWARE"}]},
+  "checkpoint": {"objectName": "REPLACE_ME_EXISTING_SYNTHETIC_OBJECT", "expectedHash": "REPLACE_ME_SHA256", "retentionUntil": 0, "legalHold": false}
+}

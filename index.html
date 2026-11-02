@@ -52,14 +52,48 @@
       <button class="btn glove" id="qKakao" type="button">이 견적으로 카톡 문의</button>
       <button class="btn line" id="qSms" type="button">문자로 견적 보내기</button>
       <button class="link" id="qCopy" type="button">문의 내용만 복사하기</button>
+      <button class="btn line" id="qReserve" type="button" hidden>예약 신청</button>
     </div>
+    <form id="reservationForm" hidden>
+      <p id="reserveIntro">예약 접수 시험입니다. 가상 정보만 입력해 주세요.</p>
+      <div id="reserveVerified" hidden>
+        <label><span id="reserveEmailLabel">시험 계정 이메일</span> <input id="reserveEmail" type="email" autocomplete="off"></label>
+        <label><span id="reservePasswordLabel">시험 계정 비밀번호</span> <input id="reservePassword" type="password" autocomplete="off"></label>
+        <button class="btn line" id="reserveLogin" type="button">시험 계정 로그인</button>
+        <label>기존 접수번호 <input id="reserveReceipt" autocomplete="off" maxlength="80"></label>
+        <button class="btn line" id="reserveRecover" type="button">접수 확인</button>
+        <button class="btn line" id="reserveListMine" type="button" hidden>내 예약 목록</button>
+        <div id="reserveOwnList" aria-live="polite"></div>
+        <div id="reserveMemberLink" hidden>
+          <p>이 화면에서 방금 접수한 회원가입 요청을 예약 계정에 연결합니다. 기존 가입 기록이나 다른 기기 자료는 상담으로 확인해 주세요.</p>
+          <label><input id="reserveMemberLinkConsent" type="checkbox"> 회원가입 요청과 예약 계정을 연결하는 데 동의합니다.</label>
+          <button class="btn line" id="reserveMemberLinkSubmit" type="button">회원 계정 연결</button>
+          <p id="reserveMemberLinkStatus" role="status" aria-live="polite"></p>
+        </div>
+        <div id="reserveWithdrawal" hidden>
+          <p>예약 계정 탈퇴를 요청합니다. 확인 후 처리되며 계정과 개인정보가 즉시 삭제되지는 않습니다. 기존 회원 혜택 데이터는 별도로 처리됩니다.</p>
+          <label>재인증 비밀번호 <input id="withdrawPassword" type="password" autocomplete="off"></label>
+          <button class="btn line" id="withdrawRequest" type="button">예약 계정 탈퇴 요청</button>
+        </div>
+      </div>
+      <div class="field"><label for="reserveName">이름</label><input id="reserveName" maxlength="30" required autocomplete="off"></div>
+      <div class="field"><label for="reservePhone">휴대폰 번호</label><input id="reservePhone" type="tel" required autocomplete="off"></div>
+      <div class="field"><label for="reserveSize">규모</label><input id="reserveSize" type="number" min="1" max="999" step="1" required></div>
+      <div class="field"><label for="reserveNotes">요청사항</label><textarea id="reserveNotes" maxlength="500" autocomplete="off"></textarea></div>
+      <p id="reserveConsentDetails" hidden></p>
+      <a id="reservePolicyLink" target="_blank" rel="noopener noreferrer" hidden>개인정보 처리방침 보기</a>
+      <label><input id="reserveConsent" type="checkbox" required> <span id="reserveConsentText">예약 접수 시험에 동의합니다.</span></label>
+      <button class="btn glove" id="reserveSubmit" type="submit">예약 접수</button>
+      <button class="btn line" id="reserveNew" type="button" hidden>새 예약 작성</button>
+      <p id="reserveStatus" role="status" aria-live="polite"></p>
+    </form>
   </div>
 </div></section>
 
 <section class="s trust" id="promise"><div class="wrap">
   <h2>오케이청소의 약속</h2>
   <p class="d">처음 맡기는 업체라 걱정되시죠. 이렇게 일해요.</p>
-  <div class="trust-in"><div class="stat"><b>52건</b><span>블로그에 공개한 시공 기록</span></div><ul class="promise"><li><b>사진 보고 확정 견적</b><span>현장 사진을 먼저 보고 금액을 정해요. 추가 비용이 생길 수 있는 부분은 작업 전에 미리 말씀드려요.</span></li><li><b>분해 세척 + 기본 살균소독</b><span>에어컨·세탁기는 분해해서 씻고, 모든 청소는 손 닿는 곳과 주방·욕실까지 살균소독으로 마무리해요.</span></li><li><b>끝나고 함께 확인</b><span>작업이 끝나면 같이 둘러보고, 아쉬운 곳은 그 자리에서 다시 손봐요.</span></li><li><b>사업자 등록 업체</b><span>춘천에 사무실을 둔 사업자 등록 업체예요. 작업 기록은 블로그에 공개하고 있어요.</span></li></ul></div>
+  <div class="trust-in"><div class="stat"><b>53건</b><span>블로그에 공개한 시공 기록</span></div><ul class="promise"><li><b>사진 보고 확정 견적</b><span>현장 사진을 먼저 보고 금액을 정해요. 추가 비용이 생길 수 있는 부분은 작업 전에 미리 말씀드려요.</span></li><li><b>분해 세척 + 기본 살균소독</b><span>에어컨·세탁기는 분해해서 씻고, 모든 청소는 손 닿는 곳과 주방·욕실까지 살균소독으로 마무리해요.</span></li><li><b>끝나고 함께 확인</b><span>작업이 끝나면 같이 둘러보고, 아쉬운 곳은 그 자리에서 다시 손봐요.</span></li><li><b>사업자 등록 업체</b><span>춘천에 사무실을 둔 사업자 등록 업체예요. 작업 기록은 블로그에 공개하고 있어요.</span></li></ul></div>
 </div></section>
 
 <section class="s" id="services"><div class="wrap">

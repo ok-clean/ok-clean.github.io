@@ -2,6 +2,7 @@
 // Prototype server component: wire only to trusted Firebase Admin SDK and a real rate limiter.
 // Never expose service-account credentials or this privileged database client to browsers.
 const crypto = require('node:crypto');
+const {isDeepStrictEqual}=require('node:util');
 const ID = /^[A-Za-z0-9_-]{1,80}$/;
 const services = new Set(['입주·이사 청소','거주·정기 청소','사무실·상가 청소','에어컨 청소','후드·주방 청소','그 외 청소']);
 const areas = new Set(['춘천','화천','양구','인제','철원','홍천','횡성','가평','그 외 지역']);
@@ -22,6 +23,29 @@ function validate(input, now) {
   if (estimateMax !== undefined && (!Number.isInteger(estimateMax) || estimateMin === undefined || estimateMax < estimateMin || estimateMax > 1e9)) return null;
   if (pricing !== undefined && (!pricing || typeof pricing !== 'object' || Array.isArray(pricing))) return null;
   return {service,area,size,date,name:name.trim(),phone,notes, ...(pricing !== undefined ? {pricing} : {}), ...(estimateMin !== undefined ? {estimateMin} : {}), ...(estimateMax !== undefined ? {estimateMax} : {}),consent:true};
+}
+// Existing documents must retain the submitted data, not only its digest.
+// Administrative metadata may be added without changing this canonical subset.
+const storedStatuses=new Set(['신규','검토중','상담중','예약확정','작업완료','종료','취소']);
+function storedTime(value){
+  try {
+    const date=value instanceof Date ? value : value && typeof value.toDate==='function' ? value.toDate() : null;
+    return date instanceof Date && Number.isSafeInteger(date.getTime()) ? date.getTime() : NaN;
+  } catch {return NaN;}
+}
+function matchesStoredReservation(record,valid,{uid,fingerprint,now}){
+  if(!record||typeof record!=='object'||Array.isArray(record))return false;
+  if(record.ownerUid!==uid||record.requestFingerprint!==fingerprint||!storedStatuses.has(record.status)||
+    record.retentionRedacted===true||record.dataMutationFrozen===true)return false;
+  if(typeof record.consentVersion!=='string'||!/^[A-Za-z0-9._-]{1,80}$/.test(record.consentVersion))return false;
+  for(const key of ['createdAt','consentAt']){
+    const at=storedTime(record[key]);if(!Number.isFinite(at)||at<0||at>now.getTime())return false;
+  }
+  if(storedTime(record.date)!==new Date(valid.date+'T14:59:59.999Z').getTime())return false;
+  for(const key of ['service','area','size','name','phone','notes','estimateMin','estimateMax','pricing']){
+    if(Object.hasOwn(record,key)!==Object.hasOwn(valid,key)||!isDeepStrictEqual(record[key],valid[key]))return false;
+  }
+  return true;
 }
 function createVerifiedReservationHandler({verifyIdToken, db, enforceRateLimit, now = () => new Date(), consentVersion = 'test-v1'}) {
   if (typeof consentVersion !== 'string' || !/^[A-Za-z0-9._-]{1,80}$/.test(consentVersion)) throw new TypeError('Consent version required');
@@ -45,7 +69,7 @@ function createVerifiedReservationHandler({verifyIdToken, db, enforceRateLimit, 
         const snap=await tx.get(ref);
         if (snap.exists) {
           const record=snap.data();
-          return record.ownerUid === auth.uid && record.requestFingerprint === fingerprint ? 'confirmed' : 'unavailable';
+          return matchesStoredReservation(record,valid,{uid:auth.uid,fingerprint,now:timestamp}) ? 'confirmed' : 'unavailable';
         }
         const {date,consent,...data}=valid;
         tx.create(ref,{...data,date:new Date(date+'T14:59:59.999Z'),ownerUid:auth.uid,status:'신규',consentVersion,consentAt:timestamp,createdAt:timestamp,requestFingerprint:fingerprint});
@@ -55,4 +79,4 @@ function createVerifiedReservationHandler({verifyIdToken, db, enforceRateLimit, 
     } catch { return reply(503,'unavailable'); }
   };
 }
-module.exports={createVerifiedReservationHandler};
+module.exports={createVerifiedReservationHandler,matchesStoredReservation};

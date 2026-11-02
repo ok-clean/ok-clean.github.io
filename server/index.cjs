@@ -3,7 +3,7 @@ const express=require('express');
 const {initializeApp,applicationDefault}=require('firebase-admin/app');
 const {getAuth}=require('firebase-admin/auth');
 const {getAppCheck}=require('firebase-admin/app-check');
-const {restrictedAppCheck}=require('./app-check-policy.cjs');
+const {createFirebaseSdkIdentity}=require('./firebase-sdk-identity.cjs');
 const {getFirestore}=require('firebase-admin/firestore');
 const {createHttpHandler}=require('./handler.cjs');
 const {createRateLimit}=require('./rate-limit.cjs');
@@ -20,6 +20,10 @@ const firebaseApp=initializeApp({credential:applicationDefault(),projectId:proce
 // Explicit named database selection permits a verified restored database to be
 // used after approved cutover. Default preserves the existing configuration.
 // Choosing a name does not prove isolation or authorize any cutover.
+const verifiedIdentity=createFirebaseSdkIdentity({app:firebaseApp,projectId:process.env.OKCLEAN_PROJECT_ID,appId:process.env.OKCLEAN_FIREBASE_WEB_APP_ID,sdk:{getAuth,getAppCheck}});
+// Preserve account lifecycle methods while requiring the strict verifier for every token.
+const rawAuth=getAuth(firebaseApp);
+const requestAuth=new Proxy(rawAuth,{get(target,key){if(key==='verifyIdToken')return verifiedIdentity.auth.verifyIdToken;const value=Reflect.get(target,key,target);return typeof value==='function'?value.bind(target):value;}});
 const db=getFirestore(firebaseApp,process.env.OKCLEAN_FIRESTORE_DATABASE_ID||'(default)');const app=express();
 app.disable('x-powered-by');app.use(express.json({limit:'8kb',strict:true}));
 // Always disabled under production preflight; test harness can exercise it on demo emulators.
@@ -52,6 +56,6 @@ if(process.env.OKCLEAN_WITHDRAWAL_RECOVERY_ENABLED==='true'){
   const recover=createWithdrawalRecoveryHandler({db,auth:getAuth(),verifyOidc:createGoogleOidcVerifier(),config:{enabled:true,policyReviewed:process.env.OKCLEAN_WITHDRAWAL_POLICY_REVIEWED==='true',projectId:process.env.OKCLEAN_PROJECT_ID,audience:process.env.OKCLEAN_WITHDRAWAL_RECOVERY_AUDIENCE,serviceAccount:process.env.OKCLEAN_WITHDRAWAL_RECOVERY_ACCOUNT,protectedMemberAdminUid:process.env.OKCLEAN_MEMBER_ADMIN_UID}});
   app.post('/_internal/withdrawal/recover',recover);
 }
-app.use(createHttpHandler({auth:getAuth(),appCheck:restrictedAppCheck(getAppCheck(),process.env.OKCLEAN_FIREBASE_WEB_APP_ID),db,rateLimit:createRateLimit(db),allowedOrigin:process.env.ALLOWED_ORIGIN,services,consentVersion:process.env.CONSENT_VERSION,protectedMemberAdminUid:process.env.OKCLEAN_MEMBER_ADMIN_UID,withdrawalPolicyReviewed:process.env.OKCLEAN_WITHDRAWAL_POLICY_REVIEWED==='true',memberLinkEnabled:process.env.OKCLEAN_MEMBER_LINK_ENABLED==='true'&&process.env.OKCLEAN_MEMBER_LINK_POLICY_REVIEWED==='true',memberLinkPolicyVersion:process.env.OKCLEAN_MEMBER_LINK_POLICY_VERSION}));
+app.use(createHttpHandler({auth:requestAuth,appCheck:verifiedIdentity.appCheck,db,rateLimit:createRateLimit(db),allowedOrigin:process.env.ALLOWED_ORIGIN,services,consentVersion:process.env.CONSENT_VERSION,protectedMemberAdminUid:process.env.OKCLEAN_MEMBER_ADMIN_UID,withdrawalPolicyReviewed:process.env.OKCLEAN_WITHDRAWAL_POLICY_REVIEWED==='true',memberLinkEnabled:process.env.OKCLEAN_MEMBER_LINK_ENABLED==='true'&&process.env.OKCLEAN_MEMBER_LINK_POLICY_REVIEWED==='true',memberLinkPolicyVersion:process.env.OKCLEAN_MEMBER_LINK_POLICY_VERSION}));
 app.use((err,req,res,next)=>{res.status(400).set('Cache-Control','no-store').json({status:'unavailable'});});
 app.listen(Number(process.env.PORT)||8080,'0.0.0.0');

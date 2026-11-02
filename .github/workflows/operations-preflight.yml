@@ -1,0 +1,32 @@
+name: 운영 연결 오프라인 사전검사
+on:
+  pull_request:
+    paths:
+      - 'server/**'
+      - 'tests/operations-*.test.cjs'
+      - 'tests/key-lifecycle-adapter.test.cjs'
+      - 'tests/write-isolation-adapter.test.cjs'
+      - 'tests/checkpoint-store-adapter.test.cjs'
+      - 'docs/operations-approval-plan.md'
+      - '.github/workflows/operations-preflight.yml'
+permissions:
+  contents: read
+jobs:
+  offline-preparation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Synthetic configuration and authorization regression
+        run: node --test tests/key-lifecycle-adapter.test.cjs tests/write-isolation-adapter.test.cjs tests/checkpoint-store-adapter.test.cjs tests/operations-readiness-reader.test.cjs tests/operations-adapters-integration.test.cjs tests/operations-preflight.test.cjs tests/preflight.test.cjs tests/server-handler.test.cjs tests/app-check-handler.test.cjs tests/verified-reservation-handler.test.cjs tests/independent-restore-verifier.test.cjs tests/restore-issuer.test.cjs tests/restore-gate.test.cjs
+      - name: Missing environment must fail closed
+        shell: bash
+        run: |
+          set +e
+          env -i PATH="$PATH" node server/operations-preflight.cjs --deployment config.json config.json
+          result=$?
+          set -e
+          test "$result" -eq 1
