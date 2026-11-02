@@ -10,6 +10,10 @@ const admin=require('firebase-admin');
 const {createVerifiedReservationHandler}=require('../prototype/security/verified-reservation-handler.cjs');
 const {createReceiptStatusHandler}=require('../prototype/security/receipt-status-handler.cjs');
 const project='demo-okclean-integration';
+// Each viewport runs in a fresh emulator process; no production data is used.
+const viewportWidth=Number(process.env.OKCLEAN_TEST_VIEWPORT_WIDTH||390);
+if(![320,390,1440].includes(viewportWidth))throw Error('Unsupported test viewport');
+const viewport={width:viewportWidth,height:viewportWidth===1440?900:844};
 if(process.env.FIREBASE_AUTH_EMULATOR_HOST!=='127.0.0.1:9099' ||
    process.env.FIRESTORE_EMULATOR_HOST!=='127.0.0.1:8085' ||
    process.env.GCLOUD_PROJECT!==project) throw new Error('Loopback emulators and demo project are mandatory');
@@ -64,7 +68,7 @@ async function main(){
   const base='http://127.0.0.1:'+server.address().port;
   const browser=await chromium.launch({headless:true});
   async function context(){
-    const ctx=await browser.newContext({viewport:{width:390,height:844},serviceWorkers:'block'});
+    const ctx=await browser.newContext({viewport,serviceWorkers:'block'});
     await ctx.route('**/*',route=>{
       const u=new URL(route.request().url());
       if(u.origin===base || (u.hostname==='127.0.0.1' && ['8085','9099'].includes(u.port)))return route.continue();
@@ -258,7 +262,7 @@ async function main(){
     assert.equal((await db.collection('quote_requests').doc(verifiedId).get()).data().status,'상담중');
     await manager2.close();await bad.close();await newSession.close();await verified.close();
     console.log('PASS: verified server, lost response, reload, new session, access isolation and manager');
-    console.log('PASS: real browser reservation -> emulators -> admin status -> reload');
+    console.log('PASS: real browser reservation -> emulators -> admin status -> reload; viewport='+viewportWidth);
   }finally{
     await browser.close();await new Promise(resolve=>server.close(resolve));await app.delete();
   }

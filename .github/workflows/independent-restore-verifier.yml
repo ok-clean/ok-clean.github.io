@@ -1,0 +1,22 @@
+name: 독립 복원 검증자 준비 검사
+on:
+  pull_request:
+    paths:
+      - 'server/independent-restore-verifier.cjs'
+      - 'server/restore-issuer.cjs'
+      - 'server/restore-issuer-index.cjs'
+      - 'server/restore-gate.cjs'
+      - 'tests/independent-restore-verifier.test.cjs'
+      - '.github/workflows/independent-restore-verifier.yml'
+permissions:
+  contents: read
+jobs:
+  synthetic-verifier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test tests/independent-restore-verifier.test.cjs tests/restore-issuer.test.cjs tests/restore-gate.test.cjs
