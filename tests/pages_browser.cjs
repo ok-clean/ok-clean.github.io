@@ -6,7 +6,7 @@ await page.route('**/*',async r=>{if(new URL(r.request().url()).hostname==='127.
 if(r.request().url().includes('firebase-auth.js'))return r.fulfill({contentType:'text/javascript',body:`export const getAuth=()=>({});export class GoogleAuthProvider{};let cb;export const onAuthStateChanged=(a,f)=>{cb=f;f(null)};export const signInWithPopup=async()=>cb({uid:'fixture'});export const signInWithRedirect=signInWithPopup;export const getRedirectResult=async()=>null;export const signOut=async()=>cb(null);`});
 if(r.request().url().includes('firebase-firestore.js'))return r.fulfill({contentType:'text/javascript',body:`export const getFirestore=()=>({});export const collection=(...a)=>a;export const query=(...a)=>a;export const orderBy=(...a)=>a;export const limit=(...a)=>a;export const doc=(...a)=>a;export const updateDoc=async()=>{globalThis.fixtureSaved=true};export const onSnapshot=(q,f)=>{f({docs:[{id:'fixture',data:()=>({name:'TEST ONLY',phone:'000',area:'fixture',status:'신규',couponStatus:'미사용',freeStatus:'미제공'})}]});return ()=>{}};`});
 return r.abort();});
-await page.goto('http://127.0.0.1:8765/');await page.waitForSelector('#qSvc option');
+await page.goto('http://127.0.0.1:8765/');await page.waitForSelector('#qSvc option',{state:'attached'});
 assert(await page.locator('#qSvc option').count()>1);const before=await page.locator('#qSvc').inputValue();await page.locator('#qSvc').selectOption({index:1});assert.notEqual(await page.locator('#qSvc').inputValue(),before);
 assert(await page.locator('body').innerText());
 await page.goto('http://127.0.0.1:8765/admin/');await page.waitForSelector('#loginBtn');assert(await page.locator('#dashboard').isHidden());
