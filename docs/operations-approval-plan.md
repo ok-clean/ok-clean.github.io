@@ -29,7 +29,7 @@
 | schemaVersion | 1 |
 | projects | source, ledger, control: 서로 다른 실제 프로젝트 ID |
 | databases | source, restore: 서로 다른 DB ID; sourceUid, restoreUid: 실제 DB UUID |
-| authorities | control, validator, issuer 각각 독립 serviceAccount, keyVersion, algorithm=EC_SIGN_ED25519, state=ENABLED, capabilities |
+| authorities | control, validator, issuer 각각 독립 serviceAccount, keyVersion, algorithm=EC_SIGN_ED25519, state=ENABLED, capabilities, publicKeySha256, notBefore/expiresAt(UTC epoch ms) |
 | checkpoint | bucket, project=control 프로젝트, retentionLocked=true, retentionSeconds=승인기간, writerAccess=create-only |
 | fence | mode=deny-all-writers, onExpiry=remain-closed, coversAdminSdk=true, coversRestoreAndDelete=true |
 | authentication | checkRevoked=true, appCheckEnforced=true, debugTokensDisabled=true, directClientWrites=false |
@@ -97,3 +97,18 @@ debug token 사용 현황, KMS algorithm/state/version, bucket retention/lock/IA
 62→56 정렬, 57 개인정보 변경과 충돌 조정, 최신 main 회귀, 운영 보안 실증 후 main/서버 배포를
 각각 승인한다. 승인 전 기존 PR 병합/종료, Firebase/IAM 변경, 키 발급, 데이터 파기는 금지한다.
 320/390/1440 UI는 이전 동일 구현의 성공 증거를 재사용한다. 새 HEAD CI는 별도로 기록한다.
+
+## 후속 보강: 키 수명과 입력 보호
+
+키 참조가 서로 달라도 공개키가 같으면 독립성이 없으므로 세 SPKI DER SHA-256 fingerprint도
+서로 달라야 한다. issuer fingerprint는 기존 OKCLEAN_RESTORE_PUBLIC_KEY와 대조한다.
+모든 키는 정수 notBefore/expiresAt 기간 안에 있어야 한다. 이 기간은 운영자 계획값이며 KMS의
+실제 유효 상태/폐기 조회를 대신하지 않는다. 고정 버전·키 상태 검사는 기존 구현을 재사용한다.
+
+manifest/site 파일은 각각 64KiB 이내여야 하며, camelCase privateKey/idToken/authorization과
+추가 secret 환경변수도 거부한다. 출력은 원문 대신 고정 코드만 남긴다. --prepare 성공을
+배포 승인으로 사용하지 않으며 --deployment는 계속 실패한다.
+
+실제 운영 구현에는 여전히 고객/관리자/재적용 writer별 fencing token과 멱등성 본문 결속,
+commit 직전 권한 재검증, 키 폐기 조회 실패 시 차단, generation에 결속된 전체 checkpoint,
+append-only 감사 기록이 필요하다. 승인만으로 이 구현이 완료되는 것은 아니다.

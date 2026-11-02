@@ -8,7 +8,7 @@ const db=/^(\(default\)|[a-z][a-z0-9-]{2,61}[a-z0-9])$/;
 const uid=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const kms=/^projects\/([a-z][a-z0-9-]{4,28}[a-z0-9])\/locations\/[a-z0-9-]+\/keyRings\/[A-Za-z0-9_-]+\/cryptoKeys\/([A-Za-z0-9_-]+)\/cryptoKeyVersions\/[1-9][0-9]*$/;
 const roles=['control','validator','issuer'];
-function inspect(m,env,site){
+function inspect(m,env,site,now=Date.now()){
  const errors=validateRuntime(env);const need=(ok,code)=>{if(!ok)errors.push(code);};
  if(!m||typeof m!=='object'||Array.isArray(m))m={};
  need(m.schemaVersion===1,'MANIFEST_VERSION_INVALID');
@@ -20,17 +20,23 @@ function inspect(m,env,site){
  const d=m.databases||{};
  need(db.test(d.source||'')&&db.test(d.restore||'')&&d.source!==d.restore&&d.restore===env.OKCLEAN_RESTORE_SERVING_DATABASE_ID&&d.source===env.OKCLEAN_FIRESTORE_DATABASE_ID,'DATABASE_BINDING_INVALID');
  need(uid.test(d.sourceUid||'')&&uid.test(d.restoreUid||'')&&d.sourceUid!==d.restoreUid,'DATABASE_UID_REQUIRED');
- const accounts=[],keys=[];
+ const accounts=[],keys=[],fingerprints=[];
+ need(Number.isSafeInteger(now),'CLOCK_INVALID');
  for(const role of roles){
   const v=m.authorities?.[role]||{},owner=role==='control'?p.control:p.ledger;
   need(typeof v.serviceAccount==='string'&&/^[a-z][a-z0-9-]{4,28}[a-z0-9]@/.test(v.serviceAccount)&&v.serviceAccount.endsWith('@'+owner+'.iam.gserviceaccount.com'),'AUTHORITY_'+role.toUpperCase()+'_INVALID');
   const match=typeof v.keyVersion==='string'&&v.keyVersion.match(kms);
   need(!!match&&match[1]===owner,'KEY_'+role.toUpperCase()+'_INVALID');
+  need(Number.isSafeInteger(v.notBefore)&&Number.isSafeInteger(v.expiresAt)&&v.notBefore<=now&&v.expiresAt>now,'KEY_'+role.toUpperCase()+'_VALIDITY_INVALID');
+  need(typeof v.publicKeySha256==='string'&&/^[a-f0-9]{64}$/.test(v.publicKeySha256),'KEY_'+role.toUpperCase()+'_FINGERPRINT_INVALID');
+  fingerprints.push(v.publicKeySha256);
   accounts.push(v.serviceAccount);keys.push(match?v.keyVersion.replace(/\/cryptoKeyVersions\/[0-9]+$/,''):null);
   need(v.algorithm==='EC_SIGN_ED25519'&&v.state==='ENABLED','KEY_'+role.toUpperCase()+'_STATE_INVALID');
  }
  need(accounts.every(Boolean)&&new Set(accounts).size===3,'INDEPENDENT_IDENTITIES_REQUIRED');
  need(keys.every(Boolean)&&new Set(keys).size===3,'INDEPENDENT_KEYS_REQUIRED');
+ need(fingerprints.every(Boolean)&&new Set(fingerprints).size===3,'INDEPENDENT_PUBLIC_KEYS_REQUIRED');
+ try{const crypto=require('node:crypto');const fingerprint=crypto.createHash('sha256').update(crypto.createPublicKey(env.OKCLEAN_RESTORE_PUBLIC_KEY).export({format:'der',type:'spki'})).digest('hex');need(m.authorities?.issuer?.publicKeySha256===fingerprint,'ISSUER_PUBLIC_KEY_BINDING_MISMATCH');}catch{errors.push('ISSUER_PUBLIC_KEY_BINDING_MISMATCH');}
  const c=m.checkpoint||{};
  need(typeof c.bucket==='string'&&/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(c.bucket)&&c.project===p.control,'CHECKPOINT_RESOURCE_INVALID');
  need(c.retentionLocked===true&&Number.isSafeInteger(c.retentionSeconds)&&c.retentionSeconds>0&&c.writerAccess==='create-only','CHECKPOINT_IMMUTABILITY_PLAN_REQUIRED');
@@ -45,14 +51,15 @@ function inspect(m,env,site){
  const allowed={control:['fence.observe','checkpoint.create','control.sign'],validator:['checkpoint.read','restore.read','ledger.read','validation.create','validator.sign'],issuer:['validation.read','ledger.read','attestation.create','issuer.sign']};
  for(const role of roles){const caps=m.authorities?.[role]?.capabilities;need(Array.isArray(caps)&&caps.length===allowed[role].length&&new Set(caps).size===caps.length&&caps.every(x=>allowed[role].includes(x)),'CAPABILITY_'+role.toUpperCase()+'_INVALID');}
  need(env.OKCLEAN_RESTORE_ISSUER_ENABLED==='false'&&env.OKCLEAN_RESTORE_RENEWAL_ENABLED==='false'&&m.publishAllowed===false,'ISSUANCE_MUST_REMAIN_BLOCKED');
+ for(const [name,value] of Object.entries(env)){if(value&&/PRIVATE_KEY|ACCESS_TOKEN|REFRESH_TOKEN|CLIENT_SECRET/i.test(name))errors.push('SECRET_ENV_FORBIDDEN');}
  const encoded=JSON.stringify(m);
- need(!/-----BEGIN [^-]*PRIVATE KEY-----|"(?:private_key|access_token|refresh_token|client_secret|password)"\s*:/i.test(encoded),'SECRET_MATERIAL_FORBIDDEN');
+ need(!/-----BEGIN [^-]*PRIVATE KEY-----|"(?:private_key|privateKey|access_token|refresh_token|client_secret|password|idToken|authorization)"\s*:/i.test(encoded),'SECRET_MATERIAL_FORBIDDEN');
  return {staticValid:errors.length===0,productionVerified:false,deployAllowed:false,errors:[...new Set(errors)],blockers:['LIVE_IAM_APPCHECK_UNVERIFIED','EXTERNAL_FENCE_WORM_UNVERIFIED','KEY_LIFECYCLE_ADAPTER_UNIMPLEMENTED','RETENTION_SCOPE_EFFECTIVE_DATE_UNAPPROVED','PRODUCTION_ISSUER_HARDGUARD']};
 }
 function run(argv,env){
  // No raw paths, supplied values, exception messages or tokens in diagnostics.
  if(argv.length!==3||!['--prepare','--deployment'].includes(argv[0])){console.error('USAGE: --prepare|--deployment MANIFEST_JSON SITE_CONFIG_JSON');return 2;}
- let m,site;try{m=JSON.parse(fs.readFileSync(argv[1],'utf8'));site=JSON.parse(fs.readFileSync(argv[2],'utf8'));}catch{console.error('INPUT_UNREADABLE');return 2;}
+ let m,site;try{const read=p=>{const data=fs.readFileSync(p);if(data.length>65536)throw Error('INPUT_LIMIT');return JSON.parse(data.toString('utf8'));};m=read(argv[1]);site=read(argv[2]);}catch{console.error('INPUT_UNREADABLE');return 2;}
  const result=inspect(m,env,site);
  try{require('node:vm').runInNewContext(fs.readFileSync(path.join(__dirname,'restore-issuer-index.cjs'),'utf8'),Object.create(null),{timeout:100});result.errors.push('ISSUER_GUARD_NOT_BLOCKING');}catch(e){if(e.message!=='INDEPENDENT_RESTORE_VERIFIER_REQUIRED')result.errors.push('ISSUER_GUARD_UNEXPECTED');}
  result.staticValid=result.errors.length===0;
