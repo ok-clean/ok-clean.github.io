@@ -34,6 +34,9 @@ jobs:
       - name: 블로그 후기 모으고 페이지 만들기
         run: python update.py
 
+      - name: Pages 배포 파일 준비
+        run: python scripts/stage_pages.py . "$RUNNER_TEMP/okclean-pages"
+
       - name: 바뀐 파일 저장
         run: |
           git config user.name "github-actions[bot]"
@@ -41,12 +44,21 @@ jobs:
           git add -A . ':(exclude)__pycache__' ':(exclude)*.pyc'
           if ! git diff --cached --quiet; then
             git commit -m "사이트 자동 업데이트"
-            git push || (git pull --rebase -X theirs origin main && git push)
+            # 원격에 새로운 변경이 있으면 덮어쓰지 않고 다음 실행에서 다시 생성합니다.
+            git push
+          fi
+          # 변경사항이 없어 push하지 않은 경우에도 오래된 산출물 배포를 줄입니다.
+          current="$(git rev-parse HEAD)"
+          remote="$(git ls-remote --exit-code origin refs/heads/main | awk '{print $1}')"
+          if [ "$current" != "$remote" ]; then
+            echo "main이 변경되어 이번 배포를 중단합니다."
+            exit 1
           fi
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: "."
+          path: ${{ runner.temp }}/okclean-pages
       - id: deployment
         uses: actions/deploy-pages@v4
+
