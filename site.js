@@ -55,7 +55,12 @@
     m.hidden = false; document.body.classList.add("modal-open");
     const candidates = m.querySelectorAll('input:not([type="hidden"]), select, textarea, button:not(.x), a[href]');
     const first = [...candidates].find(el => !el.disabled && el.getClientRects().length) || m.querySelector("button.x");
-    if(first) setTimeout(() => { if(!m.hidden && first.isConnected && first.getClientRects().length) first.focus(); }, 50);
+    const session = modalSessions.get(m);
+    if(first) setTimeout(() => {
+      // Ignore a closed/reopened dialog and preserve a field the user already chose.
+      if(modalSessions.get(m) !== session || m.hidden || m.contains(document.activeElement)) return;
+      if(first.isConnected && first.getClientRects().length) first.focus();
+    }, 50);
   };
   window.closeModal = function(m){
     if(!m || m.hidden) return;
