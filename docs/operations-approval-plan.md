@@ -236,3 +236,60 @@ GCS/KMS 외부 계정/테스트 프로젝트는 제공되지 않아 모의 trans
 - https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys.cryptoKeyVersions/asymmetricSign
 - https://docs.cloud.google.com/kms/docs/data-integrity-guidelines
 - https://docs.cloud.google.com/storage/docs/json_api/v1/objects/insert
+
+## v6 서버 연결 및 읽기 전용 실행 (2026-11-03 KST)
+
+### 실제 코드 변경
+
+고객 서버 `server/index.cjs`는 기존 복원 gate 뒤의 handler에
+`createFirebaseSdkIdentity`의 토큰/App Check 검증기를 전달한다. 기존 계정 조회/회수
+메서드는 원래 Auth 객체에 bind해 보존한다. 서버 설정 검사는 listener 전에 그대로 수행한다.
+복원 gate/issuer/쓰기 provider의 production 차단을 완화하지 않는다.
+새 `server/cloud-readiness-entry.cjs`는 Docker 이미지에 포함되지만 기본 CMD에서 실행되지 않는
+독립 CLI다. 고정된 Google API 주소만 읽으며 고객 본문이나 토큰을 출력하지 않는다.
+프로젝트/DB UUID/리전/실행 SA, IAM 목록, AppCheck 정책, KMS 공개키, 기존 합성 checkpoint의
+retention/generation/bytes를 대조한다. 점검 결과는 traceId·시각·검사별 고정 상태만 출력한다.
+이 stdout은 실행 증거이며 외부 감사 로그 sink의 변경 방지 보장으로 주장하지 않는다.
+
+### 현재 실행 차단 원인
+
+저장소의 `okclean-admin`은 기존 설정의 프로젝트 ID일 뿐, 이번 실행에 승인된 전체 자원
+명세가 아니다. 운영/테스트 DB UUID·리전·버킷·KMS 버전·공개키 pin·실행 SA·합성 객체
+경로/해시가 확정되지 않았다. 현재 실행 환경에 OKCLEAN/Firebase/Google 클라우드 인증
+환경 설정도 제공되지 않았다. ADC를 탐색하거나 다른 프로젝트로 자동 연결하지 않았다.
+실제 클라우드 조회/쓰기/서명/삭제 시도는 0건이다. API 활성 상태·비용·실효 IAM도 미검증이다.
+
+### 실행과 예상 결과
+
+1. `server/config/cloud-readiness.example.json`을 비밀값 없는 외부 설정 파일로 복사한다.
+   REPLACE_ME는 의도적으로 실행을 거부한다. 운영 ID를 추정해 채우지 않는다.
+   현재 inspector 계약은 같은 프로젝트의 서로 다른 DB 2개와 역할 주체3개를 요구한다.
+   실제 토폴로지가 다르면 자원을 억지로 맞추지 말고 계약 확장 후 검증한다.
+2. 승인된 workload identity 환경에서만 `GOOGLE_CLOUD_PROJECT`와 `OKCLEAN_PROJECT_ID`를
+   명세 projectId와 일치시키고 `OKCLEAN_OPERATIONAL_WRITES=false`,
+   `OKCLEAN_RESTORE_ISSUANCE=false`를 설정한다. 서비스계정 키 파일과 emulator/debug 설정은 거부한다.
+3. 오프라인: `node server/cloud-readiness-entry.cjs --validate /config/readiness.json`.
+   구조 유효시 exit0/cloudContacted=false, 누락/형식오류는 exit1. 자원 존재 증명은 아니다.
+4. 읽기 승인 후 `OKCLEAN_READONLY_APPROVAL=approved node server/cloud-readiness-entry.cjs --read-only /config/readiness.json`.
+   metadata 전부 통과해도 exit2/deployAllowed=false이며 남은 실효권한/격리/실연동 검사를 표시한다.
+   실패는 exit1/고정 오류만 출력한다. 각 공급자 시간제한 최대10초, 전체 최대31초.
+   SDK 요청 취소가 공급자의 이미 완료된 작업을 되돌린다고 주장하지 않는다.
+5. 서버 이미지 기본 실행은 기존 `node server/index.cjs`를 유지한다. 승인 없이 배포하지 않는다.
+   검증 시 Node22와 `npm ci --prefix server --ignore-scripts`로 고정 의존성을 설치한다.
+
+### v6 구체적 승인표
+
+| 대상 | 승인 후 변경값/최소 권한 | 비용·위험 | 검증 및 복구 |
+|---|---|---|---|
+| 자원 명세 | 프로젝트 ID/번호, 리전, 원본·격리 DB ID/UUID, bucket, KMS 전체 버전/pin, SA 3개와 reader 확정. 비밀값 불필요 | 잘못된 프로젝트/리전은 즉시 거부; 기존 자원 조회 비용은 계정 과금 확인 필요 | 오프라인 검사 후 읽기 비교, 실패시 설정 적용 중단 |
+| 제한된 읽기 | 지정 프로젝트 `resourcemanager.projects.get/getIamPolicy`, Firebase `firebase.clients.get`, DB `datastore.databases.getMetadata`, AppCheck `firebaseappcheck.services.get`, `firebaseappcheck.debugTokens.get`, 지정 KMS `cloudkms.cryptoKeyVersions.get/viewPublicKey`, bucket `storage.buckets.get`, 지정 합성 객체 `storage.objects.get` 필요. 정확한 IAM 지원 범위는 적용 전 정책 검토 | 프로젝트 전체 viewer/owner 부여하지 않음. metadata/API 호출·객체 다운로드 비용 가능. 권한부족을 자동 확대하지 않음 | 키 없는 SA 실제 신원 확인, read-only 실행. 실패시 CLI 종료; 부여권한 회수는 별도 승인 |
+| 격리 테스트 | 별도 비운영 프로젝트·합성 DB/객체/키, 예산 한도, 서명/쓰기/삭제 부정검사의 정확한 범위 승인 | 생성·KMS 호출·저장 과금 및 보존 잠금 비가역성. 자동 자원 생성/잠금 없음 | 실제 IAM 거부/overwrite/delete/동시성 검증 필요. 현재 CLI는 파괴성 계약을 실행하지 않으며 쓰기/서명 가드는 유지. 승인 후 별도 실행 경로 검토 필요 |
+| 운영 보안 인프라 | 모든 writer fence, 독립 anchor, locked retention, 역할 분리와 로그 보존 정책을 확정 | Firestore 자체는 WORM 아님; 서비스 간 원자성 없음; 잠금은 되돌리지 못할 수 있음 | 승인된 staging에서 장애/재시도 후 외부 설정까지 검증. 실패시 발급 닫고 이전 서버 리비전 유지 |
+| 개인정보 | 파기 범위·법적 보존 예외·시행일·백업/복원 처리 기준 확정 | 잘못된 파기 복구 불가; 코드 준비가 실제 파기 승인이 아님 | 정책별 합성 자료 검증, 승인 전 실제 파기0 |
+| 배포 | 최종 HEAD 병합·서버 설정·운영 연동·홈페이지 배포를 각각 승인 | 서비스 중단/권한 오설정 위험, Cloud Run 비용 별도 확인 | CI와 실제 연동 검증 모두 통과 후 적용; 실패시 이전 리비전 복귀 및 gate 폐쇄. 고객 DB/원장/backup은 롤백하지 않음 |
+
+GCS 잠금/덮어쓰기/삭제 거부, KMS 실제 sign/권한거부, 실토큰/Auth/AppCheck, 외부 writer 차단,
+고객 서버의 실제 Cloud Run 실행 및 감사 sink 보장은 미검증이다. CLI 성공으로 대체하지 않는다.
+
+권한명 참고: https://docs.cloud.google.com/iam/docs/roles-permissions/firebaseappcheck
+및 https://docs.cloud.google.com/iam/docs/roles-permissions/firestore (list API와 IAM permission 이름은 동일하지 않을 수 있음).

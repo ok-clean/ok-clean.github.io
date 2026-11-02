@@ -4,6 +4,7 @@ on:
     paths:
       - 'server/**'
       - 'tests/*provider*'
+      - 'tests/cloud-readiness-entry.test.cjs'
       - 'tests/firebase-sdk-identity.test.cjs'
       - 'tests/gcp-readonly-inspector.test.cjs'
       - '.github/workflows/cloud-sdk-contracts.yml'
@@ -21,7 +22,7 @@ jobs:
           node-version: '22'
       - run: npm ci --prefix server --ignore-scripts --no-audit --no-fund
       - name: SDK requests, response integrity and default write denial
-        run: node --test tests/firebase-sdk-identity.test.cjs tests/gcp-readonly-inspector.test.cjs tests/gcp-kms-provider.test.cjs tests/firestore-write-provider.test.cjs tests/firestore-evidence-provider.test.cjs tests/gcs-checkpoint-provider.test.cjs
+        run: node --test tests/cloud-readiness-entry.test.cjs tests/server-index-gate.test.cjs tests/firebase-sdk-identity.test.cjs tests/gcp-readonly-inspector.test.cjs tests/gcp-kms-provider.test.cjs tests/firestore-write-provider.test.cjs tests/firestore-evidence-provider.test.cjs tests/gcs-checkpoint-provider.test.cjs
   firestore-sdk-emulator:
     runs-on: ubuntu-latest
     timeout-minutes: 10
