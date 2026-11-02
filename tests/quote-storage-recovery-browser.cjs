@@ -80,6 +80,16 @@ function makeHome(changeConfig){
         await bounded.page.locator('#qCopy').click();
         assert.ok((await bounded.page.evaluate(()=>window.fakeCopy)).includes(expected+'대'));
       }
+      await bounded.page.locator('#qDate').fill('2000-01-01');
+      await bounded.page.locator('#qDate').dispatchEvent('change');
+      assert.equal(await bounded.page.locator('#qDate').inputValue(),'');
+      assert.equal(await bounded.page.evaluate(()=>JSON.parse(localStorage.getItem('quote')).date),'');
+      for(const button of ['#qCopy','#qSms','#qKakao']){
+        await bounded.page.evaluate(()=>{document.querySelector('#qDate').value='2000-01-01';});
+        await bounded.page.locator(button).click();
+        assert.equal(await bounded.page.locator('#qDate').inputValue(),'');
+        assert.equal(await bounded.page.locator('#sheet').isVisible(),false);
+      }
       await bounded.context.close();
       // 옵션 저장값이 배열이 아니어도 나머지 정상 선택과 견적을 사용할 수 있습니다.
       for(const opts of [{bad:1},42,'0']){

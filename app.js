@@ -161,10 +161,24 @@ $("qMinus").onclick = () => { cur.qty = Math.max(1, (+cur.qty || 1) - 1); $("qQt
 $("qPlus").onclick = () => { cur.qty = Math.min(999, (+cur.qty || 0) + 1); $("qQty").value = cur.qty; calc(); };
 $("qOpt").addEventListener("change", e => { const i = +e.target.dataset.o; cur.opts = e.target.checked ? [...new Set([...cur.opts, i])] : cur.opts.filter(x => x !== i); calc(); });
 $("qArea").addEventListener("change", calc);
-$("qDate").addEventListener("change", calc);
+$("qDate").addEventListener("change", () => {
+  const input = $("qDate");
+  input.min = new Date(Date.now() + 9*3600e3).toISOString().slice(0, 10);
+  if(input.value && input.value < input.min){ input.value = ""; toast("지난 날짜는 선택할 수 없어요. 희망 날짜를 다시 선택해 주세요."); }
+  calc();
+});
+function validateQuoteDateBeforeSend(){
+  const input = $("qDate");
+  input.min = new Date(Date.now() + 9*3600e3).toISOString().slice(0, 10);
+  if(input.value && input.value < input.min){
+    input.value = ""; calc(); toast("지난 날짜가 지워졌어요. 희망 날짜를 다시 확인해 주세요."); input.focus(); return false;
+  }
+  return true;
+}
 window.goSms = u => { location.href = u; };
 // 문자로 견적 보내기: 견적 내용이 미리 적힌 문자 창을 엶 (아이폰은 &body=, 안드로이드는 ?body=)
 if($("qSms")) $("qSms").onclick = async () => {
+  if(!validateQuoteDateBeforeSend()) return;
   const num = (C.sms || "").replace(/[^0-9]/g, ""), body = encodeURIComponent(summary());
   const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const MOBILE = IOS || /Android/i.test(navigator.userAgent);
@@ -175,8 +189,9 @@ if($("qSms")) $("qSms").onclick = async () => {
   }
   window.goSms(`sms:${num}${IOS ? "&" : "?"}body=${body}`);
 };
-$("qCopy").onclick = async () => { if(await copy(summary())) toast("문의 내용을 복사했어요. 원하는 곳에 붙여넣어 주세요."); };
+$("qCopy").onclick = async () => { if(!validateQuoteDateBeforeSend()) return; if(await copy(summary())) toast("문의 내용을 복사했어요. 원하는 곳에 붙여넣어 주세요."); };
 $("qKakao").onclick = async () => {
+  if(!validateQuoteDateBeforeSend()) return;
   if(C.kakao) return kakaoSend("카톡으로 견적 문의", summary());
   await copy(summary());
   toast("문의 내용을 복사했어요. 전화로 연결할게요."); setTimeout(() => location.href = "tel:" + phoneDigits, 600);
