@@ -1,7 +1,7 @@
 name: 제휴 추천관 검토 검사
 on:
   pull_request:
-    paths: ['prototype/affiliate/**', 'tests/test_affiliate_catalog.py', 'tests/affiliate-browser.cjs', '.github/workflows/affiliate-preview-tests.yml']
+    paths: ['prototype/affiliate/**', 'prototype/navigation-preview/**', 'tests/test_affiliate_catalog.py', 'tests/affiliate-browser.cjs', '.github/workflows/affiliate-preview-tests.yml']
 permissions:
   contents: read
 jobs:
