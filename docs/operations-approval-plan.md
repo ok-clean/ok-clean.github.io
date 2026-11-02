@@ -163,3 +163,76 @@ v4 복원 연결은 비소비형 키 검증(consume:false)과 DB 내 요청 영�
 내용·checkpoint 결속을 확인한 뒤 격리된 쓰기만 승인한다. writer는 거래 안에서 다시 확인하고,
 요청 영수증·본문·감사를 함께 저장한다. 독립 공급자 사이의 폐기/쓰기 원자성은 이 코드만으로
 보장하지 않으며 외부 fence와 실제 공급자 통합 검사가 필수다.
+
+
+## v5 실제 SDK 공급자 연결 코드
+
+기존 의존성 firebase-admin 14.5.0, google-auth-library 11.3.2와 lockfile을 그대로 사용한다.
+새로운 운영 진입점은 만들지 않았다. 초기화된 Firebase App/Firestore 및 GoogleAuth 인스턴스를
+서버의 신뢰된 구성에서 공급하며, 브라우저/요청 본문에서 프로젝트나 관리자 권한을 받지 않는다.
+운영 활성화는 기존 issuer hardguard 해제와 별도의 승인된 서버 구성·실제 권한 검증을 요구한다.
+환경변수/manifest가 없거나 공급자 생성자의 자원 결속 검사가 실패하면 연결을 거부한다.
+
+| 공급자 | 실제 SDK 호출 및 보장 범위 | 차단/제한 |
+|---|---|---|
+| firestore-write-provider | Admin SDK runTransaction/get/set/create; 본문·멱등 영수증·감사 동일 DB 거래 | 기본/운영 쓰기 거부; 실제 SDK host 또는 servicePath/port와 ssl=false까지 확인한 demo loopback만 쓰기 허용 |
+| firestore-evidence-provider | SDK 원자 거래로 키 registry/영수증/감사와 checkpoint records/head/audit 저장 | 사전 생성된 registry/head 필요; 읽기 후 쓰기 순서, 크기/행 수 제한; Firestore 자체를 WORM으로 표시하지 않음 |
+| gcp-kms-provider | GoogleAuth 요청으로 version/getPublicKey/asymmetricSign; CRC32C·SPKI·상태·알고리즘·응답서명 검증 | 실제 인증은 읽기만, 서명 경로는 명시적 모의 transport만; 키 생성/변경/파기 API 없음 |
+| gcs-checkpoint-provider | GoogleAuth GCS JSON API, generation=0 조건부 생성 계약, generation 고정 다운로드·SHA256·보존/hold 대조 | 실제 인증은 읽기만, 생성은 명시적 모의 transport; overwrite/delete/retention lock 변경 API 없음 |
+| firebase-sdk-identity | getAuth(app).verifyIdToken(token,true), getAppCheck(app).verifyToken(token) | 발급자/대상/만료/appId 대조, authVersion 없으면 거부; 사용자·권한·토큰 생성/변경 없음 |
+| gcp-readonly-inspector | 프로젝트/웹앱/DB metadata, getIamPolicy(version3), AppCheck enforcement 및 debug token 페이지 조회 | GET와 읽기 전용 getIamPolicy POST만; 프로젝트 정책이 맞아도 상속·그룹·조건·deny·impersonation 전체 검증 완료로 표시하지 않음 |
+
+기존 v4 write/lifecycle/checkpoint/restore bridge에 위 SDK 공급자를 주입한다. 예약 원본 DB와
+격리 대상 DB는 ID와 UUID 모두 구분하고 거래 전후 확인한다. 실제 에뮬레이터 시험의 DB UUID,
+인증·복원 증명은 합성 값이며 실제 Firestore metadata/IAM/Auth 운영 증명이 아니다.
+감사 기록은 공급자 내 create 전용 문서와 고정 코드·해시·추적 ID를 사용한다. SDK 예외 본문,
+토큰, 고객 본문은 진단 출력에 포함하지 않는다. 운영 로그 sink의 보존/조회 권한은 별도 검증한다.
+
+### 공급자 실제 보장의 한계
+
+- Firestore 거래는 같은 DB의 데이터 원자성을 제공하지만 임의의 서버 commit 시각을 application
+  deadline 이내로 강제하는 API는 없다. 늦거나 끊긴 응답은 불확정으로 처리하고 격리를 유지한다.
+  같은 requestId로 영수증을 확인한다. timeout이 이미 실행된 commit을 취소했다고 주장하지 않는다.
+- Firestore anchor, GCS 객체, KMS registry는 서로 다른 서비스다. 하나의 원자적 commit으로 묶었다고
+  표시하지 않는다. 외부 fence·독립 anchor 보호와 장애 단계별 재개 검증이 필요하다.
+- GCS retention lock·uniform access·객체 generation/bytes를 읽어 대조해도 전체 IAM과 법적 보존을
+  증명하지 않는다. temporary hold 변경 권한 및 bucket 정책의 실효권한은 따로 승인·검증한다.
+- IAM 프로젝트 역할 목록 확인만으로 유효 권한을 완성했다고 판단하지 않는다. 상속/리소스/그룹/
+  조건/서비스계정 위임/deny 정책은 미확인 차단 요소로 남긴다. AppCheck Firestore enforcement는
+  custom backend 배포의 검증 코드 적용을 증명하지 않는다.
+
+### 운영 승인 체크리스트 (v5)
+
+| 영역 | 구현 상태/필요 자원·권한 | 위험·적용 절차 | 검증·실패 복구 | 승인 |
+|---|---|---|---|---|
+| Firebase | 실제 SDK 연결/metadata 검사 구현; 프로젝트·원본/격리 DB ID·UUID와 읽기 권한 필요 | 잘못된 대상 연결; metadata를 설정과 대조 후만 연결 | 원본 쓰기 없는 조회→staging 거래; 불일치 즉시 중단 | 자원확정/운영연결 필요 |
+| IAM | 프로젝트 정책 SDK 조회/역할 대조 구현; 독립 SA와 계층별 정책 조회 필요 | 과권한·상속 누락; 각 역할 allowlist 및 실효권한 분석 | 권한 부족/과다/위임/조건 검사; 이전 정책 snapshot 복구는 별도승인 | 조회 범위/적용 필요 |
+| App Check | Admin SDK 검증 및 enforcement/debug 조회 구현 | 앱 불일치·debug 우회; 등록 앱/운영 정책 확정 | 누락/위조/만료 거부, custom backend 실제 검사; 실패 시 API 차단 | 실제 운영검증 필요 |
+| KMS | 버전/지문/CRC/서명 SDK 코드·모의 계약 완료; 독립 키·서비스계정 필요 | 폐기·교체 오설정; 알고리즘/버전/권한 확정 후 staging 연결 | 권한 거부/교체 경합/폐기 검증; 발급 차단 유지, 공개키 이력 보존 | 실제 서명·키 변경 별도승인 |
+| 체크포인트 | Firestore 기록 및 GCS 조건부 생성/조회 코드 완료; 독립 bucket/anchor 필요 | lock 비가역성·서비스간 부분 실패; 기간/비용 검토 후 생성 | 덮어쓰기/삭제 불가·부분 실패·재시도 실증; 객체/원장 임의 되돌림 금지 | 저장소/lock/권한 적용 필요 |
+| 예약 격리 | SDK 거래·멱등성·감사·복원 계약 완료; 모든 writer 차단 인프라 필요 | Admin SDK 우회·late commit; writer 목록과 격리 권한 확정 | 실제 동시 writer/중단 재개; 격리 유지하고 영수증으로 확인 | 운영 쓰기·격리 적용 필요 |
+| 개인정보 | hold/보존기간 역행 차단 구현; 유형별 범위·예외·시행일 필요 | 오삭제/과보존; 합성 preview 후 범위 결정 | backup 복원 후 재삭제와 예외 검증; 실제 파기는 코드 rollback 대상 아님 | 정책 결정 필요 |
+| 배포 | Draft/CI/실행 차단 유지; 검증 HEAD·서버 revision 필요 | 기존 기능 회귀; 승인된 범위에서 단계별 연동→병합→배포 | 최종 CI 및 운영 점검; 이전 revision 복귀, 고객자료는 별도승인 | 각각 별도승인 |
+
+### 검증 실행
+
+`npm ci --prefix server --ignore-scripts --no-audit --no-fund`
+
+`.github/workflows/cloud-sdk-contracts.yml`은 고정 SDK의 단위/요청 계약과 공식 Firestore
+에뮬레이터 두 통합 스크립트를 실행한다. 기존 208개 회귀와 기존 9개 CI도 유지한다.
+GCS/KMS 외부 계정/테스트 프로젝트는 제공되지 않아 모의 transport 검사만 수행한다.
+실제 IAM/AppCheck·KMS·GCS·staging·운영 연동 성공으로 집계하지 않는다.
+운영을 테스트 프로젝트로 사용하거나 테스트 데이터를 운영 DB에 생성하지 않는다.
+
+### 공식 API 근거
+
+- https://firebase.google.com/docs/firestore/manage-data/transactions
+- https://firebase.google.com/docs/auth/admin/verify-id-tokens
+- https://firebase.google.com/docs/app-check/custom-resource-backend
+- https://firebase.google.com/docs/reference/appcheck/rest/v1/projects.services/get
+- https://firebase.google.com/docs/reference/appcheck/rest/v1/projects.apps.debugTokens/list
+- https://docs.cloud.google.com/resource-manager/reference/rest/v3/projects/getIamPolicy
+- https://firebase.google.com/docs/reference/firebase-management/rest/v1beta1/projects.webApps/get
+- https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys.cryptoKeyVersions/asymmetricSign
+- https://docs.cloud.google.com/kms/docs/data-integrity-guidelines
+- https://docs.cloud.google.com/storage/docs/json_api/v1/objects/insert
