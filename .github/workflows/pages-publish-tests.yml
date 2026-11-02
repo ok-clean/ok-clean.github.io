@@ -5,6 +5,9 @@ on:
       - '.github/workflows/update.yml'
       - '.github/workflows/pages-publish-tests.yml'
       - 'scripts/stage_pages.py'
+      - 'update.py'
+      - 'tests/test_case_archive.py'
+      - 'tests/test_case_notice.py'
       - 'tests/test_pages_publish_guard.py'
       - 'tests/test_pages_staging.py'
 permissions:
@@ -20,3 +23,5 @@ jobs:
           python-version: '3.12'
       - run: python tests/test_pages_publish_guard.py -v
       - run: python tests/test_pages_staging.py -v
+      - run: python tests/test_case_archive.py -v
+      - run: python tests/test_case_notice.py -v
