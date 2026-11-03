@@ -1,0 +1,27 @@
+name: Pages 자동 업데이트 보호 검사
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/update.yml'
+      - '.github/workflows/pages-publish-tests.yml'
+      - 'scripts/stage_pages.py'
+      - 'update.py'
+      - 'tests/test_case_archive.py'
+      - 'tests/test_case_notice.py'
+      - 'tests/test_pages_publish_guard.py'
+      - 'tests/test_pages_staging.py'
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python tests/test_pages_publish_guard.py -v
+      - run: python tests/test_pages_staging.py -v
+      - run: python tests/test_case_archive.py -v
+      - run: python tests/test_case_notice.py -v
