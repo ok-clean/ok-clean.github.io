@@ -14,15 +14,24 @@ from urllib.parse import unquote, urlsplit
 import posixpath
 
 
-EXCLUDED_ROOTS = frozenset({'.git', 'prototype', 'tests', 'docs', '__pycache__'})
-EXCLUDED_FILES = frozenset({'scripts/stage_pages.py'})
-REQUIRED_FILES = ('index.html', 'app.js', 'site.js', 'style.css', 'sw.js',
-                  'privacy.html', 'sitemap.xml', 'robots.txt', 'manifest.webmanifest')
+# Explicit paths only: adding a new public asset requires review here.
+ALLOWED_FILES = frozenset(('admin/admin.js', 'admin/index.html', 'admin/manifest.webmanifest', 'app.js', 'apple-touch-icon.png', 'area/강원도.html', 'area/수도권.html', 'area/춘천.html', 'cases.json', 'config.json', 'google07dda5d448de1982.html', 'icon-192.png', 'index.html', 'logo.png', 'manifest.webmanifest', 'member-sync.js', 'naverb751c0bedcd74a403ef8a9d833d481ad.html', 'og.jpg', 'privacy.html', 'robots.txt', 'services/aircon.html', 'services/carpet.html', 'services/clinic.html', 'services/disinfect.html', 'services/mattress.html', 'services/move-in.html', 'services/office.html', 'services/post-build.html', 'services/regular.html', 'services/special-home.html', 'services/washer.html', 'services/window.html', 'site.js', 'sitemap.xml', 'style.css', 'sw.js'))
+ALLOWED_DIRS = frozenset(str(parent) for name in ALLOWED_FILES
+                         for parent in PurePosixPath(name).parents if str(parent) != '.')
+REQUIRED_FILES = tuple(sorted(ALLOWED_FILES))
 
 
 def excluded(relative):
-    parts = PurePosixPath(relative).parts
-    return bool(parts) and (parts[0] in EXCLUDED_ROOTS or '__pycache__' in parts or relative in EXCLUDED_FILES)
+    return relative not in ('', '.') and relative not in ALLOWED_FILES and relative not in ALLOWED_DIRS
+
+
+def validate_output(source):
+    for path in source.rglob('*'):
+        relative = path.relative_to(source).as_posix()
+        if excluded(relative) or path.is_symlink():
+            raise ValueError(f'Unexpected published entry: {relative}')
+    validate_source(source)
+    validate_html_links(source)
 
 
 def validate_source(source):
@@ -104,7 +113,7 @@ def stage(source_arg, destination_arg):
 
         # Preserve symlinks in the temporary tree so a race cannot copy targets outside source.
         shutil.copytree(source, temporary, ignore=ignore, symlinks=True, dirs_exist_ok=True)
-        validate_source(temporary)
+        validate_output(temporary)
         if os.path.lexists(destination):
             raise ValueError('Destination appeared during staging')
         temporary.rename(destination)

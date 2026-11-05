@@ -107,6 +107,18 @@ class ArchiveTest(unittest.TestCase):
                     update.main()
                 self.assertEqual(path.read_text('utf8'), original)
 
+    def test_repeated_rss_link_and_next_update_do_not_duplicate_records(self):
+        record = self.old[0]
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'cases.json'
+            path.write_text(json.dumps({'cases': [record, record]}), encoding='utf8')
+            with patch.object(update, 'OUT', path), patch.object(update.build, 'load', return_value=self.config), patch.object(update.build, 'run'), patch.object(update, 'read_blog', return_value=[record, record]), contextlib.redirect_stdout(io.StringIO()):
+                update.main()
+                first = path.read_text('utf8')
+                self.assertEqual(json.loads(first)['cases'], [record])
+                update.main()
+                self.assertEqual(path.read_text('utf8'), first)
+
     def test_archived_hidden_from_generated_pages_and_count(self):
         hidden = {'title': '가상 보관 글', 'link': 'https://example.test/archive', 'svc': 'washer', 'region': '춘천', 'kind': 'archived'}
         active = {'title': '가상 후기', 'link': 'https://example.test/case', 'svc': 'washer', 'region': '춘천', 'kind': 'case'}
