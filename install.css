@@ -43,10 +43,11 @@
 .ok-install-chrome { flex: 0 0 25px; width: 25px; height: 25px; padding: 2px; border-radius: 50%; background: white; }
 .ok-install-inline-icon { width: 21px; height: 21px; margin-right: 5px; vertical-align: -5px; color: #0b3fa6; }
 .ok-install-dialog .ok-install-hint { margin: 12px 0 0; padding: 0; color: #62718a; font-size: 13px; line-height: 1.65; word-break: keep-all; overflow-wrap: anywhere; }
-.ok-install-steps { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
-.ok-install-steps li { display: flex; align-items: center; gap: 12px; min-height: 62px; margin: 0; padding: 13px; border: 1px solid #e4ebf7; border-radius: 14px; background: #f7f9fd; color: #253b5c; font-size: 16px; line-height: 1.5; }
-.ok-install-steps small { display: block; color: #62718a; font-size: 13px; }
-.ok-install-number { display: grid; place-items: center; flex: 0 0 29px; width: 29px; height: 29px; border-radius: 9px; background: #e5eeff; color: #0b3fa6; font-size: 14px; font-weight: 800; }
+/* These are reading instructions, not tap targets. Only actual actions have a button surface. */
+.ok-install-steps { display: block; margin: 0 0 22px; padding: 0 0 0 23px; list-style: decimal outside; }
+.ok-install-steps li { display: list-item; margin: 0 0 12px; padding: 0 0 0 3px; border: 0; border-radius: 0; background: transparent; color: #253b5c; font-size: 16px; line-height: 1.6; }
+.ok-install-steps li::marker { color: #526078; font-weight: 700; }
+.ok-install-steps small { display: block; margin-top: 2px; color: #62718a; font-size: 13px; }
 .ok-install-details { margin-top: 12px; border-top: 1px solid #edf0f6; }
 .ok-install-dialog .ok-install-details summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; padding: 10px 0; color: #526078; font-size: 13px; cursor: pointer; list-style: none; }
 .ok-install-details summary::-webkit-details-marker { display: none; }
@@ -62,7 +63,7 @@
   .ok-install-top { gap: 9px; margin-bottom: 19px; }
   .ok-install-brand strong { font-size: 14px; }
   .ok-install-dialog #ok-install-description { margin-bottom: 17px; font-size: 14px; }
-  .ok-install-steps li { gap: 9px; padding: 11px; font-size: 15px; }
+  .ok-install-steps li { font-size: 15px; }
   .ok-install-dialog .ok-install-primary { font-size: 16px; }
 }
 @media (prefers-reduced-motion: no-preference) {

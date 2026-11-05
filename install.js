@@ -11,6 +11,10 @@
   const isAndroid = /Android/i.test(ua);
   const isIOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const isInApp = /KAKAOTALK|NAVER|Instagram|FBAN|FBAV|Line\/|; wv\)/i.test(ua);
+  // Chrome Custom Tabs can have the same UA as Chrome. Keep an optional browser
+  // handoff even when showing menu guidance; do not require reopening Chrome.
+  const isChromeLike = /Chrome\/\d+/i.test(ua) && !/SamsungBrowser|EdgA|OPR/i.test(ua);
+  const isSamsungBrowser = /SamsungBrowser/i.test(ua);
   const current = new URL(location.href);
   const returned = current.searchParams.get('install') === '1';
   const failedHandoff = returned && current.searchParams.get('install_fallback') === '1';
@@ -38,9 +42,12 @@
 
   const chromeIcon = '<svg class="ok-install-chrome" viewBox="0 0 24 24" aria-hidden="true"><path fill="#ea4335" d="M12 2a10 10 0 0 1 8.66 5H12a5 5 0 0 0-4.33 7.5L3.34 7A10 10 0 0 1 12 2Z"/><path fill="#fbbc05" d="M20.66 7a10 10 0 0 1-8.66 15l4.33-7.5A5 5 0 0 0 12 7Z"/><path fill="#34a853" d="M12 22A10 10 0 0 1 3.34 7l4.33 7.5a5 5 0 0 0 8.66 0Z"/><circle cx="12" cy="12" r="4.5" fill="#4285f4" stroke="white"/></svg>';
   const shareIcon = '<svg class="ok-install-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 9H5v12h14V9h-3M12 15V2m-4 4 4-4 4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-  const steps = rows => `<ol class="ok-install-steps">${rows.map((row, i) => `<li><span class="ok-install-number" aria-hidden="true">${i + 1}</span><span>${row}</span></li>`).join('')}</ol>`;
+  const steps = rows => `<ol class="ok-install-steps">${rows.map(row => `<li>${row}</li>`).join('')}</ol>`;
   const copyButton = primary => `<button type="button" class="ok-install-${primary ? 'primary' : 'secondary'}" data-install-action="copy"${primary ? ' data-install-primary' : ''}>주소 복사${primary ? '하기' : ''}</button>`;
-  const manualHelp = () => `<details class="ok-install-details"><summary>설치창이 나오지 않나요?</summary><p>Chrome 주소창에 아래 복사한 주소를 직접 넣어 주세요. 메뉴 <b>⋮</b>에서 <b>홈 화면에 추가</b>를 누른 뒤 <b>설치</b> 또는 <b>바로가기 만들기</b>를 선택하세요.</p><p>이미 설치했다면 홈 화면의 <b>${escape(appName)}</b> 아이콘을 눌러 주세요.</p></details>`;
+  const chromeButton = primary => `<a class="ok-install-${primary ? 'primary' : 'secondary'}" href="${escape(chromeIntent)}" data-install-action="chrome"${primary ? ' data-install-primary' : ''}>${chromeIcon}${primary ? 'Chrome에서 계속' : 'Chrome에서 열기'}</a>`;
+  const closeButton = () => '<button type="button" class="ok-install-primary" data-install-action="close" data-install-primary>안내 닫기</button>';
+  const manualHelp = () => `<details class="ok-install-details"><summary>설치창이 나오지 않나요?</summary><p>Chrome 주소창에 아래 복사한 주소를 직접 넣어 주세요. 메뉴 <b>⋮</b>에서 <b>설치 및 바로가기 만들기</b> 또는 <b>홈 화면에 추가</b>를 선택하세요.</p><p>이미 설치했다면 홈 화면의 <b>${escape(appName)}</b> 아이콘을 눌러 주세요.</p></details>`;
+  const browserFallback = () => `<details class="ok-install-details"><summary>설치 메뉴가 보이지 않나요?</summary><p>다른 앱 안에서 열었다면 Chrome에서 다시 열어 주세요.</p>${chromeButton(false)}${copyButton(false)}</details>`;
 
   function refreshButtons() {
     document.querySelectorAll('[data-install]').forEach(button => {
@@ -81,15 +88,16 @@
       title = '홈 화면에 추가해요';
       description = inAppWindow() ? '주소를 복사해 Safari에서 연 뒤 추가해 주세요.' : isInApp ? '먼저 브라우저 메뉴에서 Safari로 열기를 선택해 주세요.' : '공유 메뉴에서 두 단계로 추가할 수 있어요.';
       content = `${steps([`${shareIcon}<b>공유</b> 버튼 누르기`, '<b>홈 화면에 추가 → 추가</b>'])}<p class="ok-install-hint">‘웹 앱으로 열기’가 보이면 켜 주세요.</p>${copyButton(false)}`;
-    } else if (isAndroid && (inAppWindow() || !returned)) {
+    } else if (isAndroid && (inAppWindow() || isInApp || (!returned && !isChromeLike && !isSamsungBrowser))) {
       title = inAppWindow() ? `${isAdmin ? '관리자' : '고객용'} 앱 설치를 계속해요` : 'Chrome에서 이어서 설치해요';
       description = inAppWindow() ? '앱 안에서 열린 화면이에요. Chrome에서 설치를 진행해 주세요.' : 'Chrome이 열리면 앱 설치를 눌러 주세요.';
       const hint = inAppWindow() && returned ? '다시 앱이 열리면 주소를 복사해 <b>Chrome 주소창에 직접</b> 넣어 주세요.' : '선택창이 나오면 <b>Chrome</b>을 선택하세요.';
-      content = `<a class="ok-install-primary" href="${escape(chromeIntent)}" data-install-action="chrome" data-install-primary>${chromeIcon}Chrome에서 계속</a><p class="ok-install-hint">${hint}</p>${manualHelp()}${copyButton(false)}`;
+      content = `${chromeButton(true)}<p class="ok-install-hint">${hint}</p>${manualHelp()}${copyButton(false)}`;
     } else if (isAndroid) {
-      title = '메뉴에서 앱을 추가해요';
-      description = /SamsungBrowser/i.test(ua) ? '삼성 브라우저의 메뉴(☰)를 눌러 주세요.' : 'Chrome 오른쪽 위의 ⋮ 메뉴를 눌러 주세요.';
-      content = `${steps(['<b>홈 화면에 추가</b><small>또는 앱 설치</small>', '<b>설치</b> 또는 <b>바로가기 만들기</b>'])}<p class="ok-install-hint">이미 설치했다면 홈 화면의 ${escape(appName)} 아이콘을 눌러 주세요.</p>${manualHelp()}${copyButton(false)}`;
+      title = isSamsungBrowser ? '브라우저의 ☰ 메뉴를 눌러 주세요' : '화면 맨 위 ⋮를 눌러 주세요';
+      description = isSamsungBrowser ? '삼성 브라우저 메뉴에서 아래 순서로 진행해 주세요.' : '주소창 오른쪽 끝에 있는 Chrome 메뉴예요.';
+      const menuItem = isSamsungBrowser ? '<b>홈 화면에 추가</b><small>또는 앱 설치</small>' : '<b>설치 및 바로가기 만들기</b><small>또는 홈 화면에 추가</small>';
+      content = `${steps([menuItem, '<b>설치</b> 선택<small>설치 항목이 없으면 바로가기 만들기</small>'])}${closeButton()}${browserFallback()}`;
     } else {
       title = '브라우저에서 앱을 추가해요';
       description = '주소창의 설치 아이콘이나 브라우저 메뉴를 확인해 주세요.';

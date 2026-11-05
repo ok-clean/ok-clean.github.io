@@ -8,6 +8,7 @@ const path = require('node:path');
 const ORIGIN = process.env.OKCLEAN_TEST_ORIGIN || 'http://127.0.0.1:8765';
 assert(['127.0.0.1', 'localhost'].includes(new URL(ORIGIN).hostname), 'Tests must use a local fixture server');
 const ANDROID = 'Mozilla/5.0 (Linux; Android 15; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Mobile Safari/537.36';
+const IN_APP_ANDROID = ANDROID + ' KAKAOTALK/26.0.0';
 const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1';
 const APPS = [
   { key: 'customer', path: '/', installPath: '/app/', identity: '/', manifestPath: '/manifest.webmanifest', name: '오케이청소' },
@@ -101,9 +102,11 @@ async function assertNativeCalls(page, count) {
   assert.equal(state.prevented, true, 'The browser event must be retained for the explicit install action');
 }
 
-async function assertChromeHandoff(page, app) {
+async function assertChromeHandoff(page, app, visible = true) {
   const chrome = page.locator(`${DIALOG} ${ACTION('chrome')}`);
-  await chrome.waitFor({ state: 'visible' });
+  assert.equal(await chrome.count(), 1, 'The browser recovery action must remain available');
+  if (visible) await chrome.waitFor({ state: 'visible' });
+  else assert(!(await chrome.isVisible()), 'Optional Chrome recovery must stay hidden until its details are opened');
   const href = await chrome.getAttribute('href');
   assert(href.startsWith(`intent://${new URL(ORIGIN).host}${app.installPath}?`), 'Chrome handoff must preserve the correct app installation path');
   assert(href.includes('package=com.android.chrome;'));
@@ -122,6 +125,32 @@ async function assertNoInstallClaimFromMode(page) {
   assert.equal(await page.locator(`${DIALOG} .ok-install-success`).count(), 0, 'Standalone alone must not produce an installation success screen');
 }
 
+async function assertBrowserMenuHelp(page, app) {
+  await assertChromeHandoff(page, app, false);
+  assert(!(await page.locator(`${DIALOG} ${ACTION('copy')}`).isVisible()), 'Address-copy fallback must not compete with the main browser-menu instructions');
+  assert.equal(await page.locator(`${DIALOG} ${ACTION('install')}`).count(), 0, 'A manual instruction must not pretend to trigger the native browser menu');
+  const steps = await page.locator(`${DIALOG} ol li`).evaluateAll(items => items.map(item => {
+    const css = getComputedStyle(item);
+    return {
+      interactive: item.matches('a,button,[role="button"],[tabindex]') || !!item.querySelector('a,button,input,select,textarea,[role="button"],[tabindex]'),
+      background: css.backgroundColor,
+      borderWidths: [css.borderTopWidth, css.borderRightWidth, css.borderBottomWidth, css.borderLeftWidth],
+      shadow: css.boxShadow
+    };
+  }));
+  assert(steps.length >= 2, 'Browser installation must be explained as a short ordered list');
+  for (const step of steps) {
+    assert(!step.interactive, 'Instruction text must not act like a button');
+    assert.equal(step.background, 'rgba(0, 0, 0, 0)', 'Static steps must not have button-like card backgrounds');
+    assert(step.borderWidths.every(width => parseFloat(width) === 0), 'Static steps must not have card borders');
+    assert.equal(step.shadow, 'none', 'Static steps must not have card shadows');
+  }
+  const close = page.getByRole('button', { name: '안내 닫기', exact: true });
+  await close.waitFor({ state: 'visible' });
+  assert(await close.evaluate(button => button.tagName === 'BUTTON' && button.type === 'button' && button.hasAttribute('data-install-primary')), 'The primary close action must be a real button');
+  return close;
+}
+
 async function checkInitialHelp(app, width) {
   const { context, page } = await fixture(app, { width });
   try {
@@ -129,11 +158,11 @@ async function checkInitialHelp(app, width) {
     await page.locator('[data-install]').first().click();
     await page.locator(DIALOG).waitFor({ state: 'visible' });
     assert.match(await page.locator(DIALOG).innerText(), new RegExp(app.name));
-    await assertChromeHandoff(page, app);
+    const close = await assertBrowserMenuHelp(page, app);
     assert.equal(page.url(), ORIGIN + app.path, 'Opening help must not launch a browser or navigate');
     const layout = await page.locator(DIALOG).evaluate(element => {
       const rect = element.getBoundingClientRect();
-      const action = element.querySelector('[data-install-action="chrome"]').getBoundingClientRect();
+      const action = element.querySelector('[data-install-primary]').getBoundingClientRect();
       return { left: rect.left, right: rect.right, viewport: innerWidth,
         width: element.clientWidth, contentWidth: element.scrollWidth, tapHeight: action.height };
     });
@@ -144,10 +173,30 @@ async function checkInitialHelp(app, width) {
       fs.mkdirSync('test-results', { recursive: true });
       await page.screenshot({ path: path.join('test-results', `install-${app.key}-390.png`), animations: 'disabled' });
     }
-    await page.keyboard.press('Escape');
+    if (width === 320) await close.tap();
+    else await close.click();
     await page.locator(DIALOG).waitFor({ state: 'hidden' });
-    assert(await page.locator('[data-install]').first().evaluate(element => element === document.activeElement), 'Closing help must restore keyboard focus');
-    pass(`${app.key}: compact Android help, app-specific intent and focus at ${width}px`);
+    assert(await page.locator('[data-install]').first().evaluate(element => element === document.activeElement), 'The close button must dismiss help and restore focus');
+    if (width === 390) {
+      await page.locator('[data-install]').first().click();
+      await page.keyboard.press('Escape');
+      await page.locator(DIALOG).waitFor({ state: 'hidden' });
+      assert(await page.locator('[data-install]').first().evaluate(element => element === document.activeElement), 'Escape must continue to restore focus');
+    }
+    pass(`${app.key}: first-visit Chrome menu instructions, real ${width === 320 ? 'touch' : 'mouse'} close and focus at ${width}px`);
+  } finally { await context.close(); }
+}
+
+async function checkInAppHandoff(app) {
+  const { context, page } = await fixture(app, { ua: IN_APP_ANDROID });
+  try {
+    await page.locator('[data-install]').first().click();
+    await page.locator(DIALOG).waitFor({ state: 'visible' });
+    await assertChromeHandoff(page, app);
+    assert(await page.locator(`${DIALOG} ${ACTION('chrome')}`).evaluate(action => action.hasAttribute('data-install-primary')), 'Known in-app browsers need a visible primary browser handoff');
+    await assertNoInstallClaimFromMode(page);
+    assert.equal(page.url(), ORIGIN + app.path, 'In-app help must not navigate without an explicit handoff click');
+    pass(`${app.key}: known in-app browser retains explicit primary Chrome handoff`);
   } finally { await context.close(); }
 }
 
@@ -164,7 +213,11 @@ async function checkReturnedAndReady(app, standalone = false) {
       await assertNoInstallClaimFromMode(page);
       assert.equal(new URL(page.url()).pathname, app.path, 'Returned standalone help must not navigate automatically');
     } else {
-      assert.equal(await page.locator(`${DIALOG} ${ACTION('chrome')}`).count(), 0, 'A returned browser page must not loop into Chrome again');
+      await assertBrowserMenuHelp(page, app);
+      if (app.key === 'admin') {
+        fs.mkdirSync('test-results', { recursive: true });
+        await page.screenshot({ path: path.join('test-results', 'install-admin-chrome-return-390.png'), animations: 'disabled' });
+      }
     }
     assert.equal(await page.locator(`${DIALOG} ${ACTION('install')}`).count(), 0, 'No ready event means no pretend native-install action');
     await emitPrompt(page);
@@ -270,7 +323,8 @@ async function checkPerAppInstallState() {
     try {
       await page.locator('[data-install]').first().click();
       await page.locator(DIALOG).waitFor({ state: 'visible' });
-      await assertChromeHandoff(page, APPS[0]);
+      if (standalone) await assertChromeHandoff(page, APPS[0]);
+      else await assertBrowserMenuHelp(page, APPS[0]);
       await assertNoInstallClaimFromMode(page);
       await closeDialog(page);
       await page.evaluate(() => window.dispatchEvent(new Event('appinstalled')));
@@ -284,7 +338,8 @@ async function checkPerAppInstallState() {
       await page.locator('[data-install]').first().waitFor({ state: 'visible' });
       await page.locator('[data-install]').first().click();
       await page.locator(DIALOG).waitFor({ state: 'visible' });
-      await assertChromeHandoff(page, APPS[1]);
+      if (standalone) await assertChromeHandoff(page, APPS[1]);
+      else await assertBrowserMenuHelp(page, APPS[1]);
       await assertNoInstallClaimFromMode(page);
       assert.match(await page.locator(DIALOG).innerText(), /관리자용/);
       assert.equal(await page.locator(`${DIALOG} ${ACTION('install')}`).count(), 0, 'No browser event means no pretend install action');
@@ -325,7 +380,11 @@ async function checkCustomerAppEntry() {
     assert.equal(after.pathname, app.installPath, 'Hash navigation must stay inside the customer app scope');
     assert.equal(after.searchParams.get('ref'), 'OK-TEST01', 'Hash navigation must retain referral attribution');
     await page.locator('[data-install]').first().click();
+    await assertBrowserMenuHelp(page, app);
+    const fallback = page.locator(`${DIALOG} details`).filter({ has: page.locator(ACTION('chrome')) });
+    await fallback.locator('summary').click();
     const href = await assertChromeHandoff(page, app);
+    assert(await page.locator(`${DIALOG} ${ACTION('copy')}`).isVisible(), 'Opening recovery details must expose its real copy action');
     assert(href.includes('ref=OK-TEST01'), 'Customer installation handoff must retain referral attribution');
     pass('Customer /app/ entry loads assets/cases, runs quote controls and preserves in-scope hash navigation/referral');
   } finally { await context.close(); }
@@ -337,6 +396,7 @@ async function checkCustomerAppEntry() {
   });
   try {
     for (const app of APPS) for (const width of [320, 390]) await checkInitialHelp(app, width);
+    for (const app of APPS) await checkInAppHandoff(app);
     for (const app of APPS) for (const standalone of [false, true]) await checkReturnedAndReady(app, standalone);
     await checkDismissalAndFailures();
     for (const app of APPS) await checkPlatformStates(app);
