@@ -530,10 +530,9 @@ def run():
         "icons": [{"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
                   {"src": "logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}]}, ensure_ascii=False, indent=1)
     base = c.get("siteUrl", "").rstrip("/") + "/"
-    today = datetime.now(KST).strftime("%Y-%m-%d")
     urls = [""] + [f"services/{s['id']}.html" for s in c["services"]] + [area_file(r) for r in c.get("regions", [])]
     files["sitemap.xml"] = ('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-                            + "".join(f"<url><loc>{e(base + u)}</loc><lastmod>{today}</lastmod></url>\n" for u in urls) + "</urlset>\n")
+                            + "".join(f"<url><loc>{e(base + u)}</loc></url>\n" for u in urls) + "</urlset>\n")
     files["robots.txt"] = f"User-agent: *\nAllow: /\nSitemap: {base}sitemap.xml\n"
     for path, text in files.items():
         if write(path, text):
