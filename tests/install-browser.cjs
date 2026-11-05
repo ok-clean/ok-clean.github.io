@@ -397,7 +397,9 @@ async function checkCustomerEntryAndManifests() {
     assert.notEqual(selected, before);
     await page.waitForFunction(value => JSON.parse(localStorage.getItem('quote'))?.svc === value, selected);
     assert((await page.locator('#qV').innerText()).trim());
-    await page.waitForFunction(() => performance.getEntriesByType('resource').some(entry => new URL(entry.name).pathname.endsWith('/cases.json')));
+    // The fixture clock virtualizes Performance; assert the real fetch result
+    // and rendered case cards instead of relying on resource-timing entries.
+    await page.locator('#caseList .case').first().waitFor({ state: 'attached' });
     assert.equal(responses.get('/cases.json'), 200);
     assert(!responses.has('/app/cases.json'));
     await page.getByRole('link', { name: '상담용 견적 문의하기', exact: true }).click();
