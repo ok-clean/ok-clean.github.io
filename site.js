@@ -105,13 +105,13 @@
   async function install(){
     if(await promptNow()) return;
     if(IN_APP && openOutside()){
-      sheet("브라우저로 옮기는 중이에요", `<p class="lead-s"><b>Chrome 브라우저로 열기</b>를 선택하세요. Chrome에서 오케이청소 홈페이지가 열리면 상단 <b>앱 설치</b> 버튼을 다시 눌러 주세요.</p><p class="hint">화면이 안 바뀌면 오른쪽 위 <b>⋮ 메뉴 → 다른 브라우저로 열기 → Chrome</b>을 선택하세요. Chrome에서도 설치창이 뜨지 않으면 Chrome ⋮ 메뉴의 <b>앱 설치</b> 또는 <b>홈 화면에 추가</b>를 선택하세요.</p>`);
+      sheet("오케이청소 앱 설치 안내", `<p class="lead-s"><b>① 오른쪽 위 ⋮ 메뉴</b>를 누르세요.<br><b>② 삼성 브라우저에서 열기</b> 또는 외부 브라우저로 열기를 선택하세요.<br><b>③ 새 브라우저에서 오케이청소 홈페이지의 앱 설치 버튼을 다시 누르세요.</b><br><b>④ 설치 확인창에서 설치를 누르세요.</b></p><p class="hint">설치창이 안 뜨면 삼성 인터넷의 메뉴 → 현재 페이지 추가 → 홈 화면, 또는 Chrome 메뉴 → 앱 설치/홈 화면에 추가를 선택하세요.</p>`);
       return;
     }
     let steps;
     if(IN_APP) steps = `<ol class="steps-mini"><li>오른쪽 위(또는 아래) <b>⋯ 메뉴</b>를 누르세요.</li><li><b>Safari로 열기</b>를 고르세요.</li></ol>${IOS_STEPS}`;
     else if(IS_IOS) steps = IOS_STEPS;
-    else steps = `<ol class="steps-mini"><li>Chrome 브라우저에서 오케이청소 페이지를 연 뒤 상단 <b>앱 설치</b> 버튼을 다시 누르세요. 설치창이 안 뜨면 Chrome 오른쪽 위 <b>⋮ 메뉴</b>를 누르세요.</li><li><b>홈 화면에 추가</b> 또는 <b>앱 설치</b>를 누르세요.</li><li><b>설치</b>를 누르면 홈 화면에 아이콘이 생겨요.</li></ol><p class="hint">설치 창이 바로 안 뜨면 몇 초 뒤 다시 눌러 주세요.</p>`;
+    else steps = `<ol class="steps-mini"><li>삼성 인터넷 또는 Chrome에서 오케이청소 홈페이지를 여세요.</li><li>홈페이지 상단 <b>앱 설치</b> 버튼을 다시 누르세요.</li><li>설치창이 나타나면 <b>설치</b>를 누르세요.</li></ol><p class="hint">설치창이 없다면 삼성 인터넷 메뉴 → 현재 페이지 추가 → 홈 화면 또는 Chrome ⋮ 메뉴 → 앱 설치/홈 화면에 추가를 선택하세요.</p>`;
     sheet("휴대폰에 앱으로 설치하기", `<p class="lead-s">홈 화면에 <b>${esc(S.name)}</b> 아이콘이 생겨서, 다음부터 한 번에 견적을 볼 수 있어요.</p>${steps}`);
   }
   // 넘어온 뒤 아이폰 사파리면 방법 안내를 바로 띄움 (아이폰은 버튼 한 번 설치가 애플 정책상 안 됨)
