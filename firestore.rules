@@ -1,32 +1,59 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // member_requests/{auth UID}: immutable identity/consent and joined timestamp;
+    // six management fields are editable only by the existing Google administrator.
+    // member_receipts/{auth UID}: immutable ownerUid, requestId, coupon code, joined.
+    // Receipts contain no name, phone or internal notes; clients cannot list them.
+    function signedIn() { return request.auth != null; }
+    function owner(id) { return signedIn() && request.auth.uid == id; }
     function isAdmin() {
-      // 관리자 Firebase Auth UID를 직접 입력하세요. 이메일 문자열만으로 권한을 부여하지 않습니다.
-      return request.auth != null && request.auth.uid == 'REPLACE_WITH_ADMIN_UID';
+      return signedIn() && request.auth.uid == 'H1MfdqGkFRZzU8qkqwXTsiKv3CO2'
+        && request.auth.token.firebase.sign_in_provider == 'google.com';
+    }
+    function validMember(d) {
+      return d.keys().hasOnly(['name','phone','area','free','ad','code','ref','joined','status','couponStatus','freeStatus','memo','points','grade','ownerUid']) &&
+        d.keys().hasAll(['name','phone','area','free','ad','code','ref','joined','status','couponStatus','freeStatus','memo','points','grade','ownerUid']) &&
+        d.name is string && d.name.size() > 0 && d.name.size() <= 30 &&
+        d.phone is string && d.phone.matches('^01[016789]-?[0-9]{3,4}-?[0-9]{4}$') &&
+        d.area is string && d.area.size() <= 40 &&
+        d.free is string && d.free.size() <= 80 &&
+        d.ad is bool &&
+        d.code is string && d.code.matches('^OK-[A-Z2-9]{6}$') &&
+        d.ref is string && d.ref.size() <= 20 &&
+        d.joined is timestamp && d.ownerUid is string && d.ownerUid.size() > 0 && d.ownerUid.size() <= 128
+        && d.status in ['신규','상담중','예약확정','작업완료','종료']
+        && d.couponStatus in ['미사용','사용','취소'] && d.freeStatus in ['미제공','제공완료','취소']
+        && d.memo is string && d.memo.size() <= 1000 && d.points is number && d.points >= 0 && d.points <= 10000000
+        && d.grade in ['새싹','실버','골드','VIP'];
+    }
+    function validReceipt(d,id) {
+      return d.keys().hasAll(['ownerUid','requestId','code','joined'])
+        && d.keys().hasOnly(['ownerUid','requestId','code','joined'])
+        && d.ownerUid == id && d.requestId == id && id.size() <= 128
+        && d.code is string && d.code.matches('^OK-[A-Z2-9]{6}$') && d.joined == request.time;
     }
     match /member_requests/{id} {
-      allow read, update, delete: if isAdmin();
-      // 익명 사용자는 회원가입 요청 생성만 가능. 기존 데이터 읽기/수정은 불가.
-      allow create: if request.auth != null &&
-        request.auth.token.firebase.sign_in_provider == 'anonymous' &&
-        request.resource.data.keys().hasOnly(['name','phone','area','free','ad','code','ref','joined','status','couponStatus','freeStatus','memo','points','grade','ownerUid']) &&
-        request.resource.data.keys().hasAll(['name','phone','area','free','ad','code','ref','joined','status','couponStatus','freeStatus','memo','points','grade','ownerUid']) &&
-        request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 30 &&
-        request.resource.data.phone is string && request.resource.data.phone.matches('^01[016789]-?[0-9]{3,4}-?[0-9]{4}$') &&
-        request.resource.data.area is string && request.resource.data.area.size() <= 40 &&
-        request.resource.data.free is string && request.resource.data.free.size() <= 80 &&
-        request.resource.data.ad is bool &&
-        request.resource.data.code is string && request.resource.data.code.matches('^OK-[A-Z2-9]{6}$') &&
-        request.resource.data.ref is string && request.resource.data.ref.size() <= 20 &&
-        request.resource.data.joined == request.time &&
-        request.resource.data.status == '신규' &&
-        request.resource.data.couponStatus == '미사용' &&
-        request.resource.data.freeStatus == '미제공' &&
-        request.resource.data.memo == '' &&
-        request.resource.data.points == 0 &&
-        request.resource.data.grade == '새싹' &&
-        request.resource.data.ownerUid == request.auth.uid;
+      allow read: if isAdmin();
+      allow create: if owner(id) && validMember(request.resource.data)
+        && request.resource.data.ownerUid == id && request.resource.data.joined == request.time
+        && request.resource.data.status == '신규' && request.resource.data.couponStatus == '미사용'
+        && request.resource.data.freeStatus == '미제공' && request.resource.data.memo == ''
+        && request.resource.data.points == 0 && request.resource.data.grade == '새싹'
+        && getAfter(/databases/$(database)/documents/member_receipts/$(id)).data.code == request.resource.data.code
+        && getAfter(/databases/$(database)/documents/member_receipts/$(id)).data.joined == request.time;
+      allow update: if isAdmin() && validMember(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','couponStatus','freeStatus','grade','points','memo']);
+      allow delete: if false;
+    }
+    match /member_receipts/{id} {
+      allow get: if owner(id) || isAdmin();
+      allow list: if false;
+      allow create: if owner(id) && validReceipt(request.resource.data,id)
+        && getAfter(/databases/$(database)/documents/member_requests/$(id)).data.ownerUid == id
+        && getAfter(/databases/$(database)/documents/member_requests/$(id)).data.code == request.resource.data.code
+        && getAfter(/databases/$(database)/documents/member_requests/$(id)).data.joined == request.time;
+      allow update, delete: if false;
     }
     match /{document=**} { allow read, write: if false; }
   }
