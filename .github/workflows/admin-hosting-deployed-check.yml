@@ -1,0 +1,15 @@
+name: Verify completed administrator Hosting release
+
+on:
+  push:
+    branches: ['verify/admin-hosting-deployed-20261105']
+    paths: ['.github/workflows/admin-hosting-deployed-check.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  verify-deployed:
+    uses: ok-clean/ok-clean.github.io/.github/workflows/admin-hosting-installability.yml@713a85fbd61e82c3ad010ce443e089003e456a9b
+    with:
+      source_sha: '51670e0fef7cce51d6e85c6d0eb55ce02f3ecad5'
