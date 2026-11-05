@@ -1,0 +1,90 @@
+name: Administrator Hosting read-only install verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: 'Exact 40-character Git source SHA used for the completed administrator Hosting deployment'
+        type: string
+        required: true
+  workflow_call:
+    inputs:
+      source_sha:
+        description: 'Exact Git source SHA from the successful Hosting deployment; never infer latest main'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OKCLEAN_DEPLOYED_SOURCE_SHA: ${{ inputs.source_sha }}
+      OKCLEAN_NATIVE_TARGET: public
+      OKCLEAN_NATIVE_PROFILE: admin-hosting
+      OKCLEAN_PROBE_SOURCE_SHA: ${{ inputs.source_sha }}
+      OKCLEAN_BASELINE_SHA: ${{ inputs.source_sha }}
+      OKCLEAN_PROBE_CODE_SHA: ${{ github.sha }}
+    steps:
+      - name: Require the exact deployed source commit
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          value = os.environ['OKCLEAN_DEPLOYED_SOURCE_SHA']
+          if not re.fullmatch(r'[0-9a-f]{40}', value):
+              raise SystemExit('source_sha must be the exact 40-character deployed commit SHA')
+          PY
+      - name: Check out verification code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: probe-source
+          persist-credentials: false
+      - name: Check out the deployed application source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: deployment-source
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Rebuild the exact expected administrator bundle without Firebase access
+        working-directory: deployment-source
+        run: |
+          python - <<'PY'
+          import os
+          import subprocess
+          actual = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          if actual != os.environ['OKCLEAN_DEPLOYED_SOURCE_SHA']:
+              raise SystemExit('Checked-out application source does not match source_sha')
+          PY
+          python scripts/stage_admin_hosting.py . "$RUNNER_TEMP/okclean-admin-hosting-verification" --site-id okclean-admin-app --origin https://okclean-admin-app.web.app
+      - name: Install full Chromium and native confirmation capture tools
+        working-directory: probe-source
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+          sudo apt-get install -y xdotool imagemagick
+      - name: Verify published bytes and administrator native prompt without accepting installation
+        working-directory: probe-source
+        env:
+          OKCLEAN_BASELINE_DIR: ${{ runner.temp }}/okclean-admin-hosting-verification/public
+        run: xvfb-run -a -s '-screen 0 1280x1000x24' node tests/native-install-probe.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: admin-hosting-installability-${{ inputs.source_sha }}
+          path: |
+            probe-source/test-results/native-installability.json
+            probe-source/test-results/native-install-*.png
+            ${{ runner.temp }}/okclean-admin-hosting-verification/review.json
+          if-no-files-found: warn
+          retention-days: 3

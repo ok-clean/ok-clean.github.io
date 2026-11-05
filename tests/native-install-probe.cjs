@@ -11,12 +11,25 @@ const { execFileSync } = require('node:child_process');
 
 const MODE = process.env.OKCLEAN_NATIVE_TARGET || 'candidate';
 assert(['candidate', 'public'].includes(MODE), 'Unknown native probe target');
-const PUBLIC = 'https://ok-clean.github.io';
+const PROFILE = process.env.OKCLEAN_NATIVE_PROFILE || 'pages';
+assert(['pages', 'admin-hosting'].includes(PROFILE), 'Unknown native probe profile');
+if (PROFILE === 'admin-hosting') {
+  assert.equal(MODE, 'public', 'Admin Hosting profile verifies an existing public deployment only');
+  assert(process.env.OKCLEAN_BASELINE_DIR, 'Admin Hosting requires the generated public bundle as its baseline');
+  assert(/^[0-9a-f]{40}$/.test(process.env.OKCLEAN_PROBE_SOURCE_SHA || ''), 'The exact deployed source SHA is required');
+  assert.equal(process.env.OKCLEAN_BASELINE_SHA, process.env.OKCLEAN_PROBE_SOURCE_SHA, 'Hosting baseline and deployed source must be the same SHA');
+}
+const PUBLIC = PROFILE === 'admin-hosting' ? 'https://okclean-admin-app.web.app' : 'https://ok-clean.github.io';
 const ORIGIN = MODE === 'public' ? PUBLIC : process.env.OKCLEAN_TEST_ORIGIN || 'http://127.0.0.1:8766';
 assert(MODE === 'public' || ['127.0.0.1', 'localhost'].includes(new URL(ORIGIN).hostname), 'Candidate server must be local');
 const reference = path.resolve(process.env.OKCLEAN_BASELINE_DIR || '.');
 const staticHosts = new Set(['www.gstatic.com', 'fonts.gstatic.com', 'fonts.googleapis.com', 'cdn.jsdelivr.net']);
-const assets = ['install.js', 'install.css', 'manifest.webmanifest', 'admin/manifest.webmanifest', 'admin/index.html', 'app/index.html', 'sw.js', 'admin/admin.js'];
+const assets = PROFILE === 'admin-hosting'
+  ? ['install.js', 'install.css', 'admin/index.html', 'admin/admin.js', 'admin/manifest.webmanifest', 'admin/icon-192.png', 'admin/icon-512.png', 'admin/apple-touch-icon.png', 'config.json', 'sw.js', 'robots.txt']
+  : ['install.js', 'install.css', 'manifest.webmanifest', 'admin/manifest.webmanifest', 'admin/index.html', 'app/index.html', 'sw.js', 'admin/admin.js'];
+const manifestPaths = PROFILE === 'admin-hosting' ? ['admin/manifest.webmanifest'] : ['manifest.webmanifest', 'admin/manifest.webmanifest'];
+const apps = [{ key: 'admin', pathname: '/admin/', id: '/admin/' }];
+if (PROFILE === 'pages') apps.push({ key: 'customer', pathname: '/app/', id: '/' });
 const safeURL = (value, base = ORIGIN) => {
   try { const u = new URL(value, base); return u.protocol === 'data:' ? { kind: 'data', mime: String(value).slice(5, String(value).indexOf(';')) } : { host: u.host, path: u.pathname }; }
   catch { return { invalid: true }; }
@@ -31,7 +44,7 @@ async function timed(promise, label, ms = 15000) {
 
 async function publicParity(timeoutMs = 15000) {
   const names = new Set(assets);
-  for (const name of ['manifest.webmanifest', 'admin/manifest.webmanifest']) {
+  for (const name of manifestPaths) {
     const manifest = JSON.parse(fs.readFileSync(path.join(reference, name), 'utf8'));
     for (const icon of manifest.icons || []) {
       const url = new URL(icon.src, PUBLIC + '/' + name);
@@ -171,6 +184,7 @@ async function probe(app) {
     assert.equal(ready.manifest.id.path, app.id);
     assert.equal(ready.manifest.start.path, app.pathname);
     assert.equal(ready.manifest.scope.path, app.pathname);
+    for (const field of ['id', 'start', 'scope']) assert.equal(ready.manifest[field].host, new URL(ORIGIN).host, 'Manifest identity and launch paths must use the verified origin');
     assert(!ready.manifest.errors.some(error => error.critical), 'Manifest has no critical errors');
     assert.equal(ready.installabilityErrors.length, 0, 'Browser reports no installability error');
     assert(ready.worker.registrations.some(reg => reg.state === 'activated'), 'A real active service worker exists');
@@ -222,16 +236,16 @@ async function probe(app) {
 
 (async () => {
   fs.mkdirSync('test-results', { recursive: true });
-  const report = { recordedAt: new Date().toISOString(), targetMode: MODE, checkedSourceSha: process.env.OKCLEAN_PROBE_SOURCE_SHA || null, mode: 'headed desktop Chromium, fresh normal persistent profiles; actual native event and cancellation; no Android device or existing customer WebAPK', noLoginOrFormSubmission: true, noInstallConfirmationAccepted: true, publicAssets: [], probes: [] };
+  const report = { recordedAt: new Date().toISOString(), targetMode: MODE, targetProfile: PROFILE, expectedPublicOrigin: PUBLIC, checkedSourceSha: process.env.OKCLEAN_PROBE_SOURCE_SHA || null, probeCodeSha: process.env.OKCLEAN_PROBE_CODE_SHA || null, mode: 'headed desktop Chromium, fresh normal persistent profiles; actual native event and cancellation; no Android device or existing customer WebAPK', noLoginOrFormSubmission: true, noInstallConfirmationAccepted: true, publicAssets: [], probes: [] };
   try {
     const parity = await waitForPublicParity();
     report.publicAssets = parity.rows;
     report.publicParity = parity.status;
     if (MODE === 'public' && !parity.status.matched) throw new Error('Public assets did not match this checkout within the bounded deployment wait; browser checks were not run against a different release');
-    for (const app of [{ key: 'admin', pathname: '/admin/', id: '/admin/' }, { key: 'customer', pathname: '/app/', id: '/' }]) report.probes.push(await probe(app));
+    for (const app of apps) report.probes.push(await probe(app));
   } catch (error) { report.error = safeError(error); }
   finally {
-    report.failed = !!report.error || report.publicAssets.some(row => !row.match) || report.probes.length !== 2 || report.probes.some(row => row.failed);
+    report.failed = !!report.error || report.publicAssets.some(row => !row.match) || report.probes.length !== apps.length || report.probes.some(row => row.failed);
     fs.writeFileSync('test-results/native-installability.json', JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report));
     if (report.failed) process.exitCode = 1;
