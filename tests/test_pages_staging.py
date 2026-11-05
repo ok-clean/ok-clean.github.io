@@ -10,8 +10,12 @@ import unittest
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts' / 'stage_pages.py'
-REQUIRED = ('index.html', 'app.js', 'site.js', 'style.css', 'sw.js',
+OLD_REQUIRED = ('index.html', 'app.js', 'site.js', 'style.css', 'sw.js',
             'privacy.html', 'sitemap.xml', 'robots.txt', 'manifest.webmanifest')
+import runpy
+POLICY = runpy.run_path(str(SCRIPT))
+REQUIRED = POLICY['REQUIRED_FILES']
+
 
 
 class PagesStagingTest(unittest.TestCase):
@@ -22,11 +26,19 @@ class PagesStagingTest(unittest.TestCase):
         self.src = self.root / 'source'
         self.out = self.root / 'published'
         self.files = {name: f'가상 {name}' for name in REQUIRED}
-        self.files['index.html'] = '<a href="services/aircon.html">서비스</a><img src="/.well-known/icon.png">'
+        self.files['index.html'] = '<a href="services/aircon.html">서비스</a><img src="/icon-192.png">'
         self.files.update({
             'services/aircon.html': '<script src="../site.js"></script>',
             'area/춘천.html': '<a href="../index.html">홈</a>',
             'admin/index.html': '가상 관리자',
+            'build.py': 'development script',
+            'update.py': 'development script',
+            'firestore.rules': 'security rules',
+            'admin-setup/Code.gs': 'installation script',
+            'admin-setup/설치방법.txt': 'installation notes',
+            '관리자앱_설치방법.txt': 'installation notes',
+            'admin/debug.js': 'unexpected admin asset',
+            'unexpected.html': 'unexpected root page',
             'admin-setup/index.html': '가상 설정 안내',
             '.well-known/icon.png': '가상 아이콘',
             '.nojekyll': '',
@@ -57,7 +69,7 @@ class PagesStagingTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         for name, content in self.files.items():
             target = self.out / name
-            excluded = name.startswith(('.git/', 'docs/', 'tests/', 'prototype/', '__pycache__/')) or '/__pycache__/' in name or name == 'scripts/stage_pages.py'
+            excluded = POLICY['excluded'](name)
             if excluded:
                 self.assertFalse(os.path.lexists(target), name)
             else:
@@ -86,11 +98,13 @@ class PagesStagingTest(unittest.TestCase):
     def test_symlinks_to_external_excluded_and_missing_paths_fail_closed(self):
         for target in (self.root / 'outside', self.src / 'tests', self.root / 'missing'):
             with self.subTest(target=target):
-                link = self.src / 'bad-link'
+                link = self.src / 'logo.png'
+                link.unlink()
                 link.symlink_to(target, target_is_directory=target == self.src / 'tests')
                 self.assertNotEqual(self.run_stage().returncode, 0)
                 self.assertFalse(self.out.exists())
                 link.unlink()
+                link.write_text('restored')
 
     def test_html_links_to_excluded_paths_cannot_silently_break(self):
         targets = [('index.html', '/tests/test.js'), ('index.html', '../docs/internal.md'),
@@ -119,10 +133,12 @@ class PagesStagingTest(unittest.TestCase):
         with tarfile.open(archive, 'r:gz') as bundle:
             names = {n.removeprefix('./') for n in bundle.getnames()}
         for name in ('index.html', 'services/aircon.html', 'area/춘천.html', 'admin/index.html',
-                     '.well-known/icon.png', '.nojekyll', 'google-verification.html'):
+                     'icon-192.png', 'google07dda5d448de1982.html'):
             self.assertIn(name, names)
         for name in ('docs/internal.md', 'tests/test.js', 'prototype/index.html', '.git/config',
-                     '.github/workflows/example.yml', 'scripts/stage_pages.py'):
+                     '.github/workflows/example.yml', 'scripts/stage_pages.py',
+                     'build.py', 'update.py', 'firestore.rules', 'admin-setup/Code.gs',
+                     'admin-setup/설치방법.txt', '관리자앱_설치방법.txt', 'admin/debug.js', 'unexpected.html'):
             self.assertNotIn(name, names)
 
     def test_checkout_is_byte_identical_except_explicit_exclusions(self):

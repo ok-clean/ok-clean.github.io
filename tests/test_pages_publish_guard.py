@@ -10,8 +10,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = (ROOT / ".github/workflows/update.yml").read_text(encoding="utf-8")
 STAGE = 'python scripts/stage_pages.py . "$RUNNER_TEMP/okclean-pages"'
-REQUIRED = ('index.html', 'app.js', 'site.js', 'style.css', 'sw.js',
-            'privacy.html', 'sitemap.xml', 'robots.txt', 'manifest.webmanifest')
+import runpy
+REQUIRED = runpy.run_path(str(ROOT / 'scripts/stage_pages.py'))['REQUIRED_FILES']
 
 
 def workflow_commands():
@@ -42,6 +42,7 @@ class PublishGuardTest(unittest.TestCase):
         self.run_cmd(['git','config','user.email','test@example.invalid'], self.work)
         self.run_cmd(['git','remote','add','origin',str(self.remote)], self.work)
         for name in REQUIRED:
+            (self.work / name).parent.mkdir(parents=True, exist_ok=True)
             (self.work / name).write_text('baseline', encoding='utf-8')
         (self.work / 'scripts').mkdir()
         shutil.copyfile(ROOT / 'scripts/stage_pages.py', self.work / 'scripts/stage_pages.py')

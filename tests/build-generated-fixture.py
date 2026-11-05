@@ -1,6 +1,7 @@
 """Build a disposable site with synthetic settings using the production update entrypoint."""
 import importlib
 import json
+import runpy
 import shutil
 import socket
 import sys
@@ -10,8 +11,15 @@ from pathlib import Path
 
 source = Path(__file__).resolve().parent.parent
 root = Path(tempfile.mkdtemp(prefix='okclean-generated-', dir='/tmp'))
-for name in ('build.py', 'update.py', 'app.js', 'site.js', 'style.css', 'sw.js'):
-    shutil.copy2(source / name, root / name)
+policy = runpy.run_path(str(source / 'scripts/stage_pages.py'))
+# Copy only static public assets. Settings, cases and generated pages stay synthetic.
+generated = {'config.json', 'cases.json', 'index.html', 'privacy.html', 'sitemap.xml', 'robots.txt', 'manifest.webmanifest'}
+static = {name for name in policy['ALLOWED_FILES']
+          if name not in generated and not name.startswith(('services/', 'area/'))}
+for name in sorted(static | {'build.py', 'update.py'}):
+    destination = root / name
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source / name, destination)
 
 config = {
     'name': '가상 청소 업체', 'tagline': '테스트 전용', 'siteUrl': 'https://example.test',
@@ -34,6 +42,14 @@ config = {
     'member':{'coupon':10000,'couponTerms':'테스트 전용','freeServices':['가상 서비스'],'grades':[], 'referral':{'point':5000,'text':'가상 혜택'}},
     'seasons':[], 'faq':[{'q':'가상 질문','a':'가상 답변'}], 'analytics':{},
 }
+# Exercise the complete publication policy without copying real service settings.
+existing_ids = {service['id'] for service in config['services']}
+for name in sorted(policy['ALLOWED_FILES']):
+    if name.startswith('services/') and Path(name).stem not in existing_ids:
+        config['services'].append({'id': Path(name).stem, 'cat': 'home',
+                                  'name': '가상 서비스 ' + Path(name).stem,
+                                  'summary': '테스트 전용', 'includes': ['가상 범위'],
+                                  'unit': '현장', 'quote': True})
 (root / 'config.json').write_text(json.dumps(config,ensure_ascii=False),encoding='utf8')
 # 새 저장소의 기존 사례를 읽지 않습니다. 네트워크는 반드시 금지하고 모의 RSS만 공급합니다.
 (root / 'cases.json').write_text('{"cases": []}',encoding='utf8')
