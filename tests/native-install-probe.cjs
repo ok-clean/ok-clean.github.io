@@ -29,7 +29,7 @@ async function timed(promise, label, ms = 15000) {
   finally { clearTimeout(timer); }
 }
 
-async function publicParity() {
+async function publicParity(timeoutMs = 15000) {
   const names = new Set(assets);
   for (const name of ['manifest.webmanifest', 'admin/manifest.webmanifest']) {
     const manifest = JSON.parse(fs.readFileSync(path.join(reference, name), 'utf8'));
@@ -42,13 +42,34 @@ async function publicParity() {
     const row = { path: '/' + name, expectedRef: process.env.OKCLEAN_BASELINE_SHA || null };
     try {
       const expected = fs.readFileSync(path.join(reference, name));
-      const response = await fetch(PUBLIC + '/' + name, { redirect: 'error', signal: AbortSignal.timeout(15000), headers: { 'Cache-Control': 'no-cache' } });
+      const response = await fetch(PUBLIC + '/' + name, { redirect: 'error', signal: AbortSignal.timeout(timeoutMs), headers: { 'Cache-Control': 'no-cache' } });
       const actual = Buffer.from(await response.arrayBuffer());
       Object.assign(row, { status: response.status, expectedBytes: expected.length, actualBytes: actual.length, expectedSha256: hash(expected), actualSha256: hash(actual) });
       row.match = response.status === 200 && row.expectedSha256 === row.actualSha256;
     } catch (error) { row.match = false; row.error = safeError(error); }
     return row;
   }));
+}
+
+async function waitForPublicParity() {
+  const started = Date.now(), budgetMs = MODE === 'public' ? 90000 : 0;
+  const attempts = [];
+  let rows = [];
+  // Pages deployment runs independently of this push workflow. Wait only for
+  // this exact checkout's bytes; do not inspect a stale release as the new one.
+  for (let number = 1; number <= (MODE === 'public' ? 10 : 1); number++) {
+    const remaining = budgetMs - (Date.now() - started);
+    if (number > 1 && remaining <= 0) break;
+    rows = await publicParity(MODE === 'public' ? Math.max(1, Math.min(15000, remaining)) : 15000);
+    const mismatch = rows.filter(row => !row.match);
+    const attempt = { number, elapsedMs: Date.now() - started, matched: rows.length - mismatch.length, total: rows.length,
+      failures: mismatch.map(row => ({ path: row.path, status: row.status || null, error: row.error || 'bytes differ from checkout' })) };
+    attempts.push(attempt);
+    console.log('PUBLIC_PARITY_ATTEMPT ' + JSON.stringify(attempt));
+    if (!mismatch.length || MODE !== 'public' || Date.now() - started >= budgetMs) break;
+    await new Promise(resolve => setTimeout(resolve, Math.min(10000, budgetMs - (Date.now() - started))));
+  }
+  return { rows, status: { attemptCount: attempts.length, budgetMs, elapsedMs: Date.now() - started, matched: rows.length > 0 && rows.every(row => row.match), attempts } };
 }
 
 async function launch(profile, record) {
@@ -203,7 +224,10 @@ async function probe(app) {
   fs.mkdirSync('test-results', { recursive: true });
   const report = { recordedAt: new Date().toISOString(), targetMode: MODE, checkedSourceSha: process.env.OKCLEAN_PROBE_SOURCE_SHA || null, mode: 'headed desktop Chromium, fresh normal persistent profiles; actual native event and cancellation; no Android device or existing customer WebAPK', noLoginOrFormSubmission: true, noInstallConfirmationAccepted: true, publicAssets: [], probes: [] };
   try {
-    report.publicAssets = await publicParity();
+    const parity = await waitForPublicParity();
+    report.publicAssets = parity.rows;
+    report.publicParity = parity.status;
+    if (MODE === 'public' && !parity.status.matched) throw new Error('Public assets did not match this checkout within the bounded deployment wait; browser checks were not run against a different release');
     for (const app of [{ key: 'admin', pathname: '/admin/', id: '/admin/' }, { key: 'customer', pathname: '/app/', id: '/' }]) report.probes.push(await probe(app));
   } catch (error) { report.error = safeError(error); }
   finally {

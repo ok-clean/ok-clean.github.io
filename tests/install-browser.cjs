@@ -79,7 +79,16 @@ async function emitPrompt(page, { outcome = 'accepted', behavior = 'choice' } = 
   }, { outcome, behavior });
 }
 async function resolvePrompt(page, id, outcome) { await page.evaluate(({ id, outcome }) => window.installFixture.events[id].resolve({ outcome }), { id, outcome }); }
-async function expectState(page, expected) { await page.waitForFunction(expected => window.OKCleanInstall.getState().state === expected, expected); assert.equal(await button(page).getAttribute('data-install-state'), expected); }
+async function expectState(page, expected) {
+  // Handoff state changes synchronously to prevent duplicate navigation, while
+  // its anchor remains in the DOM until the native click's default action runs.
+  // Wait for both the controller and its next-task render, not just the model.
+  await page.waitForFunction(expected =>
+    window.OKCleanInstall.getState().state === expected &&
+    document.querySelector('[data-install]')?.dataset.installState === expected,
+  expected, { timeout: 5000 });
+  assert.equal(await button(page).getAttribute('data-install-state'), expected);
+}
 async function expectCalls(page, expected) { assert.equal(await page.evaluate(() => window.installFixture?.totalCalls || 0), expected); }
 async function closePanel(page) {
   if (await page.locator(PANEL).isVisible()) {

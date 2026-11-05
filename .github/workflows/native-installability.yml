@@ -1,6 +1,18 @@
 name: Native browser installability diagnosis
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/native-installability.yml'
+      - 'tests/native-install-probe.cjs'
+      - 'install.js'
+      - 'install.css'
+      - 'manifest.webmanifest'
+      - 'admin/**'
+      - 'app/index.html'
+      - 'sw.js'
+      - 'scripts/stage_pages.py'
   pull_request:
     paths:
       - '.github/workflows/native-installability.yml'
@@ -26,9 +38,9 @@ permissions:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     env:
-      OKCLEAN_NATIVE_TARGET: ${{ github.event_name == 'workflow_dispatch' && inputs.target || 'candidate' }}
+      OKCLEAN_NATIVE_TARGET: ${{ github.event_name == 'push' && 'public' || github.event_name == 'workflow_dispatch' && inputs.target || 'candidate' }}
       OKCLEAN_PROBE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       OKCLEAN_BASELINE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
       OKCLEAN_BASELINE_DIR: ${{ github.workspace }}/baseline-source
