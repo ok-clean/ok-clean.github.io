@@ -214,7 +214,9 @@ function drawCases(){
 }
 $("caseList").addEventListener("click", e => { if(e.target.id === "caseMore"){ caseN += 8; drawCases(); } });
 $("caseChips").addEventListener("click", e => { const b = e.target.closest("[data-f]"); if(!b) return; caseF = b.dataset.f; caseN = 8; drawCases(); });
-fetch("cases.json?t=" + Date.now(), {cache: "no-store"}).then(r => r.ok ? r.json() : {cases: []}).catch(() => ({cases: []})).then(d => {
+// The public homepage and /app/ share this script and the same case archive.
+const casesUrl = new URL("cases.json?t=" + Date.now(), document.currentScript?.src || location.origin + "/app.js");
+fetch(casesUrl, {cache: "no-store"}).then(r => r.ok ? r.json() : {cases: []}).catch(() => ({cases: []})).then(d => {
   const ex = (C.excludeWords || []).map(w => w.replace(/\s/g, ""));
   const all = (d.cases || []).filter(x => x.link && x.title && !ex.some(w => x.title.replace(/\s/g, "").includes(w))).sort((p, q) => (q.date || "").localeCompare(p.date || ""));
   CASES = all.filter(x => (x.kind || "case") === "case");

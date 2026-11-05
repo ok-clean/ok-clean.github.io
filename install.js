@@ -6,7 +6,7 @@
   const root = new URL('.', script.src);
   const isAdmin = script.dataset.app === 'admin';
   const appName = isAdmin ? '오케이청소 관리자' : '오케이청소';
-  const appUrl = new URL(isAdmin ? 'admin/' : './', root);
+  const appUrl = new URL(isAdmin ? 'admin/' : 'app/', root);
   const ua = navigator.userAgent || '';
   const isAndroid = /Android/i.test(ua);
   const isIOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -15,7 +15,9 @@
   const returned = current.searchParams.get('install') === '1';
   const failedHandoff = returned && current.searchParams.get('install_fallback') === '1';
   const displayMode = window.matchMedia('(display-mode: standalone)');
-  const standalone = () => displayMode.matches || navigator.standalone === true;
+  // Display mode identifies an app window, not which PWA owns it. In particular,
+  // an old customer app with scope '/' can open the administrator page inside it.
+  const inAppWindow = () => displayMode.matches || navigator.standalone === true;
   const escape = value => String(value).replace(/[&<>"']/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
   let pending = null;
   let prompting = false;
@@ -38,7 +40,7 @@
   const shareIcon = '<svg class="ok-install-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 9H5v12h14V9h-3M12 15V2m-4 4 4-4 4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const steps = rows => `<ol class="ok-install-steps">${rows.map((row, i) => `<li><span class="ok-install-number" aria-hidden="true">${i + 1}</span><span>${row}</span></li>`).join('')}</ol>`;
   const copyButton = primary => `<button type="button" class="ok-install-${primary ? 'primary' : 'secondary'}" data-install-action="copy"${primary ? ' data-install-primary' : ''}>주소 복사${primary ? '하기' : ''}</button>`;
-  const manualHelp = () => `<details class="ok-install-details"><summary>지금 브라우저에서 설치하려면</summary><p>브라우저 메뉴 <b>⋮ 또는 ☰</b>에서 <b>앱 설치</b> 또는 <b>홈 화면에 추가</b>를 선택하세요.</p><p>이미 설치했다면 홈 화면의 <b>${escape(appName)}</b> 아이콘을 눌러 주세요.</p></details>`;
+  const manualHelp = () => `<details class="ok-install-details"><summary>설치창이 나오지 않나요?</summary><p>Chrome 주소창에 아래 복사한 주소를 직접 넣어 주세요. 메뉴 <b>⋮</b>에서 <b>홈 화면에 추가</b>를 누른 뒤 <b>설치</b> 또는 <b>바로가기 만들기</b>를 선택하세요.</p><p>이미 설치했다면 홈 화면의 <b>${escape(appName)}</b> 아이콘을 눌러 주세요.</p></details>`;
 
   function refreshButtons() {
     document.querySelectorAll('[data-install]').forEach(button => {
@@ -48,7 +50,7 @@
       button.setAttribute('aria-controls', 'okInstallDialog');
       button.setAttribute('aria-expanded', String(dialogActive));
       const label = button.querySelector('[data-install-label], span') || button;
-      label.textContent = standalone() ? '앱 사용 중' : requested ? '설치 확인' : '앱 설치';
+      label.textContent = requested ? '설치 확인' : '앱 설치';
     });
   }
 
@@ -63,11 +65,7 @@
   function render() {
     if (!dialog) return;
     let title, description, content;
-    if (standalone()) {
-      title = '앱으로 사용 중이에요';
-      description = '다음에도 홈 화면의 아이콘을 눌러 바로 열어 주세요.';
-      content = '<div class="ok-install-success" aria-hidden="true">✓</div><button type="button" class="ok-install-primary" data-install-action="close" data-install-primary>계속 사용하기</button>';
-    } else if (requested) {
+    if (requested) {
       title = '설치를 시작했어요';
       description = `잠시 후 홈 화면에서 ${appName} 아이콘을 확인하세요.`;
       content = '<div class="ok-install-success" aria-hidden="true">✓</div><button type="button" class="ok-install-primary" data-install-action="close" data-install-primary>확인</button>';
@@ -81,16 +79,17 @@
       content = `${copyButton(true)}<p class="ok-install-hint">Chrome이 열리면 앱 설치를 눌러 주세요.</p>`;
     } else if (isIOS) {
       title = '홈 화면에 추가해요';
-      description = isInApp ? '먼저 브라우저 메뉴에서 Safari로 열기를 선택해 주세요.' : '공유 메뉴에서 두 단계로 추가할 수 있어요.';
+      description = inAppWindow() ? '주소를 복사해 Safari에서 연 뒤 추가해 주세요.' : isInApp ? '먼저 브라우저 메뉴에서 Safari로 열기를 선택해 주세요.' : '공유 메뉴에서 두 단계로 추가할 수 있어요.';
       content = `${steps([`${shareIcon}<b>공유</b> 버튼 누르기`, '<b>홈 화면에 추가 → 추가</b>'])}<p class="ok-install-hint">‘웹 앱으로 열기’가 보이면 켜 주세요.</p>${copyButton(false)}`;
-    } else if (isAndroid && !returned) {
-      title = 'Chrome에서 이어서 설치해요';
-      description = 'Chrome이 열리면 앱 설치를 눌러 주세요.';
-      content = `<a class="ok-install-primary" href="${escape(chromeIntent)}" data-install-action="chrome" data-install-primary>${chromeIcon}Chrome에서 계속</a><p class="ok-install-hint">선택창이 나오면 <b>Chrome</b>을 선택하세요.</p>${manualHelp()}${copyButton(false)}`;
+    } else if (isAndroid && (inAppWindow() || !returned)) {
+      title = inAppWindow() ? `${isAdmin ? '관리자' : '고객용'} 앱 설치를 계속해요` : 'Chrome에서 이어서 설치해요';
+      description = inAppWindow() ? '앱 안에서 열린 화면이에요. Chrome에서 설치를 진행해 주세요.' : 'Chrome이 열리면 앱 설치를 눌러 주세요.';
+      const hint = inAppWindow() && returned ? '다시 앱이 열리면 주소를 복사해 <b>Chrome 주소창에 직접</b> 넣어 주세요.' : '선택창이 나오면 <b>Chrome</b>을 선택하세요.';
+      content = `<a class="ok-install-primary" href="${escape(chromeIntent)}" data-install-action="chrome" data-install-primary>${chromeIcon}Chrome에서 계속</a><p class="ok-install-hint">${hint}</p>${manualHelp()}${copyButton(false)}`;
     } else if (isAndroid) {
       title = '메뉴에서 앱을 추가해요';
       description = /SamsungBrowser/i.test(ua) ? '삼성 브라우저의 메뉴(☰)를 눌러 주세요.' : 'Chrome 오른쪽 위의 ⋮ 메뉴를 눌러 주세요.';
-      content = `${steps(['<b>홈 화면에 추가</b><small>또는 앱 설치</small>', '<b>설치</b> 누르기'])}<p class="ok-install-hint">이미 설치했다면 홈 화면의 아이콘을 눌러 주세요.</p>${copyButton(false)}`;
+      content = `${steps(['<b>홈 화면에 추가</b><small>또는 앱 설치</small>', '<b>설치</b> 또는 <b>바로가기 만들기</b>'])}<p class="ok-install-hint">이미 설치했다면 홈 화면의 ${escape(appName)} 아이콘을 눌러 주세요.</p>${manualHelp()}${copyButton(false)}`;
     } else {
       title = '브라우저에서 앱을 추가해요';
       description = '주소창의 설치 아이콘이나 브라우저 메뉴를 확인해 주세요.';
@@ -146,7 +145,7 @@
 
   function install(trigger) {
     if (prompting) return;
-    if (!pending || requested || standalone()) {
+    if (!pending || requested) {
       show(trigger);
       return;
     }
@@ -278,7 +277,7 @@
       current.searchParams.delete('install');
       current.searchParams.delete('install_fallback');
       try { history.replaceState(history.state, '', current.href); } catch (_) {}
-      if (!standalone()) show(); // Only open the helper. Never prompt or navigate automatically.
+      show(); // A return marker does not prove that the app window was escaped.
     }
   }
 
