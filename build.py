@@ -1,6 +1,6 @@
 """config.json(업체 정보) 하나로 사이트의 모든 페이지를 만드는 스크립트
 
-만드는 것: index.html, services/서비스.html, area/지역.html, privacy.html, sitemap.xml, robots.txt
+만드는 것: index.html, app/index.html, services/서비스.html, area/지역.html, privacy.html, sitemap.xml, robots.txt
 GitHub Actions 가 1시간마다 update.py 를 돌리고, update.py 가 끝에 이 스크립트를 부름.
 """
 import html
@@ -85,8 +85,9 @@ def tel(c):
     return "tel:" + "".join(ch for ch in c.get("phone", "") if ch.isdigit() or ch == "+")
 
 
-def head(c, title, desc, path, depth=0, ld=None):
+def head(c, title, desc, path, depth=0, ld=None, home_path=None):
     up = "../" * depth
+    home = up + "index.html" if home_path is None else home_path
     url = c.get("siteUrl", "").rstrip("/") + "/" + path
     return f"""<!doctype html>
 <html lang="ko"><head>
@@ -109,8 +110,8 @@ def head(c, title, desc, path, depth=0, ld=None):
 </head><body>
 {'<div class="sample">샘플 화면이에요 · config.json 에 업체 정보를 넣고 sample 을 false 로 바꾸면 이 줄이 사라져요</div>' if c.get("sample") else ''}
 <div class="wrap"><header class="top">
-<a class="brand" href="{up}index.html"><img src="{up}icon-192.png" alt="" width="38" height="38" class="logo"><b>{e(c["name"])}</b></a>
-<nav aria-label="주요 메뉴"><a href="{up}index.html#quote">견적 계산</a><a href="{up}index.html#services">서비스</a><a href="{up}index.html#cases">시공 사례</a><a href="{up}index.html#member">회원 혜택</a><a href="{up}index.html#faq">자주 묻는 질문</a></nav>
+<a class="brand" href="{home or '#'}"><img src="{up}icon-192.png" alt="" width="38" height="38" class="logo"><b>{e(c["name"])}</b></a>
+<nav aria-label="주요 메뉴"><a href="{home}#quote">견적 계산</a><a href="{home}#services">서비스</a><a href="{home}#cases">시공 사례</a><a href="{home}#member">회원 혜택</a><a href="{home}#faq">자주 묻는 질문</a></nav>
 <div class="tools">
 <button class="tool" type="button" data-share aria-label="공유하기"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>공유</span></button>
 <button class="tool app" type="button" data-install hidden><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7v7M9 11l3 3 3-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>앱 설치</span></button>
@@ -154,8 +155,9 @@ def biz_ld(c):
     return d
 
 
-def foot(c, depth=0):
+def foot(c, depth=0, home_path=None):
     up = "../" * depth
+    home = up + "index.html" if home_path is None else home_path
     b = c.get("business") or {}
     parts = [f"상호 {e(b['company'])}" if b.get("company") else "", f"대표 {e(b['owner'])}" if b.get("owner") else "",
              f"사업자등록번호 {e(b['number'])}" if b.get("number") else "", e(b.get("address", "")),
@@ -164,7 +166,7 @@ def foot(c, depth=0):
     areas = " ".join(f'<a href="{up}{area_file(r)}">{e(r)} 청소</a>' for r in c.get("regions", []))
     kakao = c.get("kakao", "")
     dock_main = (f'<a class="btn glove" href="{e(kakao)}" target="_blank" rel="noopener">카톡으로 상담하기</a>' if kakao
-                 else f'<a class="btn glove" href="{up}index.html#quote">견적 계산하기</a>')
+                 else f'<a class="btn glove" href="{home}#quote">견적 계산하기</a>')
     rc = c.get("recruit") or {}
     recruit = (f'<section class="recruit"><div class="wrap"><div><b>{e(rc.get("title", ""))}</b><p>{e(rc.get("text", ""))}</p></div>'
                f'<a class="btn line" href="{e(kakao)}" target="_blank" rel="noopener">{e(rc.get("button", "카톡으로 문의"))}</a></div></section>') if rc and kakao else ""
@@ -236,7 +238,8 @@ def member_section(c):
 </div></section>"""
 
 
-def join_modal(c):
+def join_modal(c, depth=0):
+    up = "../" * depth
     m = c.get("member")
     if not m:
         return ""
@@ -253,7 +256,7 @@ def join_modal(c):
   <div class="field"><label for="jPhone">연락처</label><input id="jPhone" type="tel" inputmode="tel" autocomplete="tel" maxlength="13" placeholder="010-0000-0000"></div>
   <div class="field"><label for="jArea">지역</label><select id="jArea"><option value="">선택</option>{regions}<option>그 외 지역</option></select></div>
   <div class="field"><span class="lab">무료로 받을 서비스 1가지</span>{frees}</div>
-  <label class="agree"><input type="checkbox" id="jAgree"><span><b>(필수)</b> 개인정보 수집·이용 동의 · 이름·연락처·지역(추천인 코드)을 회원 관리, 쿠폰·포인트 지급, 예약 상담에만 쓰고 탈퇴 요청 시 지체 없이 파기해요. <a href="privacy.html" target="_blank">자세히</a></span></label>
+  <label class="agree"><input type="checkbox" id="jAgree"><span><b>(필수)</b> 개인정보 수집·이용 동의 · 이름·연락처·지역(추천인 코드)을 회원 관리, 쿠폰·포인트 지급, 예약 상담에만 쓰고 탈퇴 요청 시 지체 없이 파기해요. <a href="{up}privacy.html" target="_blank">자세히</a></span></label>
   <label class="agree"><input type="checkbox" id="jAd"><span>(선택) 할인·이벤트 소식 받기</span></label>
   <p class="err" id="jErr" role="alert"></p>
   <button class="btn glove" type="button" id="jSubmit">가입하고 쿠폰 받기</button>
@@ -301,7 +304,12 @@ def premium_html(c):
     </div></section>"""
 
 
-def index_page(c, cases=()):
+def index_page(c, cases=(), app_entry=False):
+    # The app has its own non-overlapping scope. Reuse the homepage without
+    # redirecting out of /app/ or losing referral parameters during navigation.
+    depth = 1 if app_entry else 0
+    up = "../" * depth
+    home = "" if app_entry else None
     regions = c.get("regions", [])
     rg = "·".join(regions[:2]) if regions else ""
     title = f"{c['name']} | {rg} 입주청소·에어컨 청소 견적" if rg else f"{c['name']} | 청소 견적"
@@ -309,7 +317,7 @@ def index_page(c, cases=()):
     cfg = json.dumps(c, ensure_ascii=False).replace("</", "<\\/")
     faq_ld = {"@context": "https://schema.org", "@type": "FAQPage",
               "mainEntity": [{"@type": "Question", "name": f["q"], "acceptedAnswer": {"@type": "Answer", "text": f["a"]}} for f in c.get("faq", [])]}
-    return head(c, title, desc, "", 0, [biz_ld(c), faq_ld]) + f"""
+    return head(c, title, desc, "", depth, [biz_ld(c), faq_ld], home_path=home) + f"""
 <main>
 <section class="hero"><div class="wrap hero-in">
   <div>
@@ -318,7 +326,7 @@ def index_page(c, cases=()):
     {f'<p class="sani-badge">🛡 {e(c["sanitize"]["badge"])}</p>' if c.get("sanitize") else ''}
     <div class="areas">{''.join(f'<span>{e(r)}</span>' for r in regions)}</div>
     {member_badge(c)}
-    <img class="hero-logo" src="logo.png" alt="{e(c['name'])} 로고" width="240" height="240">
+    <img class="hero-logo" src="{up}logo.png" alt="{e(c['name'])} 로고" width="240" height="240">
   </div>
   <div class="calc" id="quote">
     <h2>예상 견적 계산</h2>
@@ -347,7 +355,7 @@ def index_page(c, cases=()):
   <h2>하는 일</h2>
   <p class="d">주거부터 상가, 준공 현장, 가전 분해세척까지 맡아요. 항목을 누르면 작업 범위와 가격 기준을 볼 수 있어요.</p>
   {f'<p class="note">{e(c["priceNote"])}</p>' if c.get("priceNote") else ''}
-  {services_html(c)}
+  {services_html(c, depth)}
   {premium_html(c)}
 </div></section>
 
@@ -389,10 +397,10 @@ def index_page(c, cases=()):
   {faq_html(c)}
 </div></section>
 </main>
-{foot(c)}
+{foot(c, depth, home_path=home)}
 <script id="cfg" type="application/json">{cfg}</script>
-{join_modal(c)}
-<script src="app.js"></script>
+{join_modal(c, depth)}
+<script src="{up}app.js"></script>
 </body></html>
 """
 
@@ -521,14 +529,15 @@ def run():
         except ValueError:
             cases = []
     changed = []
-    files = {"index.html": index_page(c, cases), "privacy.html": privacy_page(c)}
+    files = {"index.html": index_page(c, cases), "app/index.html": index_page(c, cases, app_entry=True),
+             "privacy.html": privacy_page(c)}
     for s in c["services"]:
         files[f"services/{s['id']}.html"] = service_page(c, s, cases)
     for r in c.get("regions", []):
         files[f"area/{r}.html"] = area_page(c, r, cases)
     files["manifest.webmanifest"] = json.dumps({
         "name": c["name"], "short_name": c["name"], "description": c.get("tagline", ""), "lang": "ko",
-        "id": "/", "start_url": "/?src=app", "scope": "/", "display": "standalone", "background_color": "#F4F7FC", "theme_color": "#0B3FA6",
+        "id": "/", "start_url": "/app/?src=app", "scope": "/app/", "display": "standalone", "background_color": "#F4F7FC", "theme_color": "#0B3FA6",
         "icons": [{"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
                   {"src": "logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}]}, ensure_ascii=False, indent=1)
     base = c.get("siteUrl", "").rstrip("/") + "/"
