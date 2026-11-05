@@ -1,8 +1,8 @@
 {
   "name": "오케이청소 관리자",
   "short_name": "OK청소 관리자",
-  "start_url": "./",
-  "scope": "./",
+  "start_url": "/admin/",
+  "scope": "/admin/",
   "display": "standalone",
   "background_color": "#f4f7fc",
   "theme_color": "#173d87",
@@ -18,5 +18,6 @@
       "type": "image/png",
       "purpose": "any"
     }
-  ]
+  ],
+  "id": "/admin/"
 }
