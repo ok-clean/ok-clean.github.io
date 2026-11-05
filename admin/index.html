@@ -12,8 +12,8 @@
   let pending = null, installed = false;
   const showHelp = value => { help.hidden = !value; button.setAttribute('aria-expanded', String(value)); };
   const refresh = () => {
-    button.hidden = installed || standalone.matches || navigator.standalone === true;
-    if (button.hidden) showHelp(false);
+    button.hidden = false; // Keep install/help action visible, including standalone mode.
+    
   };
   window.addEventListener('beforeinstallprompt', event => {
     event.preventDefault(); pending = event; refresh();
@@ -23,7 +23,7 @@
   });
   standalone.addEventListener?.('change', refresh);
   button.addEventListener('click', async () => {
-    if (!pending) { showHelp(true); status.textContent = '이 브라우저에서는 설치창을 바로 열 수 없습니다. Chrome 또는 Safari에서 열어 주세요.'; return; }
+    if (!pending) { showHelp(true); status.textContent = (installed || standalone.matches || navigator.standalone === true) ? '현재 관리자 앱으로 실행 중입니다. 이미 설치된 경우 다시 설치할 필요가 없습니다.' : '이 브라우저에서는 설치창을 바로 열 수 없습니다. Chrome 또는 Safari에서 열어 주세요.'; return; }
     const prompt = pending; pending = null; button.disabled = true;
     try {
       await prompt.prompt();
