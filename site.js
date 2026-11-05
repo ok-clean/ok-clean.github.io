@@ -1,12 +1,10 @@
-// 모든 페이지 공통: 공유하기, 휴대폰 앱(홈 화면) 설치, 팝업 창
+// 모든 페이지 공통: 공유하기와 팝업 창. 앱 설치는 install.js에서 공통 처리합니다.
 (function(){
   const S = window.SITE || {};
   const $ = id => document.getElementById(id);
   const esc = s => String(s ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
   const UA = navigator.userAgent;
-  const IS_IOS = /iPhone|iPad|iPod/.test(UA) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const IN_APP = /KAKAOTALK|NAVER|Instagram|FBAN|FBAV|Line\//i.test(UA);
-  const STANDALONE = matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 
   // ── 토스트·복사 ──
   window.toast = function(msg){
@@ -68,58 +66,4 @@
     if(e.target.closest("[data-copy-link]")){ if(await window.copyText(shareText + "\n" + shareUrl)){ window.closeModal($("sheet")); window.toast("링크를 복사했어요. 카톡이나 문자에 붙여넣어 주세요."); } }
   });
 
-  // ── 휴대폰 앱(홈 화면) 설치 ──
-  // 카톡·네이버 같은 앱 안의 브라우저에서는 설치가 안 돼서, 크롬(아이폰은 사파리)으로 자동으로 옮긴 뒤 설치 창을 띄움
-  const IS_ANDROID = /Android/i.test(UA), IS_KAKAO = /KAKAOTALK/i.test(UA);
-  const WANT = new URLSearchParams(location.search).get("install") === "1";
-  let deferred = null;
-  const showInstall = on => document.querySelectorAll("[data-install]").forEach(b => b.hidden = !on);
-  if(!STANDALONE) showInstall(true);
-  const installUrl = () => { const u = new URL(location.href); u.searchParams.set("install", "1"); u.hash = ""; return u.toString(); };
-  function openOutside(){
-    const url = installUrl();
-    if(IS_KAKAO){ location.href = "kakaotalk://web/openExternal?url=" + encodeURIComponent(url); return true; }   // 카톡: 기본 브라우저로 열기
-    if(IS_ANDROID){                                                                                                // 그 외 안드로이드 앱: 크롬으로 열기
-      const u = new URL(url);
-      location.href = `intent://${u.host}${u.pathname}${u.search}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(url)};end`;
-      return true;
-    }
-    return false;
-  }
-  function readySheet(){
-    sheet("앱 설치 준비가 끝났어요", `<p class="lead-s">아래 버튼을 누르고 <b>설치</b>를 누르면 홈 화면에 <b>${esc(S.name)}</b> 아이콘이 생겨요.</p><button class="btn glove" type="button" data-install-now style="width:100%">지금 설치하기</button>`);
-  }
-  async function promptNow(){
-    if(!deferred) return false;
-    window.closeModal($("sheet"));
-    deferred.prompt(); const r = await deferred.userChoice; deferred = null;
-    if(r.outcome === "accepted") showInstall(false);
-    return true;
-  }
-  window.addEventListener("beforeinstallprompt", e => {
-    e.preventDefault(); deferred = e; showInstall(true);
-    if(WANT && !STANDALONE) readySheet();   // 카톡에서 넘어온 경우: 바로 설치 버튼 보여주기
-  });
-  window.addEventListener("appinstalled", () => { deferred = null; showInstall(false); window.toast("홈 화면에 앱을 추가했어요."); });
-  const IOS_STEPS = `<ol class="steps-mini"><li>화면 아래(또는 위) <b>공유 버튼(□↑)</b>을 누르세요.</li><li>목록을 내려 <b>홈 화면에 추가</b>를 누르세요.</li><li>오른쪽 위 <b>추가</b>를 누르면 홈 화면에 아이콘이 생겨요.</li></ol>`;
-  async function install(){
-    if(await promptNow()) return;
-    if(IN_APP && openOutside()){
-      sheet("브라우저로 옮기는 중이에요", `<p class="lead-s"><b>Chrome 브라우저로 열기</b>를 선택하세요. Chrome에서 오케이청소 홈페이지가 열리면 상단 <b>앱 설치</b> 버튼을 다시 눌러 주세요.</p><p class="hint">화면이 안 바뀌면 오른쪽 위 <b>⋮ 메뉴 → 다른 브라우저로 열기 → Chrome</b>을 선택하세요. Chrome에서도 설치창이 뜨지 않으면 Chrome ⋮ 메뉴의 <b>앱 설치</b> 또는 <b>홈 화면에 추가</b>를 선택하세요.</p>`);
-      return;
-    }
-    let steps;
-    if(IN_APP) steps = `<ol class="steps-mini"><li>오른쪽 위(또는 아래) <b>⋯ 메뉴</b>를 누르세요.</li><li><b>Safari로 열기</b>를 고르세요.</li></ol>${IOS_STEPS}`;
-    else if(IS_IOS) steps = IOS_STEPS;
-    else steps = `<ol class="steps-mini"><li>Chrome 브라우저에서 오케이청소 페이지를 연 뒤 상단 <b>앱 설치</b> 버튼을 다시 누르세요. 설치창이 안 뜨면 Chrome 오른쪽 위 <b>⋮ 메뉴</b>를 누르세요.</li><li><b>홈 화면에 추가</b> 또는 <b>앱 설치</b>를 누르세요.</li><li><b>설치</b>를 누르면 홈 화면에 아이콘이 생겨요.</li></ol><p class="hint">설치 창이 바로 안 뜨면 몇 초 뒤 다시 눌러 주세요.</p>`;
-    sheet("휴대폰에 앱으로 설치하기", `<p class="lead-s">홈 화면에 <b>${esc(S.name)}</b> 아이콘이 생겨서, 다음부터 한 번에 견적을 볼 수 있어요.</p>${steps}`);
-  }
-  // 넘어온 뒤 아이폰 사파리면 방법 안내를 바로 띄움 (아이폰은 버튼 한 번 설치가 애플 정책상 안 됨)
-  if(WANT && !STANDALONE && IS_IOS && !IN_APP) window.addEventListener("load", () => setTimeout(install, 600));
-  // 안드로이드에서 설치 창이 준비 안 된 경우 대비: 잠시 뒤 안내
-  if(WANT && !STANDALONE && !IS_IOS && !IN_APP) setTimeout(() => { if(!deferred && $("sheet").hidden) install(); }, 3500);
-  document.addEventListener("click", e => { if(e.target.closest("[data-install-now]")) promptNow(); });
-  document.addEventListener("click", e => { if(e.target.closest("[data-install]")) install(); });
-
-  if("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register((S.root || "") + "sw.js").catch(() => {}));
 })();

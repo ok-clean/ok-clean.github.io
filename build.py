@@ -103,6 +103,8 @@ def head(c, title, desc, path, depth=0, ld=None):
 <meta property="og:image" content="{e(c.get("siteUrl","").rstrip("/") + "/og.jpg")}"><meta property="og:site_name" content="{e(c["name"])}">
 {FONT}
 <link rel="stylesheet" href="{up}style.css">
+<link rel="stylesheet" href="{up}install.css">
+<script src="{up}install.js" defer data-app="customer"></script>
 {ld_tags(ld)}{analytics(c)}
 </head><body>
 {'<div class="sample">샘플 화면이에요 · config.json 에 업체 정보를 넣고 sample 을 false 로 바꾸면 이 줄이 사라져요</div>' if c.get("sample") else ''}
@@ -526,7 +528,7 @@ def run():
         files[f"area/{r}.html"] = area_page(c, r, cases)
     files["manifest.webmanifest"] = json.dumps({
         "name": c["name"], "short_name": c["name"], "description": c.get("tagline", ""), "lang": "ko",
-        "id": "./", "start_url": "./?src=app", "scope": "./", "display": "standalone", "background_color": "#F4F7FC", "theme_color": "#0B3FA6",
+        "id": "/", "start_url": "/?src=app", "scope": "/", "display": "standalone", "background_color": "#F4F7FC", "theme_color": "#0B3FA6",
         "icons": [{"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
                   {"src": "logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}]}, ensure_ascii=False, indent=1)
     base = c.get("siteUrl", "").rstrip("/") + "/"
