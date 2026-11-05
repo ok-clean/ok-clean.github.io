@@ -11,6 +11,7 @@
 - 전용 Hosting 사이트 `okclean-admin-app`을 실제 생성했다. Console의 두 기본 도메인과 `첫 번째 출시 대기 중` 표시를 확인했다.
 - Authentication 승인 도메인에 `okclean-admin-app.web.app` 한 항목을 추가하고, 새로고침 후에도 유지됨을 확인했다. 기존 승인 도메인은 보존했다.
 - **Hosting 파일 배포·첫 release는 아직 없다.** Google OAuth redirect URI, API key 제한, 새 출처 로그인은 아직 확인하지 못했다.
+- 공개 HTTP 확인에서 새 `/admin/`은 404, Firebase 예약 `/__/auth/handler`와 `/__/auth/iframe`은 각각 200 HTML로 응답했다. 인증 helper 제공 여부만 확인한 결과이며 OAuth 승인이나 실제 로그인 성공을 뜻하지 않는다.
 - 기존 GitHub Pages 배포는 PR #78의 `51670e0fef7cce51d6e85c6d0eb55ce02f3ecad5`를 유지한다. 기존 `/admin/`의 이동 연결은 활성화하지 않았다.
 
 현재 배포 차단은 인증된 파일 배포 경로다. Firebase Console의 Cloud Shell과 Google Cloud OAuth 설정 화면이 각각 `Site Unavailable`로 열렸으며, 각 한 차례 새로고침 후에도 같았다. 이는 이 작업 환경의 해당 관리 화면 접근 실패이며 새 Hosting 서비스의 장애나 설치 실패를 확인한 결과가 아니다. 로컬 Firebase CLI 15.35.0은 설치됐으나 `login:list`에 인증 계정이 없고, 클라우드 브라우저는 로컬 CLI의 loopback 콜백에 접근하지 못했다. 자격 증명을 읽거나 대화로 요청하지 않았다.
@@ -87,7 +88,7 @@ python scripts/stage_admin_hosting.py . /tmp/okclean-admin-hosting-review \
 
 1. **완료:** Firebase Authentication 승인 도메인에 `okclean-admin-app.web.app`을 추가하고 저장·새로고침 후 유지됨을 확인했다.
 2. Google OAuth 클라이언트의 승인된 redirect URI에 `https://okclean-admin-app.web.app/__/auth/handler`가 들어 있는지 확인하고, 필요하면 이 항목만 추가한다.
-3. Firebase Hosting의 `/__/auth/handler`와 `/__/auth/iframe`이 정상 제공되는지 확인한다. 일반 HTML로 치환하는 catch-all rewrite를 추가하지 않는다.
+3. Firebase Hosting의 `/__/auth/handler`와 `/__/auth/iframe`의 200 HTML 응답은 확인했다. 실제 로그인 왕복은 미검증이다. 일반 HTML로 치환하는 catch-all rewrite를 추가하지 않는다.
 4. Google 팝업 로그인과 팝업 차단 시 redirect 복귀를 확인한다. 허가된 관리자와 비관리자의 접근 결과를 별도로 검증한다.
 5. API key의 웹사이트 제한이나 App Check 허용 출처가 있다면 새 출처가 필요한지 읽기 확인한다. 제한·규칙을 끄거나 전체 허용으로 넓히지 않는다.
 

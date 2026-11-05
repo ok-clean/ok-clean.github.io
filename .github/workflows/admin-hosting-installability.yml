@@ -28,7 +28,6 @@ jobs:
       OKCLEAN_PROBE_SOURCE_SHA: ${{ inputs.source_sha }}
       OKCLEAN_BASELINE_SHA: ${{ inputs.source_sha }}
       OKCLEAN_PROBE_CODE_SHA: ${{ github.sha }}
-      OKCLEAN_BASELINE_DIR: ${{ runner.temp }}/okclean-admin-hosting-verification/public
     steps:
       - name: Require the exact deployed source commit
         run: |
@@ -76,6 +75,8 @@ jobs:
           sudo apt-get install -y xdotool imagemagick
       - name: Verify published bytes and administrator native prompt without accepting installation
         working-directory: probe-source
+        env:
+          OKCLEAN_BASELINE_DIR: ${{ runner.temp }}/okclean-admin-hosting-verification/public
         run: xvfb-run -a -s '-screen 0 1280x1000x24' node tests/native-install-probe.cjs
       - uses: actions/upload-artifact@v4
         if: always()
