@@ -1,6 +1,19 @@
 # 관리자 앱 별도 출처 준비 및 검증 기록
 
-기준일: 2026-11-05. **준비만 완료한 방안이며 새 Hosting 사이트를 생성하거나 배포하지 않았다. 실제 Android 설치 검증은 대기 중이다.**
+기준일: 2026-11-05. **사용자 승인 후 관리자 전용 Hosting 사이트 생성과 Firebase 로그인 승인 도메인 등록을 완료했다. 파일 배포는 아직 없으며 실제 Android 설치 검증은 대기 중이다.**
+
+## 승인 후 실제 적용 상태
+
+이번 사용자의 명시적 승인은 기존 프로젝트 안 새 전용 Hosting 사이트 생성·정적 배포·필요한 로그인 도메인/OAuth URI 추가를 포함한다. 같은 범위에 대한 재승인은 필요하지 않다.
+
+- Firebase Console에서 기존 프로젝트 `okclean-admin`에 관리 계정으로 접근했다.
+- Spark 요금제 `무료($0/월)`을 확인했다. 요금제 전환이나 결제 연결은 하지 않았다.
+- 전용 Hosting 사이트 `okclean-admin-app`을 실제 생성했다. Console의 두 기본 도메인과 `첫 번째 출시 대기 중` 표시를 확인했다.
+- Authentication 승인 도메인에 `okclean-admin-app.web.app` 한 항목을 추가하고, 새로고침 후에도 유지됨을 확인했다. 기존 승인 도메인은 보존했다.
+- **Hosting 파일 배포·첫 release는 아직 없다.** Google OAuth redirect URI, API key 제한, 새 출처 로그인은 아직 확인하지 못했다.
+- 기존 GitHub Pages 배포는 PR #78의 `51670e0fef7cce51d6e85c6d0eb55ce02f3ecad5`를 유지한다. 기존 `/admin/`의 이동 연결은 활성화하지 않았다.
+
+현재 배포 차단은 인증된 파일 배포 경로다. Firebase Console의 Cloud Shell과 Google Cloud OAuth 설정 화면이 각각 `Site Unavailable`로 열렸으며, 각 한 차례 새로고침 후에도 같았다. 이는 이 작업 환경의 해당 관리 화면 접근 실패이며 새 Hosting 서비스의 장애나 설치 실패를 확인한 결과가 아니다. 로컬 Firebase CLI 15.35.0은 설치됐으나 `login:list`에 인증 계정이 없고, 클라우드 브라우저는 로컬 CLI의 loopback 콜백에 접근하지 못했다. 자격 증명을 읽거나 대화로 요청하지 않았다.
 
 ## 확인된 사실과 아직 확인되지 않은 사실
 
@@ -30,13 +43,13 @@
 
 ## 준비한 구체적인 별도 출처
 
-**권장 대상 한 가지:** 기존 Firebase 프로젝트 `okclean-admin` 안에 새 전용 Hosting 사이트 `okclean-admin-app`을 생성한다.
+**승인된 배포 대상:** 기존 Firebase 프로젝트 `okclean-admin` 안에 생성한 전용 Hosting 사이트 `okclean-admin-app`을 사용한다.
 
 - 준비 주소: `https://okclean-admin-app.web.app/admin/`
-- 현재 상태: **미생성·미배포·사이트 ID 가용성 미확인. 최종 운영 주소로 배포하거나 안내하지 않는다.**
+- 현재 상태: **사이트 생성 완료·파일 미배포. 최종 운영 주소로 안내하지 않는다.**
 - 새 프로젝트, 유료 도메인, Functions, App Hosting, Blaze 전환은 필요하지 않다.
-- 기존 기본 사이트 `okclean-admin`에는 배포하지 않는다. 기존 사이트의 내용과 사용 여부를 알 수 없기 때문이다. 공개 기본 Hosting 주소도 읽기 도구에서 확인되지 않았으며, 이를 빈 사이트라는 증거로 사용하지 않았다.
-- 새 사이트 ID가 이미 존재하거나 생성 충돌이 발생하면 중단한다. 기존 사이트를 자동 선택하거나 덮어쓰지 않는다.
+- 기존 기본 사이트 `okclean-admin`에는 배포하지 않는다. Console에서 해당 사이트도 첫 번째 출시 대기 상태로 보였으며, 이번 작업은 별도 사이트만 대상으로 한다.
+- `okclean-admin-app`은 이번 승인 범위에서 직접 생성한 사이트이므로 후속 작업에서 생성 명령을 다시 실행하지 않는다. 프로젝트와 사이트의 소속을 확인하고 이 대상만 사용한다.
 
 [Firebase 다중 Hosting 공식 문서](https://firebase.google.com/docs/hosting/multisites)는 같은 프로젝트의 Authentication·데이터 자원을 여러 사이트에서 사용할 수 있음을 설명한다. 서로 다른 출처는 브라우저 저장소와 서비스워커를 분리하지만, 같은 프로젝트·같은 Google 계정으로 인증하면 기존 UID와 서버 권한을 계속 사용할 수 있다.
 
@@ -72,7 +85,7 @@ python scripts/stage_admin_hosting.py . /tmp/okclean-admin-hosting-review \
 
 [Firebase redirect 로그인 지침](https://firebase.google.com/docs/auth/web/redirect-best-practices)에 따라 실제 반영 전에 다음을 확인해야 한다.
 
-1. Firebase Authentication 승인 도메인에 `okclean-admin-app.web.app`이 들어 있는지 확인하고, 필요하면 이 항목만 추가한다.
+1. **완료:** Firebase Authentication 승인 도메인에 `okclean-admin-app.web.app`을 추가하고 저장·새로고침 후 유지됨을 확인했다.
 2. Google OAuth 클라이언트의 승인된 redirect URI에 `https://okclean-admin-app.web.app/__/auth/handler`가 들어 있는지 확인하고, 필요하면 이 항목만 추가한다.
 3. Firebase Hosting의 `/__/auth/handler`와 `/__/auth/iframe`이 정상 제공되는지 확인한다. 일반 HTML로 치환하는 catch-all rewrite를 추가하지 않는다.
 4. Google 팝업 로그인과 팝업 차단 시 redirect 복귀를 확인한다. 허가된 관리자와 비관리자의 접근 결과를 별도로 검증한다.
@@ -84,23 +97,29 @@ python scripts/stage_admin_hosting.py . /tmp/okclean-admin-hosting-review \
 
 [공식 Hosting 요금 문서](https://firebase.google.com/docs/hosting/usage-quotas-pricing)를 2026-11-05에 확인했다. 무료 사용량은 프로젝트 전체 합산 저장 10GB와 전송 10GB/월이며, 다른 Hosting 사이트와 공유한다. Spark에서 한도를 넘으면 배포·서비스가 제한될 수 있고, Blaze에서는 초과 사용량에 요금이 발생한다. 따라서 현 프로젝트의 요금제와 잔여 사용량을 확인하기 전에는 추가 비용이 무조건 0원이라고 말하지 않는다.
 
-이 방안은 정적 Hosting만 사용한다. 요금제 전환·결제 연결은 수행하지 않는다. 기존 프로젝트가 이미 Blaze라면 자동으로 요금제를 바꾸거나 비용 상한이 있다고 가정하지 않는다.
+이 방안은 정적 Hosting만 사용한다. Console에서 Spark 무료 요금제를 실제 확인했다. 요금제 전환·결제 연결은 수행하지 않는다. 현재 준비 묶음은 11개 파일, 총 58,280바이트다. 향후 사용량 한도는 프로젝트 전체 기준으로 확인한다.
 
-현재 세션에는 연결된 Firebase 관리 API/CLI 인증과 실제 Android 기기 제어가 제공되지 않았다. 공개 코드 읽기와 로컬 빌드로 확인할 수 있는 범위까지 완료했다. 사이트 생성 가능 여부, 요금제, 승인 도메인, OAuth 설정은 연결된 관리 권한으로 읽기 점검한 뒤 적용해야 한다. 비밀번호·서비스 계정 키를 공개 저장소나 대화에 기록하지 않는다.
+Firebase Console의 관리 세션으로 사이트 생성과 승인 도메인 변경은 적용했다. 현재 실행 환경에는 연결된 Firebase 관리 API/CLI 인증과 실제 Android 기기 제어가 제공되지 않았다. Cloud Shell·Google Cloud 관리 화면 접근 실패로 파일 배포와 OAuth 확인은 대기 중이다. 비밀번호·인증 코드·서비스 계정 키를 공개 저장소나 대화에 기록하지 않는다.
 
-## 승인 후 적용 순서와 원복
+## 남은 적용 순서와 원복
 
-현재 문서는 준비 결과이며 다음 명령을 실행한 기록이 아니다.
+사이트 생성과 승인 도메인 등록은 완료했다. 아래 순서는 남은 작업이며 파일 배포 명령을 실행한 기록이 아니다.
 
-1. 연결된 Firebase 권한으로 프로젝트·요금제·Hosting 사이트 목록·기존 인증 설정을 읽기 확인한다. 읽기 권한이 없으면 설치 코드를 더 바꾸는 대신 접근 차단 사항을 보고한다.
+1. 인증된 Firebase CLI 실행 환경을 연결한다. 이미 확인한 프로젝트·Spark 요금제·전용 사이트의 소속을 유지한다. 관리 화면 접근 실패를 앱 설치 완료나 실패로 해석하지 않는다.
 2. 최종 검토한 커밋으로 새 묶음을 만들고 `review.json`의 파일 해시를 보존한다.
-3. 승인한 범위에서 `firebase hosting:sites:create okclean-admin-app --project okclean-admin`을 실행한다. 이미 존재·충돌·유료 전환 요구 시 즉시 중단한다.
-4. 필요한 도메인·OAuth URI만 승인된 항목대로 추가한 뒤 생성된 묶음에서 `firebase deploy --project okclean-admin --config firebase.json --only hosting`을 실행한다. 이 설정에는 Authentication·Firestore·Functions 배포가 없다.
+3. `npx -y firebase-tools@latest hosting:sites:list --project okclean-admin`으로 생성한 `okclean-admin-app`의 소속을 확인한다. 사이트를 다시 생성하거나 기본 사이트를 선택하지 않는다. 유료 전환 요구 시 중단한다.
+4. 미확인 OAuth URI와 필요한 출처 제한을 확인·적용한 뒤 생성된 묶음에서 `npx -y firebase-tools@latest deploy --project okclean-admin --config firebase.json --only hosting`을 실행한다. 이 설정에는 Authentication·Firestore·Functions 배포가 없다.
 5. 새 공개 파일의 해시·manifest·설치 이벤트, 실제 관리자 로그인·권한, Android 설치를 확인한다. 새 origin에 대한 설치 수락과 `appinstalled`만으로 아이콘 생성·실행을 대신 확인했다고 보고하지 않는다.
 6. 새 주소 검증 전에는 기존 `https://ok-clean.github.io/admin/`을 유지한다. 검증 후 기존 주소에 전용 관리자 주소 연결을 추가한다. 기존 앱 창에서 외부 브라우저가 필요한 경우 사용자 클릭으로 한 번만 전환하며 자동 설치를 보장하지 않는다.
 7. 문제가 생기면 기존 GitHub 관리자 주소를 계속 사용한다. 새 연결을 제거하고 새 Hosting만 이전 정상 release로 되돌린다. 기존 고객 앱, 기본 Hosting, 인증 사용자·권한·DB를 삭제하거나 되돌리지 않는다.
 
-필요한 별도 승인은 **기존 프로젝트 안 새 전용 Hosting 사이트 생성·정적 공개 배포와 필요한 승인 도메인/OAuth URI 추가**다. 변경할 항목·최종 커밋·빌드 해시를 제시한 뒤 한 번에 요청한다. Firebase 연결과 실제 기기 접근이 없다는 사실을 승인으로 해결된 것처럼 표시하지 않는다.
+**승인은 이미 받았다.** 남은 것은 인증된 배포 경로 확보와 검증이다. Firebase 연결과 실제 기기 접근이 없다는 사실을 승인으로 해결된 것처럼 표시하지 않는다.
+
+## 새 출처 공개 배포 검사
+
+`.github/workflows/admin-hosting-installability.yml`은 배포 후 읽기 전용 검사다. 필수 `source_sha`에 실제 Firebase 배포에 사용한 40자리 Git 커밋을 넣는다. 검사 코드와 배포 소스를 따로 체크아웃하고, 배포 소스의 생성기로 만든 11개 공개 파일을 새 출처와 대조한다. `tests/native-install-probe.cjs`의 `admin-hosting` 프로필은 `/admin/`만 검사한다. 기존 `pages` 프로필은 유지한다.
+
+검사는 실제 Chromium 설치 이벤트와 페이지 버튼의 네이티브 확인창 호출, 취소·새로고침·브라우저 재실행을 확인한다. 설치 확인을 수락하지 않고 로그인·운영 데이터 제출도 하지 않는다. 새 Hosting 파일이 배포되지 않은 현재 이 검사는 실행하지 않았다. 문법·워크플로 설정·생성 파일 목록과 잘못된 SHA 입력 거부만 로컬에서 검증했다.
 
 ## 검증 상태
 
