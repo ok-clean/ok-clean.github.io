@@ -1,0 +1,75 @@
+name: Native browser installability diagnosis
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/native-installability.yml'
+      - 'tests/native-install-probe.cjs'
+      - 'install.js'
+      - 'install.css'
+      - 'manifest.webmanifest'
+      - 'admin/**'
+      - 'app/index.html'
+      - 'sw.js'
+      - 'scripts/stage_pages.py'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'candidate checks this checkout locally; public verifies its exact deployed assets'
+        type: choice
+        options: [public, candidate]
+        default: public
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      OKCLEAN_NATIVE_TARGET: ${{ github.event_name == 'workflow_dispatch' && inputs.target || 'candidate' }}
+      OKCLEAN_PROBE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      OKCLEAN_BASELINE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+      OKCLEAN_BASELINE_DIR: ${{ github.workspace }}/baseline-source
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          path: baseline-source
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install full Chromium and native confirmation capture tools
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+          sudo apt-get install -y xdotool imagemagick
+      - name: Stage only approved public candidate files
+        if: env.OKCLEAN_NATIVE_TARGET == 'candidate'
+        run: python scripts/stage_pages.py . "$RUNNER_TEMP/okclean-native-pages"
+      - name: Real install event, native button prompt, cancellation and restart
+        run: |
+          if [ "$OKCLEAN_NATIVE_TARGET" = "candidate" ]; then
+            python -m http.server 8766 --bind 127.0.0.1 --directory "$RUNNER_TEMP/okclean-native-pages" > "$RUNNER_TEMP/native-http.log" 2>&1 &
+            native_server_pid=$!
+            trap 'kill "$native_server_pid" 2>/dev/null || true' EXIT
+          fi
+          xvfb-run -a -s '-screen 0 1280x1000x24' node tests/native-install-probe.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-installability-${{ env.OKCLEAN_NATIVE_TARGET }}
+          path: |
+            test-results/native-installability.json
+            test-results/native-install-*.png
+          if-no-files-found: warn
+          retention-days: 3
