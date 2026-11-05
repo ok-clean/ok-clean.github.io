@@ -124,7 +124,7 @@ async function checkInitialHelp(app, width) {
     assert(layout.tapHeight >= 44, 'Primary action must have a usable touch target');
     if (width === 390) {
       fs.mkdirSync('test-results', { recursive: true });
-      await page.screenshot({ path: path.join('test-results', `install-${app.key}-390.png`) });
+      await page.screenshot({ path: path.join('test-results', `install-${app.key}-390.png`), animations: 'disabled' });
     }
     await page.keyboard.press('Escape');
     await page.locator(DIALOG).waitFor({ state: 'hidden' });
