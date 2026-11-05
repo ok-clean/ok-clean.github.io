@@ -1,0 +1,32 @@
+name: Native browser installability diagnosis
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/native-installability.yml'
+      - 'tests/native-install-probe.cjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install full Chromium for the isolated diagnostic profile
+        run: npm install --no-save playwright && npx playwright install --with-deps chromium
+      - name: Observe browser installability on public pages without authentication
+        run: xvfb-run -a node tests/native-install-probe.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-installability
+          path: test-results/native-installability.json
+          if-no-files-found: warn
+          retention-days: 3
