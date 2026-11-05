@@ -27,6 +27,21 @@ class Page(HTMLParser):
 
 
 class CustomerAppScopeTest(unittest.TestCase):
+    def test_administrator_icons_are_distinct_local_png_assets(self):
+        admin = json.loads((ROOT / 'admin/manifest.webmanifest').read_text('utf-8'))
+        self.assertEqual(admin['name'], '오케이청소 관리자')
+        self.assertEqual(admin['id'], '/admin/')
+        for icon in admin['icons']:
+            path = ROOT / 'admin' / icon['src']
+            data = path.read_bytes()
+            self.assertEqual(data[:8], b'\x89PNG\r\n\x1a\n')
+            width, height = int.from_bytes(data[16:20], 'big'), int.from_bytes(data[20:24], 'big')
+            self.assertEqual(icon['sizes'], f'{width}x{height}')
+            self.assertIn('maskable', icon['purpose'])
+            self.assertNotEqual(data, (ROOT / 'icon-192.png').read_bytes())
+        html = Page((ROOT / 'admin/index.html').read_text('utf-8'))
+        self.assertIn(('link', {'rel': 'apple-touch-icon', 'href': 'apple-touch-icon.png'}), html.tags)
+
     def test_app_scopes_do_not_overlap_and_customer_identity_is_preserved(self):
         customer = json.loads((ROOT / 'manifest.webmanifest').read_text('utf-8'))
         admin = json.loads((ROOT / 'admin/manifest.webmanifest').read_text('utf-8'))

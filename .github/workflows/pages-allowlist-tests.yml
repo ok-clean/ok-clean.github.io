@@ -21,6 +21,7 @@ jobs:
           node-version: '22'
       - run: npm install --no-save playwright && npx playwright install --with-deps chromium
       - run: |
+          node --test tests/service-worker.cjs
           python -m http.server 8765 --directory "$RUNNER_TEMP/okclean-pages" > /tmp/pages-http.log 2>&1 &
           node tests/pages_browser.cjs
           node tests/install-browser.cjs

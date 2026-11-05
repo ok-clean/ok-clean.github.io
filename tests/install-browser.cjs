@@ -1,12 +1,12 @@
-// UI and controller regression tests. Native install events and device signals are
-// fixtures: these checks do not claim Android/iPhone installation success.
+// Auxiliary UI/controller checks only. Browser install events, installed-app
+// signals and external handoffs below are fixtures, not actual phone installs.
 const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const ORIGIN = process.env.OKCLEAN_TEST_ORIGIN || 'http://127.0.0.1:8765';
-assert(['127.0.0.1', 'localhost'].includes(new URL(ORIGIN).hostname), 'Tests must use a local fixture server');
+assert(['127.0.0.1', 'localhost'].includes(new URL(ORIGIN).hostname), 'Tests require an isolated local server');
 const ANDROID = 'Mozilla/5.0 (Linux; Android 15; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Mobile Safari/537.36';
 const IN_APP_ANDROID = ANDROID + ' KAKAOTALK/26.0.0';
 const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1';
@@ -14,395 +14,428 @@ const APPS = [
   { key: 'customer', path: '/', installPath: '/app/', identity: '/', manifestPath: '/manifest.webmanifest', name: '오케이청소' },
   { key: 'admin', path: '/admin/', installPath: '/admin/', identity: '/admin/', manifestPath: '/admin/manifest.webmanifest', name: '오케이청소 관리자' }
 ];
-const DIALOG = '#okInstallDialog';
+const PANEL = '#okInstallPanel';
 const ACTION = name => `[data-install-action="${name}"]`;
+const button = page => page.locator('[data-install]').first();
 let browser;
 let passed = 0;
-
-function pass(message) {
-  passed++;
-  console.log('PASS:', message);
-}
+function pass(message) { passed++; console.log('PASS (fixture):', message); }
 
 async function fixture(app, { width = 390, ua = ANDROID, query = '', standalone = false, iosStandalone = false, copyFails = false } = {}) {
-  const context = await browser.newContext({
-    viewport: { width, height: 820 }, userAgent: ua,
-    isMobile: true, hasTouch: true, serviceWorkers: 'block'
-  });
-  await context.route('**/*', route => {
-    // No Firebase auth/data, analytics, or other real external services in tests.
-    const url = new URL(route.request().url());
-    return url.origin === new URL(ORIGIN).origin ? route.continue() : route.abort();
-  });
+  const context = await browser.newContext({ viewport: { width, height: 820 }, userAgent: ua, isMobile: true, hasTouch: true, serviceWorkers: 'block' });
+  await context.route('**/*', route => new URL(route.request().url()).origin === ORIGIN ? route.continue() : route.abort());
   await context.addInitScript(({ standalone, iosStandalone, copyFails }) => {
-    // Keep the no-event scenarios deterministic on install-capable CI browsers.
+    // Real installation is tested separately. No native prompt or live SDK call
+    // may leak into this deterministic state-transition suite.
     window.addEventListener('beforeinstallprompt', event => {
       if (event.isTrusted) { event.preventDefault(); event.stopImmediatePropagation(); }
     }, true);
+    Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: { register: async () => ({}) } });
     if (standalone) {
       const original = window.matchMedia.bind(window);
-      window.matchMedia = query => {
-        if (query === '(display-mode: standalone)') {
-          return { matches: true, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} };
-        }
-        return original(query);
-      };
+      window.matchMedia = query => query === '(display-mode: standalone)' ?
+        { matches: true, media: query, addEventListener() {}, addListener() {} } : original(query);
     }
-    if (iosStandalone) {
-      Object.defineProperty(navigator, 'standalone', { configurable: true, value: true });
-    }
-    if (copyFails) {
-      Object.defineProperty(navigator, 'clipboard', {
-        configurable: true, value: { writeText: async () => { throw new Error('fixture clipboard denied'); } }
-      });
-      document.execCommand = () => false;
-    }
+    if (iosStandalone) Object.defineProperty(navigator, 'standalone', { configurable: true, value: true });
+    if (copyFails) Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => { throw new Error('Fixture denied'); } } });
+    window.fixtureHandoffs = [];
+    document.addEventListener('click', event => {
+      const link = event.target.closest('a[href^="intent://"]');
+      if (!link) return;
+      window.fixtureHandoffs.push({ href: link.href, trusted: event.isTrusted, activation: navigator.userActivation?.isActive === true });
+      event.preventDefault(); // Record intent only; never launch an external app in a fixture.
+    }, true);
   }, { standalone, iosStandalone, copyFails });
   const page = await context.newPage();
+  await page.clock.install();
   const responses = new Map();
-  page.on('response', response => {
-    const url = new URL(response.url());
-    if (url.origin === new URL(ORIGIN).origin) responses.set(url.pathname, response.status());
-  });
+  page.on('response', response => { const url = new URL(response.url()); if (url.origin === ORIGIN) responses.set(url.pathname, response.status()); });
   await page.goto(ORIGIN + app.path + query, { waitUntil: 'load' });
-  await page.locator('[data-install]').first().waitFor({ state: 'visible' });
+  await button(page).waitFor({ state: 'visible' });
   return { context, page, responses };
 }
 
-async function emitPrompt(page, outcome = 'accepted', error = false) {
-  await page.evaluate(({ outcome, error }) => {
-    const state = window.installFixture = { calls: 0, activation: [], prevented: false };
+async function emitPrompt(page, { outcome = 'accepted', behavior = 'choice' } = {}) {
+  return page.evaluate(({ outcome, behavior }) => {
+    const record = window.installFixture ||= { events: [], totalCalls: 0 };
+    const entry = { calls: 0, activation: [], prevented: false };
+    record.events.push(entry);
+    const heldChoice = new Promise(resolve => { entry.resolve = resolve; });
     const event = new Event('beforeinstallprompt', { cancelable: true });
-    Object.assign(event, {
-      prompt() {
-        state.calls++;
-        state.activation.push(navigator.userActivation?.isActive === true);
-        if (state.calls > 1) throw new Error('An install event was reused');
-        if (error) throw new Error('fixture prompt unavailable');
-        return Promise.resolve({ outcome });
-      },
-      userChoice: Promise.resolve({ outcome })
-    });
+    event.userChoice = behavior === 'held' || behavior === 'pending' ? heldChoice : Promise.resolve({ outcome });
+    event.prompt = () => {
+      entry.calls++; record.totalCalls++;
+      entry.activation.push(navigator.userActivation?.isActive === true);
+      if (entry.calls > 1) throw new Error('Consumed event reused');
+      if (behavior === 'throw') throw new Error('Fixture prompt failure');
+      if (behavior === 'reject') return Promise.reject(new Error('Fixture promise failure'));
+      if (behavior === 'pending') return heldChoice;
+      if (behavior === 'direct') return Promise.resolve({ outcome });
+      return Promise.resolve();
+    };
     window.dispatchEvent(event);
-    state.prevented = event.defaultPrevented;
-  }, { outcome, error });
+    entry.prevented = event.defaultPrevented;
+    return record.events.length - 1;
+  }, { outcome, behavior });
 }
-
-async function closeDialog(page) {
-  if (await page.locator(DIALOG).isVisible()) {
-    await page.locator(`${DIALOG} ${ACTION('close')}`).first().click();
-    await page.locator(DIALOG).waitFor({ state: 'hidden' });
+async function resolvePrompt(page, id, outcome) { await page.evaluate(({ id, outcome }) => window.installFixture.events[id].resolve({ outcome }), { id, outcome }); }
+async function expectState(page, expected) {
+  // Handoff state changes synchronously to prevent duplicate navigation, while
+  // its anchor remains in the DOM until the native click's default action runs.
+  // Wait for both the controller and its next-task render, not just the model.
+  await page.waitForFunction(expected =>
+    window.OKCleanInstall.getState().state === expected &&
+    document.querySelector('[data-install]')?.dataset.installState === expected,
+  expected, { timeout: 5000 });
+  assert.equal(await button(page).getAttribute('data-install-state'), expected);
+}
+async function expectCalls(page, expected) { assert.equal(await page.evaluate(() => window.installFixture?.totalCalls || 0), expected); }
+async function closePanel(page) {
+  if (await page.locator(PANEL).isVisible()) {
+    await page.locator(`${PANEL} ${ACTION('close')}`).click();
+    await page.locator(PANEL).waitFor({ state: 'hidden' });
   }
 }
-
-async function assertNativeCalls(page, count) {
-  await page.waitForFunction(expected => window.installFixture.calls === expected, count);
-  const state = await page.evaluate(() => window.installFixture);
-  assert.equal(state.calls, count);
-  assert.equal(state.prevented, true, 'The browser event must be retained for the explicit install action');
+async function assertNoDeviceClaim(page) {
+  const current = await page.evaluate(() => window.OKCleanInstall.getState());
+  assert.equal(current.deviceIconVerified, false, 'Page events never verify an OS icon or its launch');
+  assert.doesNotMatch(await button(page).innerText(), /앱 사용 중|설치 완료/, 'Mode/acceptance must not claim completed installation');
 }
-
-async function assertChromeHandoff(page, app, visible = true) {
-  const chrome = page.locator(`${DIALOG} ${ACTION('chrome')}`);
-  assert.equal(await chrome.count(), 1, 'The browser recovery action must remain available');
-  if (visible) await chrome.waitFor({ state: 'visible' });
-  else assert(!(await chrome.isVisible()), 'Optional Chrome recovery must stay hidden until its details are opened');
-  const href = await chrome.getAttribute('href');
-  assert(href.startsWith(`intent://${new URL(ORIGIN).host}${app.installPath}?`), 'Chrome handoff must preserve the correct app installation path');
+async function assertNoSecondInstallButton(page) {
+  assert.equal(await page.locator(`${PANEL} ${ACTION('install')}`).count(), 0, 'The status panel must not add a second install button');
+  assert.equal(await page.locator('dialog[open]').count(), 0, 'Installation status must not block the page with a modal');
+}
+function validateHandoff(href, app) {
+  assert(href.startsWith(`intent://${new URL(ORIGIN).host}${app.installPath}?`));
   assert(href.includes('package=com.android.chrome;'));
   assert(href.includes('install=1'));
-  const fallbackValue = href.match(/S\.browser_fallback_url=([^;]+);/);
-  assert(fallbackValue, 'A blocked/unavailable Chrome handoff needs a fallback');
-  const fallback = new URL(decodeURIComponent(fallbackValue[1]));
+  const encoded = href.match(/S\.browser_fallback_url=([^;]+);/);
+  assert(encoded);
+  const fallback = new URL(decodeURIComponent(encoded[1]));
   assert.equal(fallback.pathname, app.installPath);
   assert.equal(fallback.searchParams.get('install'), '1');
   assert.equal(fallback.searchParams.get('install_fallback'), '1');
-  return href;
 }
 
-async function assertNoInstallClaimFromMode(page) {
-  assert.doesNotMatch(await page.locator('[data-install]').first().innerText(), /앱 사용 중|설치 완료/, 'Display mode must not identify the currently installed app');
-  assert.equal(await page.locator(`${DIALOG} .ok-install-success`).count(), 0, 'Standalone alone must not produce an installation success screen');
-}
-
-async function assertBrowserMenuHelp(page, app) {
-  await assertChromeHandoff(page, app, false);
-  assert(!(await page.locator(`${DIALOG} ${ACTION('copy')}`).isVisible()), 'Address-copy fallback must not compete with the main browser-menu instructions');
-  assert.equal(await page.locator(`${DIALOG} ${ACTION('install')}`).count(), 0, 'A manual instruction must not pretend to trigger the native browser menu');
-  const steps = await page.locator(`${DIALOG} ol li`).evaluateAll(items => items.map(item => {
-    const css = getComputedStyle(item);
-    return {
-      interactive: item.matches('a,button,[role="button"],[tabindex]') || !!item.querySelector('a,button,input,select,textarea,[role="button"],[tabindex]'),
-      background: css.backgroundColor,
-      borderWidths: [css.borderTopWidth, css.borderRightWidth, css.borderBottomWidth, css.borderLeftWidth],
-      shadow: css.boxShadow
-    };
-  }));
-  assert(steps.length >= 2, 'Browser installation must be explained as a short ordered list');
-  for (const step of steps) {
-    assert(!step.interactive, 'Instruction text must not act like a button');
-    assert.equal(step.background, 'rgba(0, 0, 0, 0)', 'Static steps must not have button-like card backgrounds');
-    assert(step.borderWidths.every(width => parseFloat(width) === 0), 'Static steps must not have card borders');
-    assert.equal(step.shadow, 'none', 'Static steps must not have card shadows');
-  }
-  const close = page.getByRole('button', { name: '안내 닫기', exact: true });
-  await close.waitFor({ state: 'visible' });
-  assert(await close.evaluate(button => button.tagName === 'BUTTON' && button.type === 'button' && button.hasAttribute('data-install-primary')), 'The primary close action must be a real button');
-  return close;
-}
-
-async function checkInitialHelp(app, width) {
+async function checkUnavailable(app, width) {
   const { context, page } = await fixture(app, { width });
   try {
-    assert(!(await page.locator(DIALOG).isVisible()), 'A normal visit must not auto-open the installer');
-    await page.locator('[data-install]').first().click();
-    await page.locator(DIALOG).waitFor({ state: 'visible' });
-    assert.match(await page.locator(DIALOG).innerText(), new RegExp(app.name));
-    const close = await assertBrowserMenuHelp(page, app);
-    assert.equal(page.url(), ORIGIN + app.path, 'Opening help must not launch a browser or navigate');
-    const layout = await page.locator(DIALOG).evaluate(element => {
-      const rect = element.getBoundingClientRect();
-      const action = element.querySelector('[data-install-primary]').getBoundingClientRect();
-      return { left: rect.left, right: rect.right, viewport: innerWidth,
-        width: element.clientWidth, contentWidth: element.scrollWidth, tapHeight: action.height };
-    });
-    assert(layout.left >= -1 && layout.right <= layout.viewport + 1, 'Install dialog must fit the phone width');
-    assert(layout.contentWidth <= layout.width + 1, 'Install help must not scroll horizontally');
-    assert(layout.tapHeight >= 44, 'Primary action must have a usable touch target');
-    if (width === 390) {
-      fs.mkdirSync('test-results', { recursive: true });
-      await page.screenshot({ path: path.join('test-results', `install-${app.key}-390.png`), animations: 'disabled' });
-    }
-    if (width === 320) await close.tap();
-    else await close.click();
-    await page.locator(DIALOG).waitFor({ state: 'hidden' });
-    assert(await page.locator('[data-install]').first().evaluate(element => element === document.activeElement), 'The close button must dismiss help and restore focus');
-    if (width === 390) {
-      await page.locator('[data-install]').first().click();
-      await page.keyboard.press('Escape');
-      await page.locator(DIALOG).waitFor({ state: 'hidden' });
-      assert(await page.locator('[data-install]').first().evaluate(element => element === document.activeElement), 'Escape must continue to restore focus');
-    }
-    pass(`${app.key}: first-visit Chrome menu instructions, real ${width === 320 ? 'touch' : 'mouse'} close and focus at ${width}px`);
-  } finally { await context.close(); }
-}
-
-async function checkInAppHandoff(app) {
-  const { context, page } = await fixture(app, { ua: IN_APP_ANDROID });
-  try {
-    await page.locator('[data-install]').first().click();
-    await page.locator(DIALOG).waitFor({ state: 'visible' });
-    await assertChromeHandoff(page, app);
-    assert(await page.locator(`${DIALOG} ${ACTION('chrome')}`).evaluate(action => action.hasAttribute('data-install-primary')), 'Known in-app browsers need a visible primary browser handoff');
-    await assertNoInstallClaimFromMode(page);
-    assert.equal(page.url(), ORIGIN + app.path, 'In-app help must not navigate without an explicit handoff click');
-    pass(`${app.key}: known in-app browser retains explicit primary Chrome handoff`);
-  } finally { await context.close(); }
-}
-
-async function checkReturnedAndReady(app, standalone = false) {
-  const { context, page } = await fixture(app, { query: '?install=1&ref=fixture', standalone });
-  try {
-    await page.locator(DIALOG).waitFor({ state: 'visible' });
-    assert.equal(new URL(page.url()).searchParams.get('install'), null, 'The handoff marker must be consumed');
-    assert.equal(new URL(page.url()).searchParams.get('ref'), 'fixture', 'Unrelated URL parameters must be retained');
-    if (standalone) {
-      // A return marker does not prove that the browser handoff escaped an
-      // installed PWA. Keep an explicit recovery action without auto-launching.
-      await assertChromeHandoff(page, app);
-      await assertNoInstallClaimFromMode(page);
-      assert.equal(new URL(page.url()).pathname, app.path, 'Returned standalone help must not navigate automatically');
+    await expectState(page, 'checking');
+    assert(!(await page.locator(PANEL).isVisible()));
+    assert.doesNotMatch(await button(page).innerText(), /앱 설치/);
+    await button(page).click();
+    await page.locator(PANEL).waitFor({ state: 'visible' });
+    await assertNoSecondInstallButton(page);
+    assert.doesNotMatch(await page.locator(PANEL).innerText(), /주소 복사|⋮|설치 및 바로가기|설치 완료/);
+    assert.notEqual(await page.evaluate(() => document.body.style.overflow), 'hidden');
+    // Status is inline: real page controls remain reachable while it is open.
+    if (app.key === 'admin') {
+      await page.evaluate(() => document.querySelector('#loginBtn').addEventListener('click', () => { window.fixtureLoginClicked = true; }, { once: true }));
+      await page.locator('#loginBtn').click();
+      assert.equal(await page.evaluate(() => window.fixtureLoginClicked), true);
     } else {
-      await assertBrowserMenuHelp(page, app);
-      if (app.key === 'admin') {
-        fs.mkdirSync('test-results', { recursive: true });
-        await page.screenshot({ path: path.join('test-results', 'install-admin-chrome-return-390.png'), animations: 'disabled' });
-      }
+      await page.locator('#qSvc option').first().waitFor({ state: 'attached' });
+      await page.locator('#qSvc').selectOption({ index: 1 });
     }
-    assert.equal(await page.locator(`${DIALOG} ${ACTION('install')}`).count(), 0, 'No ready event means no pretend native-install action');
-    await emitPrompt(page);
-    assert.equal(await page.evaluate(() => window.installFixture.calls), 0, 'A late event must not auto-prompt');
-    await page.locator(`${DIALOG} ${ACTION('install')}`).waitFor({ state: 'visible' });
-    await page.locator(`${DIALOG} ${ACTION('install')}`).click();
-    await assertNativeCalls(page, 1);
-    assert.deepEqual(await page.evaluate(() => window.installFixture.activation), [true], 'Native prompt must be requested within a user gesture');
-    await page.waitForFunction(() => document.querySelector('#okInstallDialog')?.innerText.includes('설치를 시작'));
-    assert(await page.locator('[data-install]').first().isVisible(), 'Install/help action must remain available after acceptance');
-    await closeDialog(page);
-    await page.locator('[data-install]').first().click();
-    assert.equal(await page.evaluate(() => window.installFixture.calls), 1, 'Consumed events must not be reused');
-    pass(`${app.key}: ${standalone ? 'standalone' : 'browser'} return, late readiness, explicit single prompt and acceptance`);
-  } finally { await context.close(); }
-}
-
-async function checkDismissalAndFailures() {
-  const { context, page } = await fixture(APPS[0], { query: '?install=1', standalone: true });
-  try {
-    await page.locator(DIALOG).waitFor({ state: 'visible' });
-    await closeDialog(page);
-    await emitPrompt(page, 'dismissed');
-    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    assert(!(await page.locator(DIALOG).isVisible()), 'A late event must respect a dismissed helper');
-    // Synthetic click checks synchronous invocation before an await; actual
-    // Playwright clicks in the preceding test separately check user activation.
-    const syncCalls = await page.locator('[data-install]').first().evaluate(element => {
-      element.click();
-      return window.installFixture.calls;
+    await page.clock.fastForward(8001);
+    await expectState(page, 'unavailable');
+    assert(await button(page).isEnabled());
+    assert.doesNotMatch(await button(page).innerText(), /앱 설치/);
+    const layout = await page.locator(PANEL).evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, viewport: innerWidth, content: element.scrollWidth, width: element.clientWidth, tapHeight: element.querySelector('[data-install-action="close"]').getBoundingClientRect().height };
     });
-    assert.equal(syncCalls, 1, 'A ready native prompt must be invoked synchronously from its click');
-    await page.waitForFunction(() => document.querySelector('#okInstallDialog')?.innerText.includes('취소'));
-    await closeDialog(page);
-    await page.locator('[data-install]').first().click();
-    assert.equal(await page.evaluate(() => window.installFixture.calls), 1, 'A dismissed native event cannot be prompted again');
-    await closeDialog(page);
-    await emitPrompt(page, 'accepted', true);
-    await page.locator('[data-install]').first().click();
-    await assertNativeCalls(page, 1);
-    await page.locator(DIALOG).waitFor({ state: 'visible' });
-    assert.match(await page.locator(DIALOG).innerText(), /열지 못|열 수 없|설치 방법/);
-    assert(await page.locator('[data-install]').first().isEnabled(), 'Prompt errors must not leave the install button disabled');
-    await closeDialog(page);
-    await page.locator('[data-install]').first().click();
-    assert.equal(await page.evaluate(() => window.installFixture.calls), 1);
-    pass('Shared controller: dismissal, late-event silence, synchronous prompt, cancel and error recovery');
+    assert(layout.left >= -1 && layout.right <= layout.viewport + 1 && layout.content <= layout.width + 1, 'Status must fit a narrow phone');
+    assert(layout.tapHeight >= 44);
+    if (width === 390) { fs.mkdirSync('test-results', { recursive: true }); await page.screenshot({ path: path.join('test-results', `install-${app.key}-status-390.png`), animations: 'disabled' }); }
+    if (width === 320) await page.locator(`${PANEL} ${ACTION('close')}`).tap();
+    else await closePanel(page);
+    assert(await button(page).evaluate(element => element === document.activeElement));
+    await assertNoDeviceClaim(page);
+    pass(`${app.key}: no-event checking/unavailable, non-modal status, page controls, close/focus at ${width}px`);
   } finally { await context.close(); }
 }
 
-async function checkPlatformStates(app) {
-  // navigator.standalone is independent of the Android display-mode fixture.
-  for (const iosStandalone of [false, true]) {
-    const { context, page } = await fixture(app, { ua: IPHONE, iosStandalone });
+async function checkDirectPrompt(app, returnedStandalone) {
+  const options = returnedStandalone ? { query: '?install=1&ref=fixture', standalone: true } : {};
+  const { context, page } = await fixture(app, options);
+  try {
+    assert(!(await page.locator(PANEL).isVisible()), 'A return marker must not auto-open instructions');
+    if (returnedStandalone) {
+      await expectState(page, 'handoff-blocked');
+      assert.equal(new URL(page.url()).searchParams.get('install'), null);
+      assert.equal(new URL(page.url()).searchParams.get('ref'), 'fixture');
+      await assertNoDeviceClaim(page);
+    }
+    const id = await emitPrompt(page, { behavior: 'held' });
+    await expectState(page, 'ready');
+    await expectCalls(page, 0);
+    assert(!(await page.locator(PANEL).isVisible()), 'Readiness alone must not open UI or prompt');
+    // A real user click must invoke the available prompt immediately, without a second dialog/button.
+    await button(page).click();
+    await expectState(page, 'prompting');
+    await expectCalls(page, 1);
+    const record = await page.evaluate(id => { const e = window.installFixture.events[id]; return { activation: e.activation, prevented: e.prevented }; }, id);
+    assert.deepEqual(record, { activation: [true], prevented: true });
+    assert(!(await page.locator(PANEL).isVisible()));
+    await assertNoSecondInstallButton(page);
+    await resolvePrompt(page, id, 'accepted');
+    await expectState(page, 'requested');
+    await assertNoDeviceClaim(page);
+    assert.match(await page.locator(PANEL).innerText(), /아직 설치 완료 알림을 받지 못/);
+    await button(page).click();
+    await expectCalls(page, 1);
+    await page.evaluate(() => window.dispatchEvent(new Event('appinstalled')));
+    await expectState(page, 'installed-browser');
+    const installed = await page.evaluate(() => window.OKCleanInstall.getState());
+    assert.equal(installed.browserInstallEventReceived, true);
+    assert.equal(installed.deviceIconVerified, false);
+    assert.match(await page.locator(PANEL).innerText(), /아이콘 생성과 실행 여부는 이 페이지에서 확인할 수 없/);
+    await page.reload({ waitUntil: 'load' });
+    await button(page).waitFor({ state: 'visible' });
+    const reloaded = await page.evaluate(() => window.OKCleanInstall.getState());
+    assert.equal(reloaded.browserInstallEventReceived, false, 'Browser acknowledgement must not persist across page loads');
+    assert(!['requested', 'installed-browser'].includes(reloaded.state));
+    assert(!(await page.locator(PANEL).isVisible()));
+    pass(`${app.key}: ${returnedStandalone ? 'returned standalone' : 'browser'} → direct prompt → request/event distinction → fresh reload`);
+  } finally { await context.close(); }
+}
+
+async function checkCancellationAndNewEvent() {
+  const { context, page } = await fixture(APPS[1]);
+  try {
+    await emitPrompt(page, { outcome: 'dismissed' });
+    // This same-stack assertion checks there is no asynchronous boundary before prompt().
+    const calls = await button(page).evaluate(element => { element.click(); return window.installFixture.totalCalls; });
+    assert.equal(calls, 1);
+    await expectState(page, 'unavailable');
+    assert(await button(page).isEnabled());
+    assert.match(await page.locator(PANEL).innerText(), /취소/);
+    await button(page).click();
+    await expectCalls(page, 1);
+    const held = await emitPrompt(page, { behavior: 'held' });
+    await button(page).click();
+    await expectState(page, 'prompting');
+    await emitPrompt(page, { behavior: 'direct' });
+    await resolvePrompt(page, held, 'dismissed');
+    await expectState(page, 'ready');
+    assert(await button(page).isEnabled(), 'An old cancellation must not swallow a newer browser event');
+    await button(page).click();
+    await expectState(page, 'requested');
+    await expectCalls(page, 3);
+    pass('Cancellation consumes one event; a newer event survives an older pending result and prompts on one click');
+  } finally { await context.close(); }
+}
+
+async function checkFailuresAndTimeout() {
+  for (const behavior of ['throw', 'reject', 'pending']) {
+    const { context, page } = await fixture(APPS[1]);
     try {
-      await page.locator('[data-install]').first().click();
-      await page.locator(DIALOG).waitFor({ state: 'visible' });
-      const text = await page.locator(DIALOG).innerText();
-      assert.match(text, /공유/);
-      assert.match(text, /홈 화면에 추가/);
-      if (iosStandalone) assert.match(text, /Safari/, 'An iPhone app window needs browser recovery guidance');
-      assert.equal(await page.locator(`${DIALOG} ${ACTION('install')}`).count(), 0);
-      assert.equal(await page.locator(`${DIALOG} ${ACTION('chrome')}`).count(), 0);
-      assert(await page.locator(`${DIALOG} ${ACTION('copy')}`).isVisible());
-      await assertNoInstallClaimFromMode(page);
+      const id = await emitPrompt(page, { behavior });
+      await button(page).click();
+      if (behavior === 'pending') { await expectState(page, 'prompting'); await page.clock.fastForward(45001); }
+      await expectState(page, 'unavailable');
+      assert(await button(page).isEnabled(), 'A thrown/rejected/abandoned prompt cannot leave the button dead');
+      await assertNoDeviceClaim(page);
+      await button(page).click();
+      await expectCalls(page, 1);
+      if (behavior === 'pending') {
+        await resolvePrompt(page, id, 'accepted');
+        await page.evaluate(() => Promise.resolve().then(() => Promise.resolve()));
+        await expectState(page, 'unavailable');
+      }
+      await emitPrompt(page, { outcome: 'dismissed' });
+      await expectState(page, 'ready');
+      await button(page).click();
+      await expectState(page, 'unavailable');
+      await expectCalls(page, 2);
+      pass(`Prompt ${behavior}: control recovers, no reuse or false completion, fresh event remains usable`);
     } finally { await context.close(); }
   }
-  pass(`${app.key}: iPhone browser and standalone manual recovery without false installed status`);
 }
 
-async function checkFallbackAndManifests() {
-  const { context, page } = await fixture(APPS[1], { query: '?install=1&install_fallback=1', standalone: true, copyFails: true });
+async function checkInstalledRace() {
+  const { context, page } = await fixture(APPS[1]);
   try {
-    await page.locator(DIALOG).waitFor({ state: 'visible' });
-    assert.match(await page.locator(DIALOG).innerText(), /열지 못|열 수 없/);
-    assert.equal(await page.locator(`${DIALOG} ${ACTION('chrome')}`).count(), 0, 'Failed handoff must stop rather than reopen Chrome');
-    await assertNoInstallClaimFromMode(page);
-    await page.locator(`${DIALOG} ${ACTION('copy')}`).click();
-    const field = page.locator(`${DIALOG} [data-install-url]`);
-    await field.waitFor({ state: 'visible' });
-    assert.equal(new URL(await field.inputValue()).pathname, '/admin/');
-    const manifests = [], scopes = [];
-    for (const app of APPS) {
-      const url = ORIGIN + app.manifestPath;
-      const response = await context.request.get(url);
-      assert.equal(response.status(), 200);
-      const manifest = await response.json();
-      assert.equal(new URL(manifest.id, url).pathname, app.identity, 'Each app must preserve its existing manifest identity');
-      assert.equal(new URL(manifest.start_url, url).pathname, app.installPath);
-      assert.equal(new URL(manifest.scope, url).pathname, app.installPath);
-      manifests.push(new URL(manifest.id, url).href);
-      scopes.push(new URL(manifest.scope, url).pathname);
-    }
-    assert.notEqual(manifests[0], manifests[1], 'Customer and admin must not share an install identity');
-    assert(!scopes[0].startsWith(scopes[1]) && !scopes[1].startsWith(scopes[0]), 'Neither app scope may contain the other app');
-    pass('Standalone handoff/clipboard failure recovery, preserved identities and nonoverlapping app scopes');
+    const id = await emitPrompt(page, { behavior: 'held' });
+    await button(page).click();
+    await expectState(page, 'prompting');
+    await page.evaluate(() => window.dispatchEvent(new Event('appinstalled')));
+    await expectState(page, 'installed-browser');
+    await resolvePrompt(page, id, 'dismissed');
+    await page.evaluate(() => Promise.resolve().then(() => Promise.resolve()));
+    await expectState(page, 'installed-browser');
+    assert(await button(page).isEnabled());
+    await assertNoDeviceClaim(page);
+    pass('A late user-choice result cannot overwrite an appinstalled acknowledgement or claim an icon launch');
   } finally { await context.close(); }
 }
 
-async function checkPerAppInstallState() {
+async function checkHandoff(app, standalone) {
+  const { context, page } = await fixture(app, { standalone, ua: standalone ? ANDROID : IN_APP_ANDROID, query: app.key === 'customer' ? '?ref=OK-TEST01' : '' });
+  try {
+    await expectState(page, 'handoff');
+    assert.equal(await button(page).evaluate(element => element.tagName), 'A');
+    const href = await button(page).getAttribute('href');
+    validateHandoff(href, app);
+    if (app.key === 'customer') assert(href.includes('ref=OK-TEST01'));
+    assert(!(await page.locator(PANEL).isVisible()));
+    await assertNoDeviceClaim(page);
+    await button(page).click();
+    await expectState(page, 'handoff-blocked');
+    const attempts = await page.evaluate(() => window.fixtureHandoffs);
+    assert.equal(attempts.length, 1);
+    assert.equal(attempts[0].trusted, true);
+    assert.equal(attempts[0].activation, true);
+    assert.equal(await button(page).evaluate(element => element.tagName), 'BUTTON');
+    await button(page).click();
+    assert.equal(await page.evaluate(() => window.fixtureHandoffs.length), 1, 'The same document must not repeat a handoff');
+    assert.equal(await page.locator(`${PANEL} ${ACTION('chrome')}`).count(), 0);
+    await page.reload({ waitUntil: 'load' });
+    await expectState(page, 'handoff-blocked');
+    assert(!(await page.locator(PANEL).isVisible()));
+    await button(page).click();
+    assert.equal(await page.evaluate(() => window.fixtureHandoffs.length), 0, 'Reload must not restore a blocked handoff in the same tab');
+    await assertNoDeviceClaim(page);
+    pass(`${app.key}: ${standalone ? 'app window' : 'known in-app browser'} direct Chrome link is user-initiated and guarded across reload`);
+  } finally { await context.close(); }
+}
+
+async function checkReturnMarkersAndOptionalHandoff() {
+  for (const standalone of [false, true]) {
+    const { context, page } = await fixture(APPS[1], { standalone, query: '?install=1&install_fallback=1&ref=fixture' });
+    try {
+      await expectState(page, 'handoff-blocked');
+      assert(!(await page.locator(PANEL).isVisible()));
+      assert.equal(new URL(page.url()).searchParams.get('install'), null);
+      assert.equal(new URL(page.url()).searchParams.get('install_fallback'), null);
+      assert.equal(new URL(page.url()).searchParams.get('ref'), 'fixture');
+      await button(page).click();
+      assert.equal(await page.locator(`${PANEL} ${ACTION('chrome')}`).count(), 0);
+      assert.equal(await page.locator(`${PANEL} ${ACTION('copy')}`).count(), 0);
+      assert.doesNotMatch(await page.locator(PANEL).innerText(), /설치 및 바로가기|⋮/);
+      await emitPrompt(page, { outcome: 'dismissed' });
+      await expectState(page, 'ready');
+      await button(page).click();
+      await expectCalls(page, 1);
+    } finally { await context.close(); }
+  }
+  const { context, page } = await fixture(APPS[0]);
+  try {
+    await page.clock.fastForward(8001);
+    await button(page).click();
+    const recovery = page.locator(`${PANEL} ${ACTION('chrome')}`);
+    assert(!(await recovery.isVisible()), 'Unknown Custom Tab recovery must stay optional');
+    await page.locator(`${PANEL} details summary`).click();
+    validateHandoff(await recovery.getAttribute('href'), APPS[0]);
+    await recovery.click();
+    assert.equal(await page.evaluate(() => window.fixtureHandoffs.length), 1);
+    await page.waitForFunction(() => !document.querySelector('#okInstallPanel [data-install-action="chrome"]'));
+    pass('Returned/fallback URLs never auto-open help or repeat a handoff; genuine readiness still wins; optional Custom Tab escape is one attempt');
+  } finally { await context.close(); }
+}
+
+async function checkIOS(app) {
+  for (const iosStandalone of [false, true]) {
+    const { context, page } = await fixture(app, { ua: IPHONE, iosStandalone, copyFails: true });
+    try {
+      await expectState(page, 'ios-manual');
+      await button(page).click();
+      await assertNoSecondInstallButton(page);
+      await assertNoDeviceClaim(page);
+      const text = await page.locator(PANEL).innerText();
+      assert.match(text, /Safari/);
+      assert.match(text, /공유/);
+      assert.match(text, /홈 화면에 추가 → 추가/);
+      assert.equal(await page.locator(`${PANEL} ${ACTION('chrome')}`).count(), 0);
+      if (iosStandalone) {
+        await page.locator(`${PANEL} details summary`).click();
+        await page.locator(`${PANEL} ${ACTION('copy')}`).click();
+        const field = page.locator(`${PANEL} [data-install-url]`);
+        await field.waitFor({ state: 'visible' });
+        assert.equal(new URL(await field.inputValue()).pathname, app.installPath);
+        await page.clock.fastForward(8001);
+        assert(await field.isVisible(), 'A routine status timer must not destroy manual fallback input or focus');
+      } else assert.equal(await page.locator(`${PANEL} ${ACTION('copy')}`).count(), 0);
+      await page.keyboard.press('Escape');
+      assert(!(await page.locator(PANEL).isVisible()));
+    } finally { await context.close(); }
+  }
+  pass(`${app.key}: iPhone minimal Safari flow, optional app-window fallback and no false installed claim`);
+}
+
+async function checkPerAppIdentity() {
   for (const standalone of [false, true]) {
     const { context, page } = await fixture(APPS[0], { standalone });
     try {
-      await page.locator('[data-install]').first().click();
-      await page.locator(DIALOG).waitFor({ state: 'visible' });
-      if (standalone) await assertChromeHandoff(page, APPS[0]);
-      else await assertBrowserMenuHelp(page, APPS[0]);
-      await assertNoInstallClaimFromMode(page);
-      await closeDialog(page);
       await page.evaluate(() => window.dispatchEvent(new Event('appinstalled')));
-      await page.locator('[data-install]').first().click();
-      await page.locator(DIALOG).waitFor({ state: 'visible' });
-      assert.match(await page.locator(DIALOG).innerText(), /설치를 시작/);
-      // Reproduce an old customer PWA whose root scope also contains /admin/.
-      // Navigation retains standalone mode, but must not identify the admin
-      // PWA as installed or suppress its own installation route.
+      await expectState(page, 'installed-browser');
       await page.goto(ORIGIN + APPS[1].path);
-      await page.locator('[data-install]').first().waitFor({ state: 'visible' });
-      await page.locator('[data-install]').first().click();
-      await page.locator(DIALOG).waitFor({ state: 'visible' });
-      if (standalone) await assertChromeHandoff(page, APPS[1]);
-      else await assertBrowserMenuHelp(page, APPS[1]);
-      await assertNoInstallClaimFromMode(page);
-      assert.match(await page.locator(DIALOG).innerText(), /관리자용/);
-      assert.equal(await page.locator(`${DIALOG} ${ACTION('install')}`).count(), 0, 'No browser event means no pretend install action');
-      assert.equal(new URL(page.url()).pathname, '/admin/', 'Opening recovery must not automatically navigate');
-      if (standalone) {
-        fs.mkdirSync('test-results', { recursive: true });
-        await page.screenshot({ path: path.join('test-results', 'install-admin-standalone-390.png'), animations: 'disabled' });
-      }
-      pass(`Customer → administrator in ${standalone ? 'standalone' : 'browser'} mode retains separate installation access`);
+      await button(page).waitFor({ state: 'visible' });
+      await expectState(page, standalone ? 'handoff' : 'checking');
+      await assertNoDeviceClaim(page);
+      assert.equal(await page.evaluate(() => window.OKCleanInstall.getState().browserInstallEventReceived), false);
+      await page.evaluate(() => window.OKCleanInstall.openHelp());
+      assert.match(await page.locator(PANEL).innerText(), /관리자용/);
+      assert.equal(new URL(await page.locator(`${PANEL} img`).getAttribute('src')).pathname, '/admin/icon-192.png');
+      pass(`Customer acknowledgement is not inherited by administrator in ${standalone ? 'standalone' : 'browser'} mode`);
     } finally { await context.close(); }
   }
 }
 
-async function checkCustomerAppEntry() {
+async function checkCustomerEntryAndManifests() {
   const app = APPS[0];
   const { context, page, responses } = await fixture({ ...app, path: app.installPath }, { query: '?src=app&ref=OK-TEST01' });
   try {
-    assert.equal(new URL(page.url()).pathname, app.installPath, 'The customer app entry must be a real page, not a redirect out of its scope');
-    for (const asset of ['/app.js', '/site.js', '/style.css', '/install.js', '/install.css', '/icon-192.png']) {
-      assert.equal(responses.get(asset), 200, `Customer app entry must load ${asset} successfully`);
-    }
+    assert.equal(new URL(page.url()).pathname, app.installPath);
+    for (const asset of ['/app.js', '/site.js', '/style.css', '/install.js', '/install.css', '/icon-192.png']) assert.equal(responses.get(asset), 200, asset);
     assert.equal(await page.locator('link[rel="manifest"]').evaluate(link => new URL(link.href).pathname), app.manifestPath);
-    assert.equal(await page.evaluate(() => window.OKCleanInstall?.app), 'customer');
     await page.locator('#qSvc option').first().waitFor({ state: 'attached' });
-    assert(await page.locator('#qSvc option').count() > 1, 'The customer app needs the full quote calculator');
     const before = await page.locator('#qSvc').inputValue();
     await page.locator('#qSvc').selectOption({ index: 1 });
     const selected = await page.locator('#qSvc').inputValue();
     assert.notEqual(selected, before);
     await page.waitForFunction(value => JSON.parse(localStorage.getItem('quote'))?.svc === value, selected);
-    assert((await page.locator('#qV').innerText()).trim(), 'Changing the quote service must leave a visible quote result');
-    await page.waitForFunction(() => performance.getEntriesByType('resource').some(entry => new URL(entry.name).pathname.endsWith('/cases.json')));
-    assert.equal(responses.get('/cases.json'), 200, 'The app entry must fetch public case data at the working root path');
-    assert(!responses.has('/app/cases.json'), 'Moving the app entry must not break relative case-data loading');
+    assert((await page.locator('#qV').innerText()).trim());
+    // The fixture clock virtualizes Performance; assert the real fetch result
+    // and rendered case cards instead of relying on resource-timing entries.
+    await page.locator('#caseList .case').first().waitFor({ state: 'attached' });
+    assert.equal(responses.get('/cases.json'), 200);
+    assert(!responses.has('/app/cases.json'));
     await page.getByRole('link', { name: '상담용 견적 문의하기', exact: true }).click();
     await page.waitForFunction(() => location.hash === '#quote');
-    const after = new URL(page.url());
-    assert.equal(after.pathname, app.installPath, 'Hash navigation must stay inside the customer app scope');
-    assert.equal(after.searchParams.get('ref'), 'OK-TEST01', 'Hash navigation must retain referral attribution');
-    await page.locator('[data-install]').first().click();
-    await assertBrowserMenuHelp(page, app);
-    const fallback = page.locator(`${DIALOG} details`).filter({ has: page.locator(ACTION('chrome')) });
-    await fallback.locator('summary').click();
-    const href = await assertChromeHandoff(page, app);
-    assert(await page.locator(`${DIALOG} ${ACTION('copy')}`).isVisible(), 'Opening recovery details must expose its real copy action');
-    assert(href.includes('ref=OK-TEST01'), 'Customer installation handoff must retain referral attribution');
-    pass('Customer /app/ entry loads assets/cases, runs quote controls and preserves in-scope hash navigation/referral');
+    assert.equal(new URL(page.url()).pathname, app.installPath);
+    assert.equal(new URL(page.url()).searchParams.get('ref'), 'OK-TEST01');
+    const ids = [], scopes = [];
+    for (const target of APPS) {
+      const url = ORIGIN + target.manifestPath;
+      const response = await context.request.get(url);
+      assert.equal(response.status(), 200);
+      const manifest = await response.json();
+      assert.equal(new URL(manifest.id, url).pathname, target.identity);
+      assert.equal(new URL(manifest.start_url, url).pathname, target.installPath);
+      assert.equal(new URL(manifest.scope, url).pathname, target.installPath);
+      ids.push(new URL(manifest.id, url).href); scopes.push(new URL(manifest.scope, url).pathname);
+    }
+    assert.notEqual(ids[0], ids[1]);
+    assert(!scopes[0].startsWith(scopes[1]) && !scopes[1].startsWith(scopes[0]));
+    pass('Customer app entry, quote/case controls, scoped navigation/referral and existing separate manifest IDs/scopes are preserved');
   } finally { await context.close(); }
 }
 
 (async () => {
-  browser = await chromium.launch({
-    headless: true, executablePath: process.env.CHROMIUM_PATH || undefined, args: ['--no-sandbox']
-  });
+  browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_PATH || undefined, args: ['--no-sandbox'] });
   try {
-    for (const app of APPS) for (const width of [320, 390]) await checkInitialHelp(app, width);
-    for (const app of APPS) await checkInAppHandoff(app);
-    for (const app of APPS) for (const standalone of [false, true]) await checkReturnedAndReady(app, standalone);
-    await checkDismissalAndFailures();
-    for (const app of APPS) await checkPlatformStates(app);
-    await checkFallbackAndManifests();
-    await checkPerAppInstallState();
-    await checkCustomerAppEntry();
-    console.log(`Install UX: ${passed} scenario groups passed. Chromium fixtures only; no native installation or production writes.`);
+    for (const app of APPS) for (const width of [320, 390]) await checkUnavailable(app, width);
+    for (const app of APPS) for (const returned of [false, true]) await checkDirectPrompt(app, returned);
+    await checkCancellationAndNewEvent();
+    await checkFailuresAndTimeout();
+    await checkInstalledRace();
+    for (const app of APPS) for (const standalone of [false, true]) await checkHandoff(app, standalone);
+    await checkReturnMarkersAndOptionalHandoff();
+    for (const app of APPS) await checkIOS(app);
+    await checkPerAppIdentity();
+    await checkCustomerEntryAndManifests();
+    console.log(`Install state regression: ${passed} fixture scenario groups passed. No native phone installation or production writes.`);
   } finally { await browser.close(); }
 })().catch(error => { console.error(error.stack || error); process.exitCode = 1; });

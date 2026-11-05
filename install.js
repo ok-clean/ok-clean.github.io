@@ -1,304 +1,326 @@
-// 고객용·관리자용 공통 설치 안내. 설치창과 외부 브라우저 이동은 사용자 클릭으로만 실행합니다.
+// Installation is offered only after the browser supplies a usable prompt.
+// Browser acknowledgement is not proof that a home-screen icon was launched.
 (function () {
   'use strict';
   const script = document.currentScript;
   if (!script || window.OKCleanInstall) return;
   const root = new URL('.', script.src);
   const isAdmin = script.dataset.app === 'admin';
+  const app = isAdmin ? 'admin' : 'customer';
   const appName = isAdmin ? '오케이청소 관리자' : '오케이청소';
   const appUrl = new URL(isAdmin ? 'admin/' : 'app/', root);
   const ua = navigator.userAgent || '';
   const isAndroid = /Android/i.test(ua);
   const isIOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const isInApp = /KAKAOTALK|NAVER|Instagram|FBAN|FBAV|Line\/|; wv\)/i.test(ua);
-  // Chrome Custom Tabs can have the same UA as Chrome. Keep an optional browser
-  // handoff even when showing menu guidance; do not require reopening Chrome.
   const isChromeLike = /Chrome\/\d+/i.test(ua) && !/SamsungBrowser|EdgA|OPR/i.test(ua);
   const isSamsungBrowser = /SamsungBrowser/i.test(ua);
   const current = new URL(location.href);
   const returned = current.searchParams.get('install') === '1';
   const failedHandoff = returned && current.searchParams.get('install_fallback') === '1';
   const displayMode = window.matchMedia('(display-mode: standalone)');
-  // Display mode identifies an app window, not which PWA owns it. In particular,
-  // an old customer app with scope '/' can open the administrator page inside it.
+  // An old customer app with scope '/' can contain the administrator page.
+  // Display mode never identifies which app is installed.
   const inAppWindow = () => displayMode.matches || navigator.standalone === true;
+  const needsBrowser = () => isAndroid && (inAppWindow() || isInApp || (!isChromeLike && !isSamsungBrowser));
+  const handoffKey = `okclean.install-handoff.v1.${app}`;
+  let handoffAttempted = returned;
+  try { handoffAttempted = handoffAttempted || sessionStorage.getItem(handoffKey) === '1'; } catch (_) {}
+  if (returned) { try { sessionStorage.setItem(handoffKey, '1'); } catch (_) {} }
   const escape = value => String(value).replace(/[&<>"']/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
-  let pending = null;
-  let prompting = false;
-  let requested = false;
-  let notice = '';
-  let dialog = null;
-  let dialogActive = false;
-  let returnFocus = null;
-  let oldOverflow = '';
-
-  // Canonical paths keep the customer and administrator apps separate. Retain referral attribution only.
   const continuation = new URL(appUrl);
   continuation.searchParams.set('install', '1');
   if (!isAdmin && current.searchParams.has('ref')) continuation.searchParams.set('ref', current.searchParams.get('ref').slice(0, 160));
   const fallback = new URL(continuation);
   fallback.searchParams.set('install_fallback', '1');
   const chromeIntent = `intent://${continuation.host}${continuation.pathname}${continuation.search}#Intent;scheme=${continuation.protocol.slice(0, -1)};package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(fallback.href)};end`;
+  const chromeLink = () => `<a class="ok-install-browser-link" href="${escape(chromeIntent)}" data-install-action="chrome">Chrome에서 열기</a>`;
+  let pending = null;
+  let promptEventObserved = false;
+  let activePrompt = null;
+  let requested = false;
+  let browserInstallEventReceived = false;
+  let observationElapsed = false;
+  let workerFailed = false;
+  let notice = '';
+  let panel = null;
+  let returnFocus = null;
+  let renderedContent = null;
 
-  const chromeIcon = '<svg class="ok-install-chrome" viewBox="0 0 24 24" aria-hidden="true"><path fill="#ea4335" d="M12 2a10 10 0 0 1 8.66 5H12a5 5 0 0 0-4.33 7.5L3.34 7A10 10 0 0 1 12 2Z"/><path fill="#fbbc05" d="M20.66 7a10 10 0 0 1-8.66 15l4.33-7.5A5 5 0 0 0 12 7Z"/><path fill="#34a853" d="M12 22A10 10 0 0 1 3.34 7l4.33 7.5a5 5 0 0 0 8.66 0Z"/><circle cx="12" cy="12" r="4.5" fill="#4285f4" stroke="white"/></svg>';
-  const shareIcon = '<svg class="ok-install-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 9H5v12h14V9h-3M12 15V2m-4 4 4-4 4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-  const steps = rows => `<ol class="ok-install-steps">${rows.map(row => `<li>${row}</li>`).join('')}</ol>`;
-  const copyButton = primary => `<button type="button" class="ok-install-${primary ? 'primary' : 'secondary'}" data-install-action="copy"${primary ? ' data-install-primary' : ''}>주소 복사${primary ? '하기' : ''}</button>`;
-  const chromeButton = primary => `<a class="ok-install-${primary ? 'primary' : 'secondary'}" href="${escape(chromeIntent)}" data-install-action="chrome"${primary ? ' data-install-primary' : ''}>${chromeIcon}${primary ? 'Chrome에서 계속' : 'Chrome에서 열기'}</a>`;
-  const closeButton = () => '<button type="button" class="ok-install-primary" data-install-action="close" data-install-primary>안내 닫기</button>';
-  const manualHelp = () => `<details class="ok-install-details"><summary>설치창이 나오지 않나요?</summary><p>Chrome 주소창에 아래 복사한 주소를 직접 넣어 주세요. 메뉴 <b>⋮</b>에서 <b>설치 및 바로가기 만들기</b> 또는 <b>홈 화면에 추가</b>를 선택하세요.</p><p>이미 설치했다면 홈 화면의 <b>${escape(appName)}</b> 아이콘을 눌러 주세요.</p></details>`;
-  const browserFallback = () => `<details class="ok-install-details"><summary>설치 메뉴가 보이지 않나요?</summary><p>다른 앱 안에서 열었다면 Chrome에서 다시 열어 주세요.</p>${chromeButton(false)}${copyButton(false)}</details>`;
-
-  function refreshButtons() {
-    document.querySelectorAll('[data-install]').forEach(button => {
-      button.hidden = false;
-      button.disabled = prompting;
-      button.setAttribute('aria-haspopup', 'dialog');
-      button.setAttribute('aria-controls', 'okInstallDialog');
-      button.setAttribute('aria-expanded', String(dialogActive));
-      const label = button.querySelector('[data-install-label], span') || button;
-      label.textContent = requested ? '설치 확인' : '앱 설치';
-    });
+  function state() {
+    if (activePrompt) return 'prompting';
+    if (pending) return 'ready';
+    if (browserInstallEventReceived) return 'installed-browser';
+    if (requested) return 'requested';
+    if (isIOS) return 'ios-manual';
+    if (!promptEventObserved && (failedHandoff || (needsBrowser() && handoffAttempted))) return 'handoff-blocked';
+    if (!promptEventObserved && needsBrowser()) return 'handoff';
+    return observationElapsed || workerFailed || notice ? 'unavailable' : 'checking';
   }
 
-  function setStatus(text) {
-    const status = dialog && dialog.querySelector('#ok-install-status');
-    if (status) {
-      status.textContent = text;
-      status.hidden = !text;
-    }
+  const labels = {
+    checking: '설치 준비', unavailable: '설치 상태', ready: isAdmin ? '관리자 앱 설치' : '앱 설치',
+    prompting: '설치창 열림', requested: '설치 요청됨', 'installed-browser': '설치 알림',
+    'ios-manual': '홈 화면 추가', handoff: 'Chrome에서 열기', 'handoff-blocked': '설치 상태'
+  };
+
+  function refreshButtons() {
+    const next = state();
+    document.querySelectorAll('[data-install]').forEach(original => {
+      let button = original;
+      const tag = next === 'handoff' ? 'A' : 'BUTTON';
+      // A browser handoff is a real link followed from the user's own click.
+      if (button.tagName !== tag) {
+        const replacement = document.createElement(tag.toLowerCase());
+        for (const attribute of button.attributes) {
+          if (!['href', 'type', 'disabled'].includes(attribute.name)) replacement.setAttribute(attribute.name, attribute.value);
+        }
+        replacement.append(...button.childNodes);
+        const focused = document.activeElement === button;
+        if (returnFocus === button) returnFocus = replacement;
+        button.replaceWith(replacement);
+        button = replacement;
+        if (focused) button.focus({preventScroll: true});
+      }
+      button.hidden = false;
+      button.dataset.installState = next;
+      button.setAttribute('aria-controls', 'okInstallPanel');
+      button.setAttribute('aria-expanded', String(!!panel && !panel.hidden));
+      button.removeAttribute('aria-haspopup');
+      if (tag === 'A') {
+        button.href = chromeIntent;
+        button.classList.add('ok-install-handoff');
+      } else {
+        button.type = 'button';
+        button.disabled = next === 'prompting';
+        button.classList.remove('ok-install-handoff');
+      }
+      const label = button.querySelector('[data-install-label], span') || button;
+      label.textContent = labels[next];
+    });
   }
 
   function render() {
-    if (!dialog) return;
-    let title, description, content;
-    if (requested) {
-      title = '설치를 시작했어요';
-      description = `잠시 후 홈 화면에서 ${appName} 아이콘을 확인하세요.`;
-      content = '<div class="ok-install-success" aria-hidden="true">✓</div><button type="button" class="ok-install-primary" data-install-action="close" data-install-primary>확인</button>';
-    } else if (pending) {
-      title = '홈 화면에 앱을 추가해요';
-      description = '아래 버튼을 누른 뒤, 휴대폰 설치창에서 설치를 눌러 주세요.';
-      content = `<button type="button" class="ok-install-primary" data-install-action="install" data-install-primary>앱 설치</button><p class="ok-install-hint">${isAdmin ? '설치 후에도 관리자 로그인이 필요해요.' : '다음부터 아이콘을 눌러 바로 견적을 볼 수 있어요.'}</p>`;
-    } else if (failedHandoff) {
-      title = 'Chrome을 열지 못했어요';
-      description = '주소를 복사해 Chrome 주소창에 붙여넣어 주세요.';
-      content = `${copyButton(true)}<p class="ok-install-hint">Chrome이 열리면 앱 설치를 눌러 주세요.</p>`;
-    } else if (isIOS) {
-      title = '홈 화면에 추가해요';
-      description = inAppWindow() ? '주소를 복사해 Safari에서 연 뒤 추가해 주세요.' : isInApp ? '먼저 브라우저 메뉴에서 Safari로 열기를 선택해 주세요.' : '공유 메뉴에서 두 단계로 추가할 수 있어요.';
-      content = `${steps([`${shareIcon}<b>공유</b> 버튼 누르기`, '<b>홈 화면에 추가 → 추가</b>'])}<p class="ok-install-hint">‘웹 앱으로 열기’가 보이면 켜 주세요.</p>${copyButton(false)}`;
-    } else if (isAndroid && (inAppWindow() || isInApp || (!returned && !isChromeLike && !isSamsungBrowser))) {
-      title = inAppWindow() ? `${isAdmin ? '관리자' : '고객용'} 앱 설치를 계속해요` : 'Chrome에서 이어서 설치해요';
-      description = inAppWindow() ? '앱 안에서 열린 화면이에요. Chrome에서 설치를 진행해 주세요.' : 'Chrome이 열리면 앱 설치를 눌러 주세요.';
-      const hint = inAppWindow() && returned ? '다시 앱이 열리면 주소를 복사해 <b>Chrome 주소창에 직접</b> 넣어 주세요.' : '선택창이 나오면 <b>Chrome</b>을 선택하세요.';
-      content = `${chromeButton(true)}<p class="ok-install-hint">${hint}</p>${manualHelp()}${copyButton(false)}`;
-    } else if (isAndroid) {
-      title = isSamsungBrowser ? '브라우저의 ☰ 메뉴를 눌러 주세요' : '화면 맨 위 ⋮를 눌러 주세요';
-      description = isSamsungBrowser ? '삼성 브라우저 메뉴에서 아래 순서로 진행해 주세요.' : '주소창 오른쪽 끝에 있는 Chrome 메뉴예요.';
-      const menuItem = isSamsungBrowser ? '<b>홈 화면에 추가</b><small>또는 앱 설치</small>' : '<b>설치 및 바로가기 만들기</b><small>또는 홈 화면에 추가</small>';
-      content = `${steps([menuItem, '<b>설치</b> 선택<small>설치 항목이 없으면 바로가기 만들기</small>'])}${closeButton()}${browserFallback()}`;
+    if (!panel) return;
+    const next = state();
+    let title, description, content = '';
+    if (next === 'ready') {
+      title = '설치 준비가 됐어요';
+      description = `${labels.ready} 버튼을 누르면 휴대폰 설치창이 열려요.`;
+    } else if (next === 'prompting') {
+      title = '휴대폰 설치창을 확인해 주세요';
+      description = '브라우저가 연 설치창에서 설치 또는 취소를 선택할 수 있어요.';
+    } else if (next === 'requested') {
+      title = '설치를 요청했어요';
+      description = '휴대폰에서 설치를 처리하고 있어요. 아직 설치 완료 알림을 받지 못했어요.';
+    } else if (next === 'installed-browser') {
+      title = '설치 완료 알림을 받았어요';
+      description = `홈 화면의 ${appName} 아이콘으로 열어 주세요. 아이콘 생성과 실행 여부는 이 페이지에서 확인할 수 없어요.`;
+    } else if (next === 'ios-manual') {
+      title = '홈 화면에 추가';
+      description = inAppWindow() || isInApp ? 'Safari에서 이 페이지를 연 뒤 아래 순서로 추가해 주세요.' : 'Safari의 공유 메뉴에서 추가할 수 있어요.';
+      content = '<ol class="ok-install-steps"><li><b>공유</b> 누르기</li><li><b>홈 화면에 추가 → 추가</b></li></ol><p class="ok-install-hint">‘웹 앱으로 열기’가 보이면 켜 주세요.</p>';
+      if (inAppWindow() || isInApp) content += '<details class="ok-install-details"><summary>Safari에서 열 주소</summary><button type="button" data-install-action="copy" class="ok-install-secondary">주소 복사</button><label class="ok-install-url-wrap" hidden>페이지 주소<input data-install-url readonly type="text" spellcheck="false"></label></details>';
+    } else if (next === 'handoff-blocked') {
+      title = '이 화면에서는 설치창을 열 수 없어요';
+      description = failedHandoff ? 'Chrome으로 전환되지 않았어요. 같은 브라우저 열기를 반복하지 않습니다.' : '브라우저 열기를 이미 요청했어요. 앱 화면으로 돌아왔다면 이 화면에서는 별도 설치를 진행할 수 없어요.';
+    } else if (next === 'handoff') {
+      title = '브라우저에서 설치할 수 있어요';
+      description = 'Chrome에서 열기 버튼으로 이동할 수 있어요. 설치 준비 여부는 열린 브라우저에서 확인합니다.';
+    } else if (next === 'checking') {
+      title = '설치 준비를 확인하고 있어요';
+      description = `설치창을 열 수 있게 되면 버튼이 ‘${labels.ready}’로 바뀌어요.`;
     } else {
-      title = '브라우저에서 앱을 추가해요';
-      description = '주소창의 설치 아이콘이나 브라우저 메뉴를 확인해 주세요.';
-      content = `${steps(['<b>앱 설치</b> 선택하기', '<b>설치</b> 누르기'])}${copyButton(false)}`;
+      title = '지금은 설치창을 열 수 없어요';
+      description = '이 화면에서 설치 가능 여부를 확인하지 못했어요. 이미 설치됐는지 또는 브라우저 제한 때문인지는 단정할 수 없어요.';
+      // Chrome Custom Tabs can look identical to Chrome. Offer an optional,
+      // single handoff only when the user explicitly asks for installation status.
+      if (isAndroid && !handoffAttempted) content = `<details class="ok-install-details"><summary>다른 앱 안에서 보고 있나요?</summary>${chromeLink()}</details>`;
     }
-    const active = document.activeElement;
-    const hadContentFocus = dialog.querySelector('.ok-install-content').contains(active);
-    const oldAction = dialog.contains(active) && active.dataset ? active.dataset.installAction : null;
-    dialog.querySelector('#ok-install-title').textContent = title;
-    dialog.querySelector('#ok-install-description').textContent = description;
-    dialog.querySelector('.ok-install-content').innerHTML = content;
-    dialog.querySelector('.ok-install-url-wrap').hidden = true;
-    setStatus(notice);
-    if (dialogActive && hadContentFocus) {
-      const next = (oldAction && dialog.querySelector(`[data-install-action="${oldAction}"]`)) || dialog.querySelector('[data-install-primary]') || dialog.querySelector('.ok-install-close');
-      if (next) next.focus({preventScroll: true});
-    }
+    panel.dataset.installState = next;
+    panel.querySelector('#ok-install-title').textContent = title;
+    panel.querySelector('#ok-install-description').textContent = description;
+    // Do not replace focused content on a routine refresh if nothing changed.
+    const target = panel.querySelector('.ok-install-content');
+    if (renderedContent !== content) { target.innerHTML = content; renderedContent = content; }
+    const status = panel.querySelector('#ok-install-status');
+    status.textContent = notice;
+    status.hidden = !notice;
+    panel.querySelector('.ok-install-page-hint').textContent = isAdmin ? '설치 없이도 아래에서 관리자 로그인을 할 수 있어요.' : '설치 없이도 이 페이지를 계속 사용할 수 있어요.';
   }
 
-  function finishClose() {
-    if (!dialogActive) return;
-    dialogActive = false;
-    document.body.style.overflow = oldOverflow;
+  function refresh() { refreshButtons(); render(); }
+
+  function hidePanel() {
+    if (!panel || panel.hidden) return;
+    panel.hidden = true;
     refreshButtons();
-    if (returnFocus && returnFocus.isConnected && typeof returnFocus.focus === 'function') returnFocus.focus({preventScroll: true});
+    if (returnFocus && returnFocus.isConnected) returnFocus.focus({preventScroll: true});
   }
 
-  function close() {
-    if (!dialogActive) return;
-    if (typeof dialog.close === 'function') dialog.close();
-    else dialog.removeAttribute('open');
-    finishClose();
-  }
-
-  function show(trigger) {
-    if (!dialog) return;
-    if (dialogActive) {
-      render();
-      return;
-    }
-    if (typeof window.closeModal === 'function') document.querySelectorAll('.modal:not([hidden])').forEach(window.closeModal);
-    returnFocus = trigger && trigger.isConnected ? trigger : document.activeElement;
+  function showPanel(trigger, focus = true) {
+    if (!panel) return;
+    if (trigger && trigger.isConnected) returnFocus = trigger;
     render();
-    oldOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    dialogActive = true;
-    if (typeof dialog.showModal === 'function') dialog.showModal();
-    else dialog.setAttribute('open', '');
+    panel.hidden = false;
     refreshButtons();
-    const focus = dialog.querySelector('[data-install-primary]') || dialog.querySelector('.ok-install-close');
-    focus.focus({preventScroll: true});
+    if (focus) panel.focus({preventScroll: true});
+  }
+
+  function finishPrompt(request, choice, failed) {
+    if (activePrompt !== request) return; // Ignore a stale result after appinstalled or timeout.
+    clearTimeout(request.timer);
+    activePrompt = null;
+    if (failed) notice = '설치창을 열지 못했어요. 다시 준비되면 설치 버튼이 나타납니다.';
+    else if (choice && choice.outcome === 'accepted') {
+      requested = !pending;
+      notice = '';
+    } else if (choice && choice.outcome === 'dismissed') {
+      notice = '설치를 취소했어요. 다시 설치할 수 있게 되면 버튼이 바뀝니다.';
+    } else {
+      notice = '설치 결과를 확인하지 못했어요. 페이지는 계속 사용할 수 있어요.';
+    }
+    // A newer event may arrive while the previous prompt is settling. It must
+    // remain usable, regardless of the old prompt's cancellation or failure.
+    if (pending) notice = '';
+    refresh();
+    showPanel(request.trigger, false);
   }
 
   function install(trigger) {
-    if (prompting) return;
-    if (!pending || requested) {
-      show(trigger);
-      return;
-    }
+    if (activePrompt) return;
+    if (!pending) { showPanel(trigger); return; }
     const event = pending;
-    const origin = dialogActive ? returnFocus : trigger;
-    pending = null; // A BeforeInstallPromptEvent may be consumed only once.
-    prompting = true;
+    pending = null; // BeforeInstallPromptEvent is single-use, even when it fails.
+    requested = false;
     notice = '';
-    close();
-    refreshButtons();
+    const request = {trigger, timer: null};
+    activePrompt = request;
+    hidePanel();
+    refresh();
     let result;
     try {
-      result = event.prompt(); // Must remain in the original click, before any await or timer.
+      result = event.prompt(); // Keep this in the original click; no await or timer before it.
     } catch (_) {
-      prompting = false;
-      notice = '설치창을 열지 못했어요. 아래 방법으로 진행해 주세요.';
-      refreshButtons();
-      show(origin);
+      finishPrompt(request, null, true);
       return;
     }
-    Promise.resolve(result).then(() => event.userChoice).then(choice => {
-      if (choice && choice.outcome === 'accepted') {
-        requested = true;
-        notice = '';
-      } else {
-        notice = '설치를 취소했어요. 원할 때 다시 설치할 수 있어요.';
-      }
-    }).catch(() => {
-      notice = '설치창을 열지 못했어요. 아래 방법으로 진행해 주세요.';
-    }).finally(() => {
-      prompting = false;
-      refreshButtons();
-      show(origin);
-    });
+    // An abandoned/pending browser promise must not disable the page's control forever.
+    if (activePrompt === request) request.timer = setTimeout(() => finishPrompt(request, null, false), 45000);
+    Promise.resolve(result).then(choice => {
+      if (choice && typeof choice.outcome === 'string') return choice;
+      return event.userChoice;
+    }).then(choice => finishPrompt(request, choice, false), () => finishPrompt(request, null, true));
+  }
+
+  function recordHandoff() {
+    handoffAttempted = true;
+    try { sessionStorage.setItem(handoffKey, '1'); } catch (_) {}
+    // Keep the clicked anchor in place until its native default action has run.
+    setTimeout(refresh, 0);
   }
 
   async function copyAddress() {
-    const origin = document.activeElement;
     let copied = false;
-    try {
-      await navigator.clipboard.writeText(continuation.href);
-      copied = true;
-    } catch (_) {
-      const field = document.createElement('textarea');
-      field.value = continuation.href;
-      field.setAttribute('readonly', '');
-      field.style.cssText = 'position:fixed;left:0;top:0;opacity:0;pointer-events:none';
-      dialog.appendChild(field);
-      field.select();
-      try { copied = document.execCommand('copy'); } catch (_) {}
-      field.remove();
-    }
-    if (!dialogActive) return;
+    try { await navigator.clipboard.writeText(appUrl.href); copied = true; } catch (_) {}
+    if (!panel || panel.hidden) return;
+    const field = panel.querySelector('[data-install-url]');
     if (copied) {
-      setStatus(`주소를 복사했어요. ${isIOS ? '브라우저' : 'Chrome'} 주소창에 붙여넣어 주세요.`);
-      if (origin && origin.isConnected) origin.focus({preventScroll: true});
-    } else {
-      dialog.querySelector('.ok-install-url-wrap').hidden = false;
-      const field = dialog.querySelector('[data-install-url]');
-      field.value = continuation.href;
+      notice = '주소를 복사했어요. Safari에서 열어 주세요.';
+      const status = panel.querySelector('#ok-install-status');
+      status.textContent = notice;
+      status.hidden = false;
+    } else if (field) {
+      field.closest('label').hidden = false;
+      field.value = appUrl.href;
       field.focus();
       field.select();
-      setStatus('아래 주소를 길게 눌러 복사해 주세요.');
     }
   }
 
   window.addEventListener('beforeinstallprompt', event => {
+    if (typeof event.prompt !== 'function') return;
     event.preventDefault();
     pending = event;
+    promptEventObserved = true;
     requested = false;
-    refreshButtons();
-    if (dialogActive) render();
+    browserInstallEventReceived = false;
+    notice = '';
+    refresh(); // No automatic prompt or helper: a fresh user click is required.
   });
   window.addEventListener('appinstalled', () => {
-    requested = true;
+    if (activePrompt) clearTimeout(activePrompt.timer);
+    activePrompt = null;
     pending = null;
+    requested = false;
+    browserInstallEventReceived = true;
     notice = '';
-    refreshButtons();
-    if (dialogActive) render();
+    refresh();
+    // Event received for this page is kept only in this document, never shared
+    // with the other app or persisted as proof of an icon's existence/launch.
   });
-  const modeChanged = () => { refreshButtons(); if (dialogActive) render(); };
+  const modeChanged = () => refresh();
   if (displayMode.addEventListener) displayMode.addEventListener('change', modeChanged);
   else if (displayMode.addListener) displayMode.addListener(modeChanged);
 
   function init() {
-    dialog = document.createElement('dialog');
-    dialog.id = 'okInstallDialog';
-    dialog.className = 'ok-install-dialog';
-    dialog.setAttribute('aria-labelledby', 'ok-install-title');
-    dialog.setAttribute('aria-describedby', 'ok-install-description');
-    dialog.setAttribute('aria-modal', 'true');
-    dialog.innerHTML = `<div class="ok-install-top"><img class="ok-install-icon" src="${escape(new URL('icon-192.png', root).href)}" width="48" height="48" alt=""><div class="ok-install-brand"><span class="ok-install-badge">${isAdmin ? '관리자용' : '고객용'}</span><strong>${escape(appName)}</strong></div><button class="ok-install-close" type="button" data-install-action="close" aria-label="설치 안내 닫기">×</button></div><h2 id="ok-install-title"></h2><p id="ok-install-description"></p><div class="ok-install-content"></div><p id="ok-install-status" class="ok-install-status" role="status" aria-live="polite" hidden></p><label class="ok-install-url-wrap" hidden>설치할 주소<input data-install-url readonly type="text" aria-label="설치할 주소" spellcheck="false"></label>`;
-    document.body.appendChild(dialog);
-    // A queued close event from a consumed prompt must not close a freshly reopened helper.
-    dialog.addEventListener('close', () => { if (!dialog.open) finishClose(); });
-    dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
-    dialog.addEventListener('click', event => {
-      const action = event.target.closest('[data-install-action]');
-      if (action) {
-        if (action.dataset.installAction === 'chrome') {
-          setStatus('선택창이 나오면 Chrome을 선택하세요. 열리지 않으면 주소 복사를 이용해 주세요.');
-          return; // Follow the intent anchor directly from the user's click.
-        }
-        event.preventDefault();
-        if (action.dataset.installAction === 'close') close();
-        if (action.dataset.installAction === 'install') install(action);
-        if (action.dataset.installAction === 'copy') copyAddress();
-      } else if (event.target === dialog) {
-        const rect = dialog.getBoundingClientRect();
-        if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) close();
-      }
-    });
-    dialog.addEventListener('keydown', event => {
-      if (event.key === 'Escape') { event.preventDefault(); close(); }
-      if (event.key !== 'Tab') return;
-      const items = [...dialog.querySelectorAll('a[href],button:not([disabled]),input,summary')].filter(node => node.getClientRects().length > 0);
-      if (!items.length) return;
-      if (event.shiftKey && document.activeElement === items[0]) { event.preventDefault(); items[items.length - 1].focus(); }
-      else if (!event.shiftKey && document.activeElement === items[items.length - 1]) { event.preventDefault(); items[0].focus(); }
+    panel = document.createElement('section');
+    panel.id = 'okInstallPanel';
+    panel.className = 'ok-install-panel';
+    panel.hidden = true;
+    panel.tabIndex = -1;
+    panel.setAttribute('aria-labelledby', 'ok-install-title');
+    panel.innerHTML = `<div class="ok-install-top"><img class="ok-install-icon" src="${escape(new URL(isAdmin ? 'admin/icon-192.png' : 'icon-192.png', root).href)}" width="44" height="44" alt=""><div class="ok-install-brand"><span class="ok-install-badge">${isAdmin ? '관리자용' : '고객용'}</span><strong>${escape(appName)}</strong></div><button type="button" class="ok-install-close" data-install-action="close" aria-label="설치 상태 닫기">×</button></div><h2 id="ok-install-title"></h2><p id="ok-install-description"></p><div class="ok-install-content"></div><p id="ok-install-status" class="ok-install-status" role="status" aria-live="polite" hidden></p><p class="ok-install-page-hint"></p>`;
+    const header = document.querySelector('[data-install]')?.closest('header');
+    if (header) header.after(panel);
+    else (document.querySelector('main') || document.body).prepend(panel);
+    panel.addEventListener('keydown', event => {
+      if (event.key === 'Escape') { event.preventDefault(); hidePanel(); }
     });
     document.addEventListener('click', event => {
+      const action = event.target.closest('[data-install-action]');
+      if (action && panel.contains(action)) {
+        if (action.dataset.installAction === 'chrome') {
+          if (handoffAttempted) event.preventDefault();
+          else recordHandoff();
+          return; // Follow the real intent link from this click, without auto-redirection.
+        }
+        event.preventDefault();
+        if (action.dataset.installAction === 'close') hidePanel();
+        if (action.dataset.installAction === 'copy') copyAddress();
+        return;
+      }
       const button = event.target.closest('[data-install]');
       if (!button) return;
+      if (state() === 'handoff' && button.tagName === 'A') { recordHandoff(); return; }
       event.preventDefault();
       install(button);
     });
-    refreshButtons();
     if (returned) {
       current.searchParams.delete('install');
       current.searchParams.delete('install_fallback');
       try { history.replaceState(history.state, '', current.href); } catch (_) {}
-      show(); // A return marker does not prove that the app window was escaped.
+      // A return marker never proves browser identity or authorizes another handoff.
     }
+    refresh();
   }
 
-  // Both apps use the existing root worker; identity stays in their separate manifests.
   function registerWorker() {
     if (!('serviceWorker' in navigator)) return;
     try {
-      navigator.serviceWorker.register(new URL('sw.js', root).href, {scope: root.pathname, updateViaCache: 'none'}).catch(() => {});
-    } catch (_) { /* Installation guidance remains usable when registration is unavailable. */ }
+      navigator.serviceWorker.register(new URL('sw.js', root).href, {scope: root.pathname, updateViaCache: 'none'}).catch(() => { workerFailed = true; refresh(); });
+    } catch (_) { workerFailed = true; refresh(); }
   }
-  window.OKCleanInstall = Object.freeze({openHelp: () => show(), app: isAdmin ? 'admin' : 'customer'});
+  window.OKCleanInstall = Object.freeze({
+    app,
+    openHelp: () => showPanel(document.querySelector('[data-install]')),
+    getState: () => ({state: state(), app, hasPrompt: !!pending, promptEventObserved, browserInstallEventReceived, deviceIconVerified: false})
+  });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, {once: true});
   else init();
-  if (document.readyState === 'complete') registerWorker();
-  else window.addEventListener('load', registerWorker, {once: true});
+  // Registration does not depend on unrelated images, fonts, or login module loads.
+  registerWorker();
+  // This timer changes only the status text; it never diagnoses installation,
+  // prompts automatically, or stops accepting a later genuine browser event.
+  setTimeout(() => { observationElapsed = true; refresh(); }, 8000);
 })();

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>오케이청소 관리자</title>
+  <rect width="512" height="512" fill="#102b50"/>
+  <path d="M256 100 368 144v93c0 80-48 134-112 170-64-36-112-90-112-170v-93z" fill="#f2bf56"/>
+  <path d="M256 128 344 162v75c0 64-36 108-88 140-52-32-88-76-88-140v-75z" fill="#102b50"/>
+  <path d="M211 178c-23 0-36 17-36 43s13 43 36 43 36-17 36-43-13-43-36-43zm0 19c11 0 15 9 15 24s-4 24-15 24-15-9-15-24 4-24 15-24zM260 180h21v34l27-34h25l-32 39 35 43h-26l-29-37v37h-21z" fill="#fff"/>
+  <path d="m222 302 23 23 47-51" fill="none" stroke="#f2bf56" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
