@@ -26,6 +26,13 @@ const BLOGS = [].concat(C.blog || []).filter(Boolean);
 const phoneDigits = (C.phone || "").replace(/[^0-9+]/g, "");
 const M = C.member || null;
 let MEMBER = store.get("member", null);
+let memberDraft = store.get("memberDraft", null);
+// 이전 버전의 로컬 기록은 서버 접수 증거가 아닙니다.
+if(MEMBER && MEMBER.serverConfirmed !== true){
+  memberDraft = memberDraft || MEMBER; store.set("memberDraft", memberDraft);
+  MEMBER = null; store.set("member", null);
+}
+let memberPending = null;
 // 친구 초대 링크(?ref=OK-XXXXXX)로 들어온 경우 추천인 코드를 기억
 const refQ = (new URLSearchParams(location.search).get("ref") || "").toUpperCase();
 if(/^OK-[A-Z0-9]{6}$/.test(refQ) && (!MEMBER || MEMBER.code !== refQ)) store.set("ref", refQ);
@@ -111,7 +118,8 @@ function summary(){
   }
   if($("qArea").value) lines.push(`지역: ${$("qArea").value}`);
   if($("qDate").value) lines.push(`희망 날짜: ${$("qDate").value}`);
-  if(MEMBER && M) lines.push(`회원 쿠폰: ${MEMBER.code} (${won(M.coupon)}원 할인 + 무료 서비스: ${MEMBER.free})`);
+  if(MEMBER?.existingReceipt) lines.push(`기존 회원 접수번호: ${MEMBER.code} (가입 내용·혜택은 관리자 확인)`);
+  else if(MEMBER && M) lines.push(`회원 쿠폰: ${MEMBER.code} (${won(M.coupon)}원 할인 + 무료 서비스: ${MEMBER.free})`);
   else if(REF) lines.push(`추천인 코드: ${REF}`);
   lines.push("상세 주소·현장 사진은 대화로 보내드릴게요.");
   return lines.join("\n");
@@ -138,7 +146,8 @@ function calc(){
   $("qKakao").textContent = r ? "이 견적으로 카톡 문의" : "카톡으로 사진 보내고 견적 받기";
   if(M){
     const box = $("qMem"); box.hidden = false;
-    if(MEMBER) box.innerHTML = r ? `🎟 회원 쿠폰 적용 시 <b>${priceText(Math.max(0, r.lo - M.coupon), r.hi == null ? null : Math.max(0, r.hi - M.coupon))}</b> + ${esc(MEMBER.free)} 무료` : `🎟 회원 쿠폰 ${won(M.coupon)}원 할인 + ${esc(MEMBER.free)} 무료가 적용돼요`;
+    if(MEMBER?.existingReceipt) box.textContent = `기존 회원 접수번호 ${MEMBER.code} · 가입 내용과 혜택은 관리자에게 확인해 주세요.`;
+    else if(MEMBER) box.innerHTML = r ? `🎟 회원 쿠폰 적용 시 <b>${priceText(Math.max(0, r.lo - M.coupon), r.hi == null ? null : Math.max(0, r.hi - M.coupon))}</b> + ${esc(MEMBER.free)} 무료` : `🎟 회원 쿠폰 ${won(M.coupon)}원 할인 + ${esc(MEMBER.free)} 무료가 적용돼요`;
     else box.innerHTML = `<button type="button" class="mem-join" data-join>🎟 회원가입하면 여기서 <b>${won(M.coupon)}원 더 할인</b> + 무료 서비스 →</button>`;
   }
   store.set("quote", {svc: cur.svc, v: cur.v, t: cur.t, qty: cur.qty, opts: cur.opts, area: $("qArea").value, date: $("qDate").value});
@@ -227,21 +236,27 @@ if(nowEl) $("months").scrollLeft = Math.max(0, nowEl.offsetLeft - 20);
 
 
 // ── 회원가입 (팝업) ──
-// 연동 URL이 설정된 경우 관리자 대장으로도 가입 정보를 전송합니다. 카톡 확인 방식은 유지합니다.
+// 서버가 확인한 접수만 완료 화면과 쿠폰 안내에 사용합니다.
 function joinDone(){
+  if(!MEMBER || MEMBER.serverConfirmed !== true) return;
   const d = $("joinDone"), m = MEMBER;
   $("joinForm").hidden = true; d.hidden = false;
-  d.innerHTML = `<p class="done-k">가입을 환영해요, ${esc(m.name)}님</p>
+  if(m.existingReceipt){
+    d.innerHTML = `<p class="done-k">기존 회원 접수가 확인됐어요.</p><p>접수번호: <b>${esc(m.code)}</b></p><p>기존 가입 내용과 관리자 처리 내용은 그대로 유지됩니다. 이번에 입력한 내용으로 변경하지 않았습니다.</p><button class="btn glove" type="button" id="jKakao">가입 내용 문의하기</button><button class="link" type="button" data-close>닫기</button>`;
+    $("jKakao").onclick = () => kakaoSend("가입 내용 문의하기", `[${C.name} 기존 접수 확인]\n접수번호: ${m.code}`);
+    return;
+  }
+  d.innerHTML = `<p class="done-k">회원가입 접수가 완료됐어요, ${esc(m.name)}님</p>
     <div class="coupon"><span>회원 쿠폰</span><b>${won(M.coupon)}원 할인</b><em>+ ${esc(m.free)} 무료</em><code>${esc(m.code)}</code></div>
     <p class="note">${esc(M.couponTerms)}</p>
-    <p class="step-k"><b>마지막 단계</b> · 아래 버튼으로 가입 내용을 카톡에 보내 주시면 쿠폰이 등록돼요.</p>
-    <button class="btn glove" type="button" id="jKakao">카톡으로 가입 완료하기</button>
+    <p class="step-k"><b>관리자에게 접수됐어요.</b> 혜택 적용은 관리자가 확인합니다. 상담이 필요하면 아래 버튼을 눌러 주세요.</p>
+    <button class="btn glove" type="button" id="jKakao">카톡으로 상담하기</button>
     ${M.referral ? `<button class="btn line small" type="button" data-invite>친구 초대하고 ${won(M.referral.point)}P 받기</button>` : ""}
-    <button class="link" type="button" data-close>나중에 보낼게요</button>`;
+    <button class="link" type="button" data-close>닫기</button>`;
   $("jKakao").onclick = async () => {
     const text = `[${C.name} 회원가입]\n이름: ${m.name}\n연락처: ${m.phone}\n지역: ${m.area || "-"}\n무료 서비스: ${m.free}\n쿠폰번호: ${m.code}${m.ref ? `\n추천인 코드: ${m.ref}` : ""}\n이벤트 소식: ${m.ad ? "받음" : "안 받음"}`;
     MEMBER.sent = true; store.set("member", MEMBER);
-    kakaoSend("카톡으로 가입 완료하기", text);
+    kakaoSend("카톡으로 상담하기", text);
   };
 }
 // 친구 초대: 내 쿠폰번호가 들어간 링크를 공유 (친구가 가입하면 카톡 가입 메시지에 추천인 코드가 함께 와요)
@@ -256,7 +271,14 @@ async function invite(){
 }
 function openJoin(){
   if(!M) return;
-  if(MEMBER) joinDone(); else { $("joinForm").hidden = false; $("joinDone").hidden = true; const rb = $("jRef"); if(rb && REF){ rb.hidden = false; rb.textContent = `친구 초대로 오셨네요! 추천인 코드 ${REF}가 함께 등록돼요.`; } }
+  if(MEMBER) joinDone(); else {
+    if(memberDraft){
+      $("jName").value = memberDraft.name || ""; $("jPhone").value = memberDraft.phone || "";
+      $("jArea").value = memberDraft.area || "";
+      document.querySelectorAll('input[name="jFree"]').forEach(x => x.checked = x.value === memberDraft.free);
+      $("jAd").checked = !!memberDraft.ad;
+    }
+    $("joinForm").hidden = false; $("joinDone").hidden = true; const rb = $("jRef"); if(rb && REF){ rb.hidden = false; rb.textContent = `친구 초대로 오셨네요! 추천인 코드 ${REF}가 함께 등록돼요.`; } }
   openModal("join");
 }
 if(M){
@@ -269,44 +291,63 @@ if(M){
     const d = e.target.value.replace(/\D/g, "").slice(0, 11);
     e.target.value = d.length < 4 ? d : d.length < 8 ? `${d.slice(0, 3)}-${d.slice(3)}` : `${d.slice(0, 3)}-${d.slice(3, d.length - 4)}-${d.slice(-4)}`;
   });
-  $("jSubmit").onclick = () => {
+  $("jSubmit").onclick = async () => {
+    const button = $("jSubmit");
+    if(button.disabled) return;
+    const err = message => { $("jErr").textContent = message; };
     const name = $("jName").value.trim(), phone = $("jPhone").value.trim();
-    const err = msg => { $("jErr").textContent = msg; };
-    if(!name) return err("이름을 적어 주세요.");
+    if(!name || name.length > 30) return err("이름은 1~30자로 적어 주세요.");
     if(!/^01[016789]-?\d{3,4}-?\d{4}$/.test(phone)) return err("휴대폰 번호를 정확히 적어 주세요. 예: 010-1234-5678");
     if(!$("jAgree").checked) return err("개인정보 수집·이용에 동의해 주세요.");
-    const abc = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    const code = "OK-" + Array.from({length: 6}, () => abc[Math.floor(Math.random() * abc.length)]).join("");
-    MEMBER = {name, phone, area: $("jArea").value, free: (document.querySelector('input[name="jFree"]:checked') || {}).value || M.freeServices[0],
-              ad: $("jAgree").checked && $("jAd").checked, code, ref: REF && REF !== code ? REF : "", joined: new Date().toISOString().slice(0, 10)};
-    store.set("member", MEMBER);
-    // Firebase가 설정되어 있으면 회원 가입 요청을 비공개 Firestore에 전송합니다.
-    // 실패 시 카카오톡 가입 확인 절차를 그대로 안내합니다.
-    if(C.firebase && C.firebase.apiKey && C.firebase.projectId){
-      import('./member-sync.js').then(mod => mod.submitMember(C.firebase, MEMBER))
-        .then(() => toast('회원정보 접수 요청이 완료됐어요. 카톡으로 가입을 확인해 주세요.'))
-        .catch(err => { console.warn('회원 접수 실패', err); toast('자동 접수가 되지 않았어요. 카톡으로 가입을 완료해 주세요.'); });
+    if(!C.firebase?.apiKey || !C.firebase?.projectId) return err("현재 온라인 접수를 준비 중입니다. 전화 또는 카카오톡으로 문의해 주세요.");
+    // 결과가 불확실한 접수는 내용을 바꾸지 않고 먼저 같은 접수의 결과를 확인합니다.
+    if(!memberDraft?.awaitingConfirmation){
+      const abc = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      const code = memberDraft?.code || "OK-" + Array.from({length:6}, () => abc[Math.floor(Math.random()*abc.length)]).join("");
+      memberDraft = {name,phone,area:$("jArea").value,
+        free:(document.querySelector('input[name="jFree"]:checked') || {}).value || M.freeServices[0],
+        ad:$("jAd").checked,code,ref:REF && REF !== code ? REF : "",joined:new Date().toISOString().slice(0,10)};
     }
-    // 관리자 대장 연결이 설정된 경우 가입 정보를 접수합니다.
-    // Google Apps Script 웹앱은 교차 출처 응답을 브라우저에서 검증할 수 없으므로
-    // 전송 성공을 단정하지 않고 카카오톡 확인 절차를 그대로 유지합니다.
-    if(C.memberBackendUrl && /^https:\/\/script\.google\.com\/macros\/s\//.test(C.memberBackendUrl)){
-      try {
-        const payload = {kind:"join", name:MEMBER.name,phone:MEMBER.phone,area:MEMBER.area,
-          free:MEMBER.free,ad:MEMBER.ad,code:MEMBER.code,ref:MEMBER.ref,joined:MEMBER.joined,
-          couponAmount:M.coupon,source:"ok-clean.github.io"};
-        const form = document.createElement("form");
-        form.method="POST"; form.action=C.memberBackendUrl; form.target="okclean_member_sink";
-        form.style.display="none";
-        const input=document.createElement("input"); input.type="hidden";input.name="payload";
-        input.value=JSON.stringify(payload);form.appendChild(input);
-        let frame=document.getElementById("okclean_member_sink");
-        if(!frame){frame=document.createElement("iframe");frame.name="okclean_member_sink";
-          frame.id="okclean_member_sink";frame.hidden=true;document.body.appendChild(frame);}
-        document.body.appendChild(form);form.submit();setTimeout(()=>form.remove(),1500);
-      }catch(err){console.warn("회원 대장 접수 요청 실패",err);}
+    const submitted = {...memberDraft,awaitingConfirmation:true};
+    memberDraft = submitted; store.set("memberDraft", submitted);
+    button.disabled = true; button.textContent = "접수 확인 중…";
+    err("서버에 접수 내용을 확인하고 있습니다. 잠시 기다려 주세요.");
+    let timer;
+    try {
+      // 같은 화면에서 중복 클릭/시간초과 재시도는 진행 중인 요청을 재사용합니다.
+      if(!memberPending){
+        const operation = import('./member-sync.js').then(mod => mod.submitMember(C.firebase, submitted));
+        memberPending = operation;
+        operation.then(() => { if(memberPending === operation) memberPending = null; },
+          () => { if(memberPending === operation) memberPending = null; });
+      }
+      const receipt = await Promise.race([memberPending, new Promise((_,reject) => {
+        timer = setTimeout(() => reject(Object.assign(new Error('pending'),{code:'intake/pending'})),15000);
+      })]);
+      if(!receipt?.requestId || !receipt?.code) throw Object.assign(new Error('unconfirmed'),{code:'intake/pending'});
+      MEMBER = receipt.existing ? {code:receipt.code,requestId:receipt.requestId,serverConfirmed:true,existingReceipt:true} : {...submitted,code:receipt.code,requestId:receipt.requestId,serverConfirmed:true};
+      delete MEMBER.awaitingConfirmation;
+      store.set("member", MEMBER); memberDraft = null; store.set("memberDraft", null);
+      err(""); joinDone(); calc();
+    } catch(e){
+      const code = String(e?.code || "");
+      if(code === 'permission-denied' || code === 'firestore/permission-denied'){
+        memberDraft.awaitingConfirmation = false;
+        err("접수 권한 오류로 저장하지 못했습니다. 잠시 후 다시 시도하거나 전화·카카오톡으로 문의해 주세요.");
+      } else if(code === 'auth/operation-not-allowed' || code === 'auth/admin-restricted-operation'){
+        memberDraft.awaitingConfirmation = false;
+        err("접수 인증이 준비되지 않아 저장하지 못했습니다. 전화·카카오톡으로 문의해 주세요.");
+      } else if(code === 'invalid-argument' || code === 'intake/invalid'){
+        memberDraft.awaitingConfirmation = false;
+        err("입력 내용을 확인해 주세요. 이름·연락처·지역·무료서비스를 확인한 뒤 다시 시도해 주세요.");
+      } else {
+        err("접수 확인 중입니다. 통신 지연으로 저장 여부가 아직 확인되지 않았습니다. 아래 ‘접수 확인·다시 시도’를 눌러 같은 접수를 확인해 주세요.");
+      }
+      store.set("memberDraft", memberDraft);
+    } finally {
+      clearTimeout(timer); button.disabled = false;
+      button.textContent = MEMBER ? "접수 완료" : "접수 확인·다시 시도";
     }
-    joinDone(); calc();
   };
   // 처음 방문한 사람에게 한 번 띄우기 (가입했거나 '다음에'를 누른 뒤 7일 동안은 안 띄움)
   const later = store.get("joinLater", 0);

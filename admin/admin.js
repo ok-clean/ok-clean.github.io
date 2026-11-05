@@ -13,9 +13,12 @@ else{
  getRedirectResult(auth).catch(e=>msg('로그인 실패: '+e.message));
  onAuthStateChanged(auth,user=>{
   if(unsub){unsub();unsub=null;} $('login').hidden=!!user;$('dashboard').hidden=!user;$('logout').hidden=!user;
-  if(!user){records=[];msg('');return;} msg('회원정보를 불러오는 중…');
-  unsub=onSnapshot(query(collection(db,'member_requests'),orderBy('joined','desc'),limit(500)),snapshot=>{
-    records=snapshot.docs.map(d=>({id:d.id,...d.data()}));msg('최근 500건까지 표시됩니다.');render();
+  records=[]; $('members').innerHTML=''; $('stats').innerHTML=''; $('dashboard').hidden=true;
+  if(!user){msg('');return;} msg('회원정보를 불러오는 중…');
+  unsub=onSnapshot(query(collection(db,'member_requests'),orderBy('joined','desc'),limit(500)),{includeMetadataChanges:true},snapshot=>{
+    if(snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites){$('dashboard').hidden=true;msg('서버 접수 상태를 확인 중입니다…');return;}
+    $('dashboard').hidden=false;
+    records=snapshot.docs.map(d=>({id:d.id,...d.data()}));msg(records.length?'최근 500건까지 표시됩니다.':'서버 확인 결과 접수가 0건입니다.');render();
   },e=>{records=[];$('dashboard').hidden=true;msg('회원 목록에 접근할 수 없습니다. Firebase 관리자 UID 등록과 보안 규칙을 확인해 주세요. ('+e.code+')');});
  });
 }

@@ -1,0 +1,19 @@
+name: Member intake isolation
+on: [pull_request]
+permissions:
+  contents: read
+jobs:
+  intake:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: npm install --no-save --ignore-scripts firebase-tools@13.35.1 @firebase/rules-unit-testing@3.0.4 firebase@10.14.1
+      - run: node --test tests/intake-ui.cjs
+      - run: npx firebase emulators:exec --config intake.firebase.json --project demo-okclean-intake --only firestore 'node tests/intake-rules.cjs && node --test tests/intake-sync.cjs'
