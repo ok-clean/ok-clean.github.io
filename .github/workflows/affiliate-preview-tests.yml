@@ -1,0 +1,23 @@
+name: 제휴 추천관 검토 검사
+on:
+  pull_request:
+    paths: ['prototype/affiliate/**', 'prototype/navigation-preview/**', 'tests/test_affiliate_catalog.py', 'tests/affiliate-browser.cjs', '.github/workflows/affiliate-preview-tests.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: python -m unittest discover -s tests -p test_affiliate_catalog.py
+      - run: npm install --no-save --no-package-lock playwright@1.56.1
+      - run: npx playwright install --with-deps chromium
+      - run: |
+          python3 -m http.server 8768 --bind 127.0.0.1 >/tmp/catalog.log 2>&1 &
+          node tests/affiliate-browser.cjs
